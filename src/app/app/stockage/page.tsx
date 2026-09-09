@@ -15,7 +15,7 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
-import { creerRessource, requete } from '@/lib/api/client'
+import { creerRessource, requete, supprimerRessource } from '@/lib/api/client'
 
 const PRIX_GO: Record<Volume['classe'], number> = {
   nvme: 5.4,
@@ -224,6 +224,26 @@ export default function Stockage() {
               }}
             />
           )}
+          <BoutonAction
+            libelle="Supprimer"
+            variant="ghost"
+            desactive={Boolean(v.attachedTo)}
+            operation={{
+              action: 'network.manage',
+              ton: 'warn',
+              titre: `Volume ${v.nom} supprimé`,
+              appel: () => supprimerRessource('/volumes', v.id, v.nom),
+              effet: () => disques.supprimer(v.id),
+              effetFinal: () => disques.recharger(),
+            }}
+            confirmation={{
+              ressource: v.nom,
+              pertes: [
+                `Les ${goHumain(v.tailleGo)} de données sont détruites, sans retour possible`,
+                'La facturation du volume cesse dès la suppression',
+              ],
+            }}
+          />
         </span>
       ),
     },

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Download, FileDown, Plus, RotateCcw, Shield, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, dateHeure, dureeMin, goHumain, num, pct } from '@/lib/format'
@@ -14,6 +14,7 @@ import { Checkbox, Field, Input, Radio, Select, Switch } from '@/components/ui/f
 import { GatedAction, Tabs } from '@/components/ui/display'
 import { Drawer } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { RpoRtoGauge } from '@/components/business/infra'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
@@ -22,7 +23,7 @@ import { Regle321 } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource } from '@/lib/api/client'
+import { creerRessource, estActif } from '@/lib/api/client'
 
 /** Valeurs du formulaire de plan — le tiroir doit être contrôlé pour
  *  qu'« Enregistrer » ait quelque chose à enregistrer. */
@@ -716,32 +717,80 @@ const ETAPES_RESTAURATION = [
   { numero: 4, titre: 'Récapitulatif' },
 ]
 
+/** `contrat` est la valeur exacte attendue par `DemandeRestauration.granularite`
+ *  (`packages/contract/synelia_contract/modeles.py`, backend) — un littéral à
+ *  cinq valeurs, plus étroit que les six niveaux affichés à l’écran. « Volume »
+ *  n’a pas d’équivalent séparé côté contrat : une restauration de volume est une
+ *  restauration complète de la ressource qui le porte. */
 const GRANULARITES = [
-  { id: 'machine', titre: 'Machine entière', detail: 'Restaure la machine complète, système et données, telle qu’elle était.' },
-  { id: 'volume', titre: 'Volume', detail: 'Un disque de données seul, sans toucher au système.' },
-  { id: 'fichiers', titre: 'Système de fichiers', detail: 'Arborescence parcourable — descendez jusqu’au fichier unique.' },
-  { id: 'base', titre: 'Base de données', detail: 'Base managée, avec restauration à un instant précis (PITR).' },
-  { id: 'boite', titre: 'Boîte aux lettres', detail: 'Une boîte, un dossier ou un message unique d’Email Pro.' },
-  { id: 'dossier', titre: 'Dossier d’un service managé', detail: 'Un dossier ou un document de Drive Pro, de la GED, ou d’un autre service.' },
+  { id: 'machine', titre: 'Machine entière', detail: 'Restaure la machine complète, système et données, telle qu’elle était.', contrat: 'complete' as const },
+  { id: 'volume', titre: 'Volume', detail: 'Un disque de données seul, sans toucher au système.', contrat: 'complete' as const },
+  { id: 'fichiers', titre: 'Système de fichiers', detail: 'Arborescence parcourable — descendez jusqu’au fichier unique.', contrat: 'fichiers' as const },
+  { id: 'base', titre: 'Base de données', detail: 'Base managée, avec restauration à un instant précis (PITR).', contrat: 'base' as const },
+  { id: 'boite', titre: 'Boîte aux lettres', detail: 'Une boîte, un dossier ou un message unique d’Email Pro.', contrat: 'boite_mail' as const },
+  { id: 'dossier', titre: 'Dossier d’un service managé', detail: 'Un dossier ou un document de Drive Pro, de la GED, ou d’un autre service.', contrat: 'objet' as const },
 ]
+
+/** `DemandeRestauration.cible` (contrat) n’a que trois valeurs — aucune ne
+ *  correspond à « Téléchargement local ». Cette destination reste affichée
+ *  (utile côté maquette) mais désactivée en mode API : mieux vaut le dire que
+ *  faire semblant avec une valeur de repli inventée. */
+const CIBLE_PAR_DESTINATION = {
+  meme: 'origine',
+  autre_espace: 'nouvelle_ressource',
+  autre_site: 'autre_site',
+} as const
 
 function AssistantRestauration() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
+  const pointsCol = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
+  const points = pointsCol.items
   const [etape, setEtape] = useState(1)
   const [granularite, setGranularite] = useState('fichiers')
-  const [ressource, setRessource] = useState('vm-web-01')
+  const [ressource, setRessource] = useState(points[0]?.resourceId ?? '')
   const [chemin, setChemin] = useState('/srv/uploads/comptabilite/2026')
-  const [pointId, setPointId] = useState(RESTORE_POINTS[0].id)
+  const [pointId, setPointId] = useState(points[0]?.id ?? '')
   const [pitr, setPitr] = useState('2026-08-19T14:00')
   const [destination, setDestination] = useState<'meme' | 'autre_espace' | 'autre_site' | 'local'>(
     'meme',
   )
   const [confirme, setConfirme] = useState(false)
 
-  const point = RESTORE_POINTS.find((p) => p.id === pointId)!
+  // Le premier rendu montre la graine (`RESTORE_POINTS`) le temps que
+  // `useCollection` charge la vraie liste — mêmes règles de resynchronisation
+  // que le correctif « Gabarit » du même jour sur `/app/vms/new` : sans ça, une
+  // ressource/un point choisi sur la graine reste figé une fois la vraie liste
+  // arrivée (vide, ou avec d’autres identifiants).
+  useEffect(() => {
+    if (points.length === 0) return
+    if (!points.some((p) => p.resourceId === ressource)) {
+      setRessource(points[0].resourceId)
+    }
+  }, [points, ressource])
+
+  useEffect(() => {
+    const pourRessource = points.filter((p) => p.resourceId === ressource)
+    if (pourRessource.length === 0) return
+    if (!pourRessource.some((p) => p.id === pointId)) {
+      setPointId(pourRessource[0].id)
+    }
+  }, [points, ressource, pointId])
+
+  const point = points.find((p) => p.id === pointId)
   const gran = GRANULARITES.find((g) => g.id === granularite)!
-  const dureeEstimee = Math.max(4, Math.round(point.tailleGo / 8))
+  const dureeEstimee = point ? Math.max(4, Math.round(point.tailleGo / 8)) : 0
+
+  if (points.length === 0) {
+    return (
+      <EmptyState
+        titre="Aucun point de restauration"
+        phrase="Les points apparaissent après la première exécution réussie d’un plan de sauvegarde — rien à restaurer tant qu’aucun plan n’a tourné."
+      />
+    )
+  }
+
+  if (!point) return null
 
   return (
     <div className="space-y-4">
@@ -785,8 +834,8 @@ function AssistantRestauration() {
               </div>
               <Field label="Ressource à restaurer">
                 <Select value={ressource} onChange={(e) => setRessource(e.target.value)}>
-                  {Array.from(new Set(RESTORE_POINTS.map((p) => p.resourceId))).map((rid) => {
-                    const p = RESTORE_POINTS.find((x) => x.resourceId === rid)!
+                  {Array.from(new Set(points.map((p) => p.resourceId))).map((rid) => {
+                    const p = points.find((x) => x.resourceId === rid)!
                     return (
                       <option key={rid} value={rid}>
                         {p.resourceNom} · {p.resourceType}
@@ -826,10 +875,10 @@ function AssistantRestauration() {
               <Card>
                 <CardHeader
                   titre="Point de restauration"
-                  sousTitre={`${RESTORE_POINTS.filter((p) => p.resourceId === ressource).length} point(s) disponible(s) pour cette ressource.`}
+                  sousTitre={`${points.filter((p) => p.resourceId === ressource).length} point(s) disponible(s) pour cette ressource.`}
                 />
                 <div className="space-y-2">
-                  {RESTORE_POINTS.filter((p) => p.resourceId === ressource).map((p) => (
+                  {points.filter((p) => p.resourceId === ressource).map((p) => (
                     <button
                       key={p.id}
                       type="button"
@@ -896,20 +945,31 @@ function AssistantRestauration() {
                   ['autre_site', 'Autre site', 'Restaure sur le second site. Utile pour un test de reprise ou une migration.'],
                   ['local', 'Téléchargement local', 'Génère une archive téléchargeable, valable sept jours. Adapté à une extraction ponctuelle de fichiers.'],
                 ] as const
-              ).map(([v, l, d]) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setDestination(v)}
-                  className={cn(
-                    'w-full rounded-[8px] border-2 bg-white p-3.5 text-left transition-colors',
-                    destination === v ? 'border-p-700 bg-p-050' : 'border-g-300 hover:border-p-400',
-                  )}
-                >
-                  <span className="block text-[13px] font-semibold text-ink">{l}</span>
-                  <span className="mt-1 block text-[12px] leading-snug text-g-700">{d}</span>
-                </button>
-              ))}
+              ).map(([v, l, d]) => {
+                // Le contrat (`DemandeRestauration.cible`) n’a que trois valeurs — pas de
+                // téléchargement local. Désactivé plutôt que simulé en mode API.
+                const indisponible = v === 'local' && estActif()
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    disabled={indisponible}
+                    onClick={() => setDestination(v)}
+                    className={cn(
+                      'w-full rounded-[8px] border-2 bg-white p-3.5 text-left transition-colors',
+                      indisponible && 'cursor-not-allowed opacity-50',
+                      destination === v ? 'border-p-700 bg-p-050' : 'border-g-300 hover:border-p-400',
+                    )}
+                  >
+                    <span className="block text-[13px] font-semibold text-ink">{l}</span>
+                    <span className="mt-1 block text-[12px] leading-snug text-g-700">
+                      {indisponible
+                        ? 'Non pris en charge par l’API aujourd’hui — le contrat de restauration ne prévoit pas de destination locale.'
+                        : d}
+                    </span>
+                  </button>
+                )
+              })}
               {destination === 'meme' && (
                 <Callout ton="warn" titre="Les données actuelles seront écrasées">
                   Une restauration sur le même emplacement remplace définitivement l’état courant.
@@ -977,13 +1037,25 @@ function AssistantRestauration() {
             ) : (
               <GatedAction autorise={autorise('backup.restore')} message={refus('backup.restore')}>
                 <Button
-                  disabled={!confirme}
+                  disabled={!confirme || (destination === 'local' && estActif())}
                   onClick={() => {
                     executer({
                       action: 'backup.restore',
                       ton: 'info',
                       titre: 'Restauration lancée',
                       detail: `Durée estimée ${dureeMin(dureeEstimee)}. Suivi dans le centre de tâches.`,
+                      // Même contrat que les boutons « Restaurer » déjà réels de l’onglet
+                      // Points de restauration (`POST /sauvegarde/restaurations`,
+                      // `granularite` obligatoire) — `destination === 'local'` est exclu
+                      // en amont (bouton désactivé en mode API, pas de valeur `cible`
+                      // correspondante).
+                      appel: () =>
+                        creerRessource('/sauvegarde/restaurations', {
+                          pointId: point.id,
+                          cible: CIBLE_PAR_DESTINATION[destination === 'local' ? 'meme' : destination],
+                          granularite: gran.contrat,
+                          ...(granularite === 'fichiers' ? { chemins: [chemin] } : {}),
+                        }),
                       job: {
                         type: 'backup.restore',
                         label: `Restauration ${point.resourceNom} · ${gran.titre.toLowerCase()}`,

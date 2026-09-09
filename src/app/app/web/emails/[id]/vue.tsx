@@ -28,6 +28,16 @@ const ONGLETS = [
   { id: 'reglages', label: 'Réglages du service' },
 ]
 
+/** Mot de passe fort généré côté client — affiché une seule fois, jamais stocké ici.
+ *  Même génération que `web/bases/[id]/vue.tsx` : pas de service de mot de passe partagé,
+ *  la fonction est petite et locale à chaque écran qui en a besoin. */
+function genererMotDePasse(longueur = 20): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!#%+-_'
+  const octets = new Uint8Array(longueur)
+  crypto.getRandomValues(octets)
+  return Array.from(octets, (o) => alphabet[o % alphabet.length]).join('')
+}
+
 export function VueMessagerie({ id }: { id: string }) {
   const maintenant = useMaintenant()
   const { autorise, refus, pousser } = useApp()
@@ -36,11 +46,15 @@ export function VueMessagerie({ id }: { id: string }) {
   const [adresse, setAdresse] = useState('')
   const [titulaire, setTitulaire] = useState('')
   const [quota, setQuota] = useState('25')
+  const [motDePasse, setMotDePasse] = useState(() => genererMotDePasse())
   const [onglet, setOnglet] = useState('boites')
   const [creation, setCreation] = useState(false)
   const [antivirus, setAntivirus] = useState(true)
   const [rapport, setRapport] = useState(true)
   const [mfaExige, setMfaExige] = useState(true)
+  /** Mot de passe réinitialisé d’une boîte existante — montré une fois, sur le patron de
+   *  `web/bases/[id]/vue.tsx`. */
+  const [secretBoite, setSecretBoite] = useState<{ adresse: string; motDePasse: string } | null>(null)
 
   const m = messageries.items.find((x) => x.id === id)
   if (!m) return null
@@ -216,16 +230,24 @@ export function VueMessagerie({ id }: { id: string }) {
                         <td className="px-3 py-2.5 text-right">
                           <span className="flex items-center justify-end gap-1">
                             <IconButton
-                              label={`Réinitialiser ${b.adresse}`}
+                              label={`Réinitialiser le mot de passe de ${b.adresse}`}
                               size="sm"
-                              onClick={() =>
+                              onClick={() => {
+                                const nouveauMotDePasse = genererMotDePasse()
                                 executer({
                                   action: 'seat.assign',
-                                  titre: `Lien de réinitialisation envoyé à ${b.adresse}`,
+                                  titre: `Mot de passe de ${b.adresse} réinitialisé`,
                                   detail:
-                                    'Le portail ne voit jamais le mot de passe : le titulaire le choisit lui-même.',
+                                    'Affiché une seule fois ci-dessous. Transmettez-le au titulaire par un canal sûr.',
+                                  appel: () =>
+                                    requete(
+                                      `/web/emails/${encodeURIComponent(m.id)}/boites/${encodeURIComponent(b.adresse)}`,
+                                      { methode: 'PATCH', corps: { motDePasse: nouveauMotDePasse } },
+                                    ),
+                                  effetFinal: () =>
+                                    setSecretBoite({ adresse: b.adresse, motDePasse: nouveauMotDePasse }),
                                 })
-                              }
+                              }}
                             >
                               <RotateCcw size={13} />
                             </IconButton>
@@ -263,6 +285,15 @@ export function VueMessagerie({ id }: { id: string }) {
                   </tbody>
                 </table>
               </div>
+              {secretBoite && (
+                <Callout
+                  ton="warn"
+                  className="m-3"
+                  titre={`Nouveau mot de passe de ${secretBoite.adresse} — affiché une seule fois`}
+                >
+                  <CopyField className="mt-2" value={secretBoite.motDePasse} masque mono />
+                </Callout>
+              )}
             </Card>
           )}
 
@@ -624,25 +655,27 @@ export function VueMessagerie({ id }: { id: string }) {
               Annuler
             </Button>
             <Button
-              disabled={!adresse.trim()}
+              disabled={!adresse.trim() || !motDePasse.trim()}
               onClick={() => {
+                const adresseComplete = `${adresse}@${m.domaine}`
                 executer({
                   action: 'seat.assign',
-                  titre: `Boîte ${adresse}@${m.domaine} créée`,
-                  detail: 'Le titulaire reçoit son lien de première connexion par SMS.',
+                  titre: `Boîte ${adresseComplete} créée`,
+                  detail: 'Notez le mot de passe maintenant : il ne sera plus affiché.',
                   appel: () =>
                     creerRessource(`/web/emails/${encodeURIComponent(m.id)}/boites`, {
-                      adresse: `${adresse}@${m.domaine}`,
+                      adresse: adresseComplete,
                       nom: titulaire || adresse,
                       quotaGo: Number(quota),
                       mfaObligatoire: mfaExige,
+                      motDePasse,
                     }),
                   effet: () =>
                     messageries.modifier(m.id, (x) => ({
                       boites: [
                         ...x.boites,
                         {
-                          adresse: `${adresse}@${m.domaine}`,
+                          adresse: adresseComplete,
                           nom: titulaire || adresse,
                           quotaGo: Number(quota),
                           utiliseGo: 0,
@@ -651,10 +684,14 @@ export function VueMessagerie({ id }: { id: string }) {
                         },
                       ],
                     })),
-                  effetFinal: () => messageries.recharger(),
+                  effetFinal: () => {
+                    messageries.recharger()
+                    setSecretBoite({ adresse: adresseComplete, motDePasse })
+                  },
                 })
                 setAdresse('')
                 setTitulaire('')
+                setMotDePasse(genererMotDePasse())
                 setCreation(false)
               }}
             >
@@ -695,9 +732,31 @@ export function VueMessagerie({ id }: { id: string }) {
             checked={mfaExige}
             onChange={setMfaExige}
           />
-          <Callout ton="info" titre="Aucun mot de passe ici">
-            L’identité est détenue par Keycloak. Le titulaire reçoit un lien de première connexion et
-            choisit lui-même son mot de passe : le portail n’en voit jamais la valeur.
+          <Field
+            label="Mot de passe"
+            hint="Généré automatiquement, modifiable. Envoyé à Zimbra à la création, jamais stocké côté portail."
+          >
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={motDePasse}
+                onChange={(e) => setMotDePasse(e.target.value)}
+                placeholder="Mot de passe de la boîte"
+                className="min-w-0 flex-1 font-mono"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setMotDePasse(genererMotDePasse())}
+              >
+                Régénérer
+              </Button>
+            </div>
+          </Field>
+          <Callout ton="warn" titre="Notez-le avant de valider">
+            Ce mot de passe n’est affiché qu’ici, avant création. Une fois la boîte créée, seule une
+            réinitialisation en révèle un nouveau.
           </Callout>
         </div>
       </Drawer>

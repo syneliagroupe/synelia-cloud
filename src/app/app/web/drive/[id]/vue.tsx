@@ -39,8 +39,10 @@ export function VueDrive({ id }: { id: string }) {
   const d = drives.items.find((x) => x.id === id)
   if (!d) return null
 
-  // Comme pour le webmail : l’ouverture passe par le SSO du backend, qui
-  // renvoie l’URL de rebond ; en maquette, le lien direct suffit.
+  // Contrairement au webmail (Zimbra `DelegateAuthRequest`), il n’y a pas de SSO applicatif
+  // ici : `POST /web/drive/{id}/ouverture` renvoie l’URL de l’instance Nextcloud réelle,
+  // sans jeton de connexion — l’utilisateur atterrit sur l’écran de connexion Nextcloud, pas
+  // déjà authentifié. En maquette, le lien direct suffit pareillement.
   const ouvrirDrive = () => {
     if (!estActif()) {
       window.open(`https://${d.hote}`, '_blank', 'noopener')
@@ -110,7 +112,7 @@ export function VueDrive({ id }: { id: string }) {
                   icone={<Plus size={14} />}
                   action="seat.assign"
                   titre="Attribuer un siège de drive"
-                  description="Un siège attribué est facturé, qu’il soit utilisé ou non. Le titulaire accède au drive en SSO, sans mot de passe supplémentaire."
+                  description="Un siège attribué est facturé, qu’il soit utilisé ou non. Il s’agit d’un droit d’accès et d’une ligne de facturation : le portail ne crée pas encore de compte Nextcloud pour le titulaire, qui doit en recevoir un directement depuis l’administration Nextcloud."
                   champs={[
                     {
                       id: 'membre',

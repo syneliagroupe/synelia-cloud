@@ -6,8 +6,8 @@ import { Download, FileDown, Plus, RotateCcw, Shield, Trash2 } from 'lucide-reac
 import { cn } from '@/lib/utils'
 import { dateCourte, dateHeure, dureeMin, goHumain, num, pct } from '@/lib/format'
 import { SITE_COURT } from '@/lib/types'
-import type { BackupPlan, ConformiteLigne, DRPlan, RestorePoint } from '@/lib/types'
-import { BACKUP_PLANS, BUCKETS, CONFORMITE, DR_PLANS, RESTORE_POINTS, VMS } from '@/lib/mock'
+import type { BackupPlan, ConformiteLigne, DRPlan, RestorePoint, VM, Volume } from '@/lib/types'
+import { BACKUP_PLANS, BUCKETS, CONFORMITE, DR_PLANS, RESTORE_POINTS, VMS, VOLUMES } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink, IconButton } from '@/components/ui/button'
 import { Checkbox, Field, Input, Radio, Select, Switch } from '@/components/ui/field'
@@ -147,8 +147,19 @@ function OngletPlans() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const plans = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
+  const vms = useCollection<VM>('vms', VMS).items
+  const volumes = useCollection<Volume>('volumes', VOLUMES).items
   const [drawer, setDrawer] = useState<BackupPlan | 'nouveau' | null>(null)
   const [f, setF] = useState<FormulairePlan>(PLAN_VIDE)
+
+  // Une portée « par ressource » qui désigne une VM sans volume Cinder attaché ne peut
+  // pas être protégée aujourd'hui : Karbor (snapshot applicatif du disque racine) n'est
+  // pas déployé dans le lab, seul le chemin snapshot Cinder d'un volume séparé marche
+  // réellement (`sauvegarde/service.py::_volumes_du_scope`). Averti ici plutôt que
+  // découvert à l'échec du job.
+  const vmCiblee = f.scopeType === 'ressource' ? vms.find((v) => v.id === f.scopeValeur) : undefined
+  const vmSansVolume =
+    vmCiblee !== undefined && !volumes.some((v) => v.attachedTo === vmCiblee.id)
 
   const ouvrir = (cible: BackupPlan | 'nouveau') => {
     setF(cible === 'nouveau' ? PLAN_VIDE : formulaireDepuis(cible))
@@ -403,6 +414,24 @@ function OngletPlans() {
                 />
               </Field>
             </div>
+            {vmSansVolume && vmCiblee && (
+              <Callout
+                ton="warn"
+                titre="Cette machine ne pourra pas être réellement protégée"
+                className="mt-3"
+                action={
+                  <ButtonLink href="/app/stockage" size="sm" variant="ghost">
+                    Créer et attacher un volume
+                  </ButtonLink>
+                }
+              >
+                {vmCiblee.nom} démarre sur le disque éphémère de l’hyperviseur, sans volume de
+                données Cinder attaché. Le plan sera créé, mais son exécution échouera à l’étape
+                « Créer le snapshot » : la sauvegarde d’un disque racine seul passe par Karbor, non
+                déployé sur cette plateforme. Seule une machine avec un volume séparé attaché est
+                aujourd’hui protégée pour de vrai.
+              </Callout>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

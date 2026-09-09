@@ -202,14 +202,21 @@ export default function NouvellesVms() {
   // sur la vraie liste dès qu'elle charge (mode API) ou change (changement
   // d'espace), même motif que `offerId` dans `espaces/new`. Un changement
   // d'espace invalide le choix précédent, qu'on ne veut pas garder muet.
+  // Le garde `length === 0 → return` d'origine laissait une valeur de
+  // maquette (`net-1`/`sg-1`, capturée pendant l'instant où `reseauxEspace`/
+  // `groupesEspace` valaient encore la graine, avant la première réponse
+  // réelle) survivre telle quelle quand l'Espace n'a en fait aucun réseau ou
+  // groupe réel — l'écran affichait alors « Aucun réseau privé dans… » (donc
+  // aucun sélecteur pour la corriger) tout en envoyant ce vieil identifiant à
+  // Nova, qui le rejette (`{'uuid': 'net-1'} is not valid`) — trouvé en testant
+  // une création réelle en direct sur dev01. Invalider dans tous les cas,
+  // vide y compris, pas seulement quand la liste réelle est non vide.
   useEffect(() => {
-    if (reseauxEspace.length === 0) return
-    if (!reseauxEspace.some((n) => n.id === reseau)) setReseau(reseauxEspace[0].id)
+    if (!reseauxEspace.some((n) => n.id === reseau)) setReseau(reseauxEspace[0]?.id ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reseauxEspace])
   useEffect(() => {
-    if (groupesEspace.length === 0) return
-    if (!groupesEspace.some((s) => s.id === sg)) setSg(groupesEspace[0].id)
+    if (!groupesEspace.some((s) => s.id === sg)) setSg(groupesEspace[0]?.id ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupesEspace])
   useEffect(() => {

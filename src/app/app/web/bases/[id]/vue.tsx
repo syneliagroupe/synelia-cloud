@@ -610,17 +610,23 @@ export function VueServeurBases({ id }: { id: string }) {
             <Button
               disabled={!nomBase.trim()}
               onClick={() => {
+                // Le contrat exige un mot de passe pour créer le compte dédié en même temps
+                // que la base (`POST …/bases { utilisateur: { motDePasse } }`) : ce tiroir ne
+                // le demande pas à l’opérateur, donc on le génère côté client — même motif que
+                // la réinitialisation de mot de passe de l’onglet Utilisateurs, affiché une
+                // seule fois juste après.
+                const motDePasseCompte = compteDedie ? genererMotDePasse() : null
                 executer({
                   action: 'service.admin',
                   titre: `${cle === 'base' ? 'Base' : 'Index'} ${nomBase} créé`,
                   detail: `Disponible immédiatement sur ${s.hoteInterne}:${s.port}.`,
-                  // Le compte dédié demande un mot de passe que ce tiroir ne
-                  // collecte pas (le contrat l’exige) : en mode API, créez-le
-                  // ensuite depuis l’onglet Utilisateurs.
                   appel: () =>
                     creerRessource(`/web/bases/${encodeURIComponent(s.id)}/bases`, {
                       nom: nomBase,
                       ...(s.moteur === 'redis' ? {} : { jeuCaracteres: collation }),
+                      ...(compteDedie
+                        ? { utilisateur: { nom: compteDedie, motDePasse: motDePasseCompte, droits: 'tous' } }
+                        : {}),
                     }),
                   effet: () =>
                     serveurs.modifier(s.id, (x) => ({
@@ -642,7 +648,13 @@ export function VueServeurBases({ id }: { id: string }) {
                           ]
                         : x.utilisateurs,
                     })),
-                  effetFinal: () => serveurs.recharger(),
+                  effetFinal: () => {
+                    if (compteDedie && motDePasseCompte) {
+                      setSecretUtilisateur({ nom: compteDedie, motDePasse: motDePasseCompte })
+                      setOnglet('utilisateurs')
+                    }
+                    serveurs.recharger()
+                  },
                 })
                 setNomBase('')
                 setCompteDedie('')

@@ -30,6 +30,7 @@ export default function Passerelle() {
   const { autorise, refus, pousser } = useApp()
   const executer = useOperation()
   const [aRevoquer, setARevoquer] = useState<CleIA | null>(null)
+  const [creationOuverte, setCreationOuverte] = useState(false)
   /** Secret renvoyé une seule fois à la création d’une clé IA. */
   const [secretCree, setSecretCree] = useState<{ prefixe: string; secret: string } | null>(null)
   const [modelesChoisis, setModelesChoisis] = useState<Set<string>>(new Set())
@@ -220,6 +221,8 @@ export default function Passerelle() {
             action="ia.key.manage"
             titre="Créer une clé d’accès"
             description="Le secret complet n’est affiché qu’une fois, à la création. Nous ne le stockons pas en clair et ne pouvons pas vous le redonner."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={[
               {
                 id: 'nom',
@@ -467,7 +470,7 @@ curl ${PASSERELLE_IA.base}/models \\
             titre: 'Aucune clé sur cet espace',
             phrase:
               'Une clé porte le quota, le plafond de dépense et la liste des modèles autorisés. Tant qu’il n’en existe pas, la passerelle refuse tous les appels de cet espace.',
-            action: { libelle: 'Créer une clé', href: '#' },
+            action: { libelle: 'Créer une clé', onClick: () => setCreationOuverte(true) },
           }}
           parPage={10}
         />

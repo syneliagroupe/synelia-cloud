@@ -266,7 +266,9 @@ export function VueService({ id, projetId }: { id: string; projetId?: string }) 
       {onglet === 'file' && <FileAttente service={service} />}
       {onglet === 'domaines' && <Domaines service={service} domaines={domaines} />}
       {onglet === 'deploiements' && <Deploiements service={service} />}
-      {onglet === 'configuration' && <Configuration service={service} />}
+      {onglet === 'configuration' && (
+        <Configuration service={service} onVoirVariables={() => setOnglet('variables')} />
+      )}
       {onglet === 'sieges' && <Sieges service={service} />}
       {onglet === 'versions' && <Versions service={service} />}
       {onglet === 'reversibilite' && <Reversibilite service={service} />}
@@ -1966,7 +1968,13 @@ function Avance({ service }: { service: ServiceProjet }) {
  * porte l'état. Régler une messagerie n'a presque rien de commun avec régler
  * un ERP, d'où un fichier par solution plutôt qu'un formulaire générique.
  */
-function Configuration({ service }: { service: ServiceProjet }) {
+function Configuration({
+  service,
+  onVoirVariables,
+}: {
+  service: ServiceProjet
+  onVoirVariables: () => void
+}) {
   const { autorise, refus } = useApp()
   const modele = service.modeleSlug ? modeleBySlug(service.modeleSlug) : undefined
   const config = modele?.configuration ? configurationDuService(modele.configuration) : undefined
@@ -1976,7 +1984,7 @@ function Configuration({ service }: { service: ServiceProjet }) {
       <EmptyState
         titre="Pas de réglages propres à cette solution"
         phrase="Ce modèle se configure entièrement par ses variables d’environnement. L’onglet Variables porte tout ce qui est réglable."
-        action={{ libelle: 'Voir les variables', href: '#' }}
+        action={{ libelle: 'Voir les variables', onClick: onVoirVariables }}
       />
     )
   }

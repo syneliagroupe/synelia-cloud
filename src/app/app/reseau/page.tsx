@@ -35,6 +35,7 @@ export default function Reseau() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const [onglet, setOnglet] = useState('prives')
+  const [creationReseauOuverte, setCreationReseauOuverte] = useState(false)
 
   const lesReseaux = useCollection<Network>('reseaux', NETWORKS)
   const lesIps = useCollection<PublicIP>('ips', PUBLIC_IPS)
@@ -92,6 +93,8 @@ export default function Reseau() {
                 action="network.manage"
                 titre="Créer un réseau privé"
                 description={`Le réseau découpe la plage ${espace.cidr} de l’espace. Le routage entre réseaux privés d’un même espace est automatique ; le filtrage se fait par groupe de sécurité.`}
+                ouvert={creationReseauOuverte}
+                onOuvertChange={setCreationReseauOuverte}
                 champs={champsReseau}
                 valeursDepart={{ vlan: 100 + reseaux.length, dns: true }}
                 libelleValider="Créer le réseau"
@@ -125,7 +128,7 @@ export default function Reseau() {
             <EmptyState
               titre="Aucun réseau privé"
               phrase={`Découpez la plage ${espace.cidr} en sous-réseaux par usage — front, données, cache — pour appliquer des politiques de filtrage distinctes.`}
-              action={{ libelle: 'Créer un réseau', href: '#' }}
+              action={{ libelle: 'Créer un réseau', onClick: () => setCreationReseauOuverte(true) }}
             />
           ) : (
             <div className="overflow-x-auto">

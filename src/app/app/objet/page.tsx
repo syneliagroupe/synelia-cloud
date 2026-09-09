@@ -25,6 +25,7 @@ export default function StockageObjet() {
   const executer = useOperation()
   const seaux = useCollection<Bucket>('buckets', BUCKETS)
   const cles = useCollection<CleS3>('cles-s3', CLES_S3)
+  const [creationOuverte, setCreationOuverte] = useState(false)
   /** Identifiants renvoyés une seule fois à la création d’une clé S3. */
   const [secretS3, setSecretS3] = useState<{
     accessKeyId: string
@@ -165,6 +166,8 @@ export default function StockageObjet() {
             action="network.manage"
             titre="Créer un bucket"
             description="Le nom d’un bucket est global et définitif : il entre dans l’URL. La région détermine où les objets résident physiquement."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={[
               { id: 'nom', label: 'Nom du bucket', placeholder: 'dba-archives-abj', obligatoire: true },
               {
@@ -255,7 +258,7 @@ export default function StockageObjet() {
           titre: 'Aucun bucket',
           phrase:
             'Un bucket de stockage objet accueille sauvegardes, médias, exports et archives, avec versioning et verrouillage WORM.',
-          action: { libelle: 'Créer un bucket', href: '#' },
+          action: { libelle: 'Créer un bucket', onClick: () => setCreationOuverte(true) },
         }}
       />
 

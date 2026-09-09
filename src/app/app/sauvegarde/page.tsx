@@ -333,7 +333,7 @@ function OngletPlans() {
               titre: 'Aucun plan de sauvegarde',
               phrase:
                 'Sans plan, aucune restauration n’est possible. Commencez par un plan quotidien immuable sur l’étiquette production, avec copie sur le second site.',
-              action: { libelle: 'Créer un plan', href: '#' },
+              action: { libelle: 'Créer un plan', onClick: () => ouvrir('nouveau') },
             }}
           />
         </div>

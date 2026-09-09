@@ -719,7 +719,13 @@ export function assemblerEntrees(
     const hebergement = hebergements.find(
       (h) => h.id === d.hebergementId || h.domaine === d.nom,
     )
-    const zone = d.zoneId ? zones.find((z) => z.id === d.zoneId) : undefined
+    // `zoneId` n'est posé qu'à la commande d'un domaine avec zone incluse : une
+    // zone rapatriée après coup (`POST /web/dns`) n'a aucun moyen de s'y relier
+    // (le contrat ne permet pas de patcher `zoneId`), donc le repli par nom
+    // évite qu'une zone fraîchement créée reste invisible sur sa propre fiche.
+    const zone = d.zoneId
+      ? zones.find((z) => z.id === d.zoneId)
+      : zones.find((z) => z.domaine === d.nom)
     const sousTitre = hebergement
       ? `${hebergement.palier} · ${hebergement.serveur.nom}`
       : zone

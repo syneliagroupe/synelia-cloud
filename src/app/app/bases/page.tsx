@@ -58,6 +58,7 @@ export default function BasesManagees() {
   const collection = useCollection<ManagedDatabase>('bases-managees', BASES_MANAGEES)
   const bases = collection.items.filter((b) => b.espaceId === espace.id)
   const [selection, setSelection] = useState(bases[0]?.id ?? '')
+  const [creationOuverte, setCreationOuverte] = useState(false)
   const [reseaux, setReseaux] = useState([
     '10.0.1.0/24 · prod-front',
     '10.0.4.0/24 · ci-cd',
@@ -91,6 +92,8 @@ export default function BasesManagees() {
             action="network.manage"
             titre="Créer une base de données managée"
             description="Nous exploitons le moteur : haute disponibilité, sauvegardes avec restauration à un instant précis, montées de version qualifiées."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={[
               { id: 'nom', label: 'Nom de l’instance', placeholder: 'pg-facturation', obligatoire: true },
               {
@@ -161,7 +164,7 @@ export default function BasesManagees() {
         <EmptyState
           titre="Aucune base managée dans cet espace"
           phrase="Une base managée vous évite d’exploiter vous-même le moteur : nous gérons la haute disponibilité, les sauvegardes avec restauration à un instant précis, les montées de version et la supervision fine."
-          action={{ libelle: 'Créer une base', href: '#' }}
+          action={{ libelle: 'Créer une base', onClick: () => setCreationOuverte(true) }}
         />
       ) : (
         <>

@@ -17,7 +17,7 @@ import { CarteAbonnement } from '@/components/business/abonnement'
 import { EditeurZone } from '@/components/business/editeur-zone'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
-import { BoutonFormulaire } from '@/components/app/actions'
+import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { creerRessource, estActif, requete } from '@/lib/api/client'
 
 /**
@@ -29,6 +29,7 @@ import { creerRessource, estActif, requete } from '@/lib/api/client'
  */
 export function VueDomaine({ id }: { id: string }) {
   const { autorise, refus } = useApp()
+  const executer = useOperation()
   const [onglet, setOnglet] = useState('apercu')
   const portefeuille = useCollection<Domaine>('domaines', DOMAINES)
   const parcHebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
@@ -374,7 +375,27 @@ export function VueDomaine({ id }: { id: string }) {
           <EmptyState
             titre="La zone de ce domaine est servie ailleurs"
             phrase="Les serveurs de noms déclarés au registre appartiennent à un autre fournisseur. Rapatriez la zone pour l’éditer ici : nous la recopions, vous vérifiez, puis vous changez les serveurs de noms."
-            action={{ libelle: 'Rapatrier la zone', href: '#' }}
+            action={{
+              libelle: 'Rapatrier la zone',
+              onClick: () =>
+                executer({
+                  action: 'network.manage',
+                  titre: `Zone ${entree.nom} rapatriée`,
+                  detail:
+                    'La zone est créée vide de notre côté : recopiez vos enregistrements existants avant de changer les serveurs de noms chez votre bureau d’enregistrement.',
+                  appel: () => creerRessource('/web/dns', { domaine: entree.nom }),
+                  effet: () =>
+                    zones.creer({
+                      id: zones.identifiant('zone'),
+                      orgId: 'org-dba',
+                      domaine: entree.nom,
+                      dnssec: false,
+                      ns: ['ns1.synelia.cloud', 'ns2.synelia.cloud'],
+                      enregistrements: [],
+                    }),
+                  effetFinal: () => zones.recharger(),
+                }),
+            }}
           />
         ))}
     </div>

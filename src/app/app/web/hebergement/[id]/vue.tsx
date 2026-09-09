@@ -108,6 +108,7 @@ export function VueHebergement({ id }: { id: string }) {
   const [baseOuverteId, setBaseOuverte] = useState<string | null>(null)
   const [partageOuvert, setPartageOuvert] = useState<string | null>(null)
   const [phpSite, setPhpSite] = useState<string | null>(null)
+  const [tacheOuverte, setTacheOuverte] = useState(false)
 
   const executer = useOperation()
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
@@ -1111,6 +1112,8 @@ export function VueHebergement({ id }: { id: string }) {
                 action="service.admin"
                 titre="Programmer une tâche"
                 description="La tâche s’exécute sur ce serveur, avec les droits du compte du site. Une tâche en échec ne bloque pas les autres."
+                ouvert={tacheOuverte}
+                onOuvertChange={setTacheOuverte}
                 champs={[
                   { id: 'libelle', label: 'Intitulé', placeholder: 'Export des commandes', obligatoire: true },
                   { id: 'commande', label: 'Commande', placeholder: 'php /var/www/boutique/bin/export.php', obligatoire: true },
@@ -1170,7 +1173,7 @@ export function VueHebergement({ id }: { id: string }) {
                 className="m-4"
                 titre="Aucune tâche planifiée"
                 phrase="WordPress et PrestaShop ont besoin d’une tâche périodique pour leurs traitements de fond. Nous la créons automatiquement à l’installation."
-                action={{ libelle: 'Programmer une tâche', href: '#' }}
+                action={{ libelle: 'Programmer une tâche', onClick: () => setTacheOuverte(true) }}
               />
             ) : (
               <ul className="divide-y divide-g-100">

@@ -261,9 +261,21 @@ export function VueVm({ id }: { id: string }) {
   const osAffiche = catalogueImages[vm.os] ?? vm.os
   const flavorAffiche = vm.flavor ? (catalogueGabarits[vm.flavor] ?? vm.flavor) : undefined
   const ipPrivee = vm.ips.find((i) => i.type === 'privee')?.adresse
-  const ipPublique = vm.ips.find((i) => i.type === 'publique')?.adresse
+  // Une IP attachée après coup via `/app/reseau` (ou le bouton « Attacher une IP publique »
+  // ci-dessous) ne réécrit jamais `vm.ips` côté backend — seule la collection `ips`
+  // (`attachedTo`) le sait vraiment. `vm.ips` reste la source pour l'IP posée à la création.
+  const ipReelleAttachee = lesIps.items.find((i) => i.attachedTo === vm.id)
+  const ipPublique = vm.ips.find((i) => i.type === 'publique')?.adresse ?? ipReelleAttachee?.adresse
   const volumes = disques.items.filter((v) => v.attachedTo === vm.id)
   const ipsDisponibles = lesIps.items.filter((i) => i.espaceId === vm.espaceId && !i.attachedTo)
+  // Interfaces à afficher dans l'onglet Réseau : celles connues de `vm.ips` (posées à la
+  // création) plus toute IP réellement attachée depuis (`lesIps`, dédupliquée par adresse).
+  const interfacesReseau = [
+    ...vm.ips,
+    ...lesIps.items
+      .filter((i) => i.attachedTo === vm.id && !vm.ips.some((v) => v.adresse === i.adresse))
+      .map((i) => ({ adresse: i.adresse, type: 'publique' as const, ptr: i.ptr })),
+  ]
   const points = pointsRestauration.items.filter((p) => p.resourceId === vm.id)
   // Un plan protège cette VM par portée directe (`ressource` == son id) ou par
   // Espace (`espace` == son espaceId). `tag`/`service` sont traités par le
@@ -804,23 +816,31 @@ export function VueVm({ id }: { id: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {vm.ips.map((ip, i) => (
-                    <tr key={ip.adresse} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2.5 font-mono text-[12px] text-ink">eth{i}</td>
-                      <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{ip.adresse}</td>
-                      <td className="px-3 py-2.5">
-                        <Badge tone={ip.type === 'publique' ? 'accent' : 'neutral'} size="sm">
-                          {ip.type === 'publique' ? 'Publique' : 'Privée'}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
-                        {ip.ptr ?? '—'}
-                      </td>
-                      <td className="px-3 py-2.5 text-[12.5px] text-g-700">
-                        {ip.type === 'privee' ? 'prod-front · 10.0.1.0/24' : 'Internet'}
+                  {interfacesReseau.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-6 text-center text-[12.5px] text-g-500">
+                        Aucune IP publique — attachez-en une avec le bouton ci-dessus.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    interfacesReseau.map((ip, i) => (
+                      <tr key={ip.adresse} className="border-b border-g-100 last:border-0">
+                        <td className="px-3 py-2.5 font-mono text-[12px] text-ink">eth{i}</td>
+                        <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{ip.adresse}</td>
+                        <td className="px-3 py-2.5">
+                          <Badge tone={ip.type === 'publique' ? 'accent' : 'neutral'} size="sm">
+                            {ip.type === 'publique' ? 'Publique' : 'Privée'}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
+                          {ip.ptr ?? '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-[12.5px] text-g-700">
+                          {ip.type === 'privee' ? 'prod-front · 10.0.1.0/24' : 'Internet'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

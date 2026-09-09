@@ -465,6 +465,8 @@ export function BoutonFormulaire({
   className,
   operation,
   complement,
+  ouvert: ouvertControle,
+  onOuvertChange,
 }: {
   libelle: ReactNode
   titre: string
@@ -482,10 +484,19 @@ export function BoutonFormulaire({
   className?: string
   operation: (valeurs: ValeursFormulaire) => SpecOperation
   complement?: (valeurs: ValeursFormulaire) => ReactNode
+  /**
+   * Ouverture pilotée depuis l'appelant (ex. l'action d'un `DataTable` en état
+   * vide, qui n'a pas de référence vers le bouton du bandeau) : non fourni, la
+   * modale garde son état interne comme avant.
+   */
+  ouvert?: boolean
+  onOuvertChange?: (v: boolean) => void
 }) {
   const { autorise, refus } = useApp()
   const executer = useOperation()
-  const [ouvert, setOuvert] = useState(false)
+  const [ouvertInterne, setOuvertInterne] = useState(false)
+  const ouvert = ouvertControle ?? ouvertInterne
+  const setOuvert = onOuvertChange ?? setOuvertInterne
   const [erreurs, setErreurs] = useState<Record<string, string>>({})
   const permis = action ? autorise(action) : true
 

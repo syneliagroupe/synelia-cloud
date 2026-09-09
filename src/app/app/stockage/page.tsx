@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { MAINTENANT } from '@/lib/format'
 import { goHumain, money, num } from '@/lib/format'
@@ -35,6 +36,7 @@ export default function Stockage() {
   const { autorise, refus } = useApp()
   const disques = useCollection<Volume>('volumes', VOLUMES)
   const parc = useCollection<VM>('vms', VMS)
+  const [creationOuverte, setCreationOuverte] = useState(false)
   const volumes = disques.items.filter((v) => v.espaceId === espace.id)
   const machines = parc.items.filter((v) => v.espaceId === espace.id)
 
@@ -246,6 +248,8 @@ export default function Stockage() {
             action="network.manage"
             titre="Créer un volume"
             description="Un volume est un disque indépendant du système : il s’étend à chaud, se déplace d’une machine à l’autre et se sauvegarde séparément."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={champsVolume}
             valeursDepart={{ taille: 100, classe: 'ssd', chiffre: true }}
             libelleValider="Créer le volume"
@@ -358,7 +362,7 @@ export default function Stockage() {
           titre: 'Aucun volume dans cet espace',
           phrase:
             'Un volume est un disque indépendant du système. Il s’étend à chaud, se déplace d’une machine à l’autre, et se sauvegarde séparément.',
-          action: { libelle: 'Créer un volume', href: '#' },
+          action: { libelle: 'Créer un volume', onClick: () => setCreationOuverte(true) },
         }}
       />
 

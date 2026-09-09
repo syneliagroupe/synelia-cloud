@@ -357,22 +357,22 @@ export default function NouvellesVms() {
                   images.find((i) => i.nom.toLowerCase().replace(/[.\-]/g, '').includes(motCle)) ??
                   images.find((i) => i.famille === famille) ??
                   images[0]
-                // Le plus petit gabarit du catalogue, pas le plus proche du
-                // choix visuel : le laboratoire dev01 a une capacité limitée
-                // et un gabarit « moyen » (2 vCPU/4 Go/40 Go) suffit à faire
-                // échouer la construction Nova (« transitioned to failure
-                // state ERROR », capacité insuffisante) — constaté en
-                // direct, `micro` (1/1/10) construit sans accroc. Cohérent
-                // avec le principe déjà tenu dans les tests d'intégration
-                // (§3.4 du plan) : choisir explicitement le plus petit
-                // gabarit disponible plutôt que ce que la maquette propose.
-                // Le tri par seul vCPU laisse une égalité (`small` et `micro`
-                // partagent vcpu: 1 sur ce catalogue) que l'ordre d'arrivée
-                // du backend départage arbitrairement — départager par
-                // ramGo puis diskGo pour prendre le vrai plus petit.
-                const gabarit = [...gabarits].sort(
-                  (a, b) => a.vcpu - b.vcpu || a.ramGo - b.ramGo || a.diskGo - b.diskGo,
-                )[0]
+                // Le gabarit réel le plus proche du choix visuel (vCPU
+                // d'abord, puis RAM, puis disque) — plus le plus petit du
+                // catalogue quel que soit ce choix. Contournement posé quand
+                // comp1/comp2 n'avaient que 85 Go libres chacun (un gabarit
+                // « moyen » suffisait à faire échouer Nova, seul `micro`
+                // construisait) : les deux nœuds ont depuis été étendus à
+                // 485 Go (2026-09-09), et le gabarit `medium` du catalogue
+                // (2 vCPU/4 Go/40 Go) a construit à trois reprises sans
+                // erreur en direct sur dev01 — voir DEMO-TODO.md.
+                const gabarit = [...gabarits].reduce((best, g) => {
+                  const ecart = (x: typeof g) =>
+                    Math.abs(x.vcpu - m.vcpu) * 100 +
+                    Math.abs(x.ramGo - m.ram) * 10 +
+                    Math.abs(x.diskGo - m.disk)
+                  return ecart(g) < ecart(best) ? g : best
+                })
                 return {
                   nom: m.nom,
                   imageId: image.id,

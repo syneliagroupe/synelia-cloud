@@ -17253,6 +17253,108 @@
         }
       }
     },
+    "/kubernetes/{clusterId}/metriques": {
+      "get": {
+        "tags": [
+          "Kubernetes"
+        ],
+        "operationId": "obtenirMetriquesK8s",
+        "summary": "Obtenir les métriques d’un cluster",
+        "description": "Agrège les diagnostics Nova/libvirt des VM réelles derrière le cluster (masters et workers, retrouvées via la stack Heat du cluster Magnum) — un instantané réel, pas un historique, même mécanique que `GET /vms/{vmId}/metriques`.",
+        "x-rbac": "org.dashboard.view",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Organisation"
+          },
+          {
+            "$ref": "#/components/parameters/Langue"
+          },
+          {
+            "name": "clusterId",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du cluster.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "k8s-prod"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Succès.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Serie"
+                      }
+                    },
+                    "noeuds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "statut": {
+                            "type": "string"
+                          },
+                          "vcpu": {
+                            "type": "integer",
+                            "format": "int32"
+                          },
+                          "cpu": {
+                            "type": "number"
+                          },
+                          "ram": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "statut"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "series",
+                    "noeuds"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalide"
+          },
+          "401": {
+            "$ref": "#/components/responses/NonAuthentifie"
+          },
+          "403": {
+            "$ref": "#/components/responses/Interdit"
+          },
+          "404": {
+            "$ref": "#/components/responses/Introuvable"
+          },
+          "424": {
+            "$ref": "#/components/responses/Degrade"
+          },
+          "429": {
+            "$ref": "#/components/responses/TropDeRequetes"
+          },
+          "500": {
+            "$ref": "#/components/responses/Serveur"
+          }
+        }
+      }
+    },
     "/kubernetes/{clusterId}/mise-a-jour": {
       "post": {
         "tags": [

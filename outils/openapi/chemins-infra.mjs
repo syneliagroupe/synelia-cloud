@@ -475,6 +475,32 @@ const k8s = fusion(
         rbac: 'component.restart',
       }),
     },
+    '/kubernetes/{clusterId}/metriques': {
+      get: op({
+        tag: T_K8S,
+        id: 'obtenirMetriquesK8s',
+        resume: 'Obtenir les métriques d’un cluster',
+        detail:
+          'Agrège les diagnostics Nova/libvirt des VM réelles derrière le cluster (masters et ' +
+          'workers, retrouvées via la stack Heat du cluster Magnum) — un instantané réel, pas un ' +
+          'historique, même mécanique que `GET /vms/{vmId}/metriques`.',
+        params: [idCluster],
+        ok: objet(
+          {
+            series: tableau(ref('Serie')),
+            noeuds: tableau(
+              objet(
+                { id: chaine(), statut: chaine(), vcpu: entier(), cpu: nombre(), ram: nombre() },
+                ['id', 'statut'],
+              ),
+            ),
+          },
+          ['series', 'noeuds'],
+        ),
+        rbac: 'org.dashboard.view',
+        erreurs: [424],
+      }),
+    },
   },
   action({
     tag: T_K8S,

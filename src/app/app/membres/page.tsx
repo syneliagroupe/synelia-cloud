@@ -85,6 +85,11 @@ export default function Membres() {
   const executer = useOperation()
   const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
   const invitations = useCollection<Invitation>('invitations', INVITATIONS)
+  // Les Espaces Cloud existent en tant que collection API à part entière : les
+  // lire depuis la maquette locale montrerait les trois espaces de démonstration
+  // même quand l’organisation réelle en a d’autres.
+  const espacesDistants = useCollection('espaces', ESPACES)
+  const ESPACES_LUS = estActif() ? espacesDistants.items : ESPACES
   const [onglet, setOnglet] = useState('membres')
   const [invitation, setInvitation] = useState(false)
   const [detail, setDetail] = useState<string | null>(null)
@@ -114,7 +119,14 @@ export default function Membres() {
     nom: u.nom,
     email: u.email,
     role: m.role,
-    portee: m.scopeLabel ?? (m.scopeType === 'org' ? 'Toute l’organisation' : m.scopeType),
+    portee:
+      m.scopeLabel ??
+      (m.scopeType === 'org'
+        ? 'Toute l’organisation'
+        : (() => {
+            const espace = ESPACES_LUS.find((e) => e.id === m.scopeId)
+            return espace ? `Espace ${espace.code}` : m.scopeType
+          })()),
     mfa: u.mfaEnabled,
     source: u.idpSource,
     dernier: u.lastLoginAt,
@@ -336,7 +348,13 @@ export default function Membres() {
               sousTitre="Une invitation expire au bout de sept jours. Le lien est à usage unique."
             />
             <div className="space-y-2">
-              {invitations.items.map((i) => (
+              {invitations.items
+                // Le backend renvoie toutes les invitations, quel que soit leur
+                // statut (`GET /invitations` sans filtre) : une invitation
+                // relancée ou annulée doit disparaître d'ici, pas rester
+                // affichée « en attente » avec ses boutons actifs.
+                .filter((i) => !i.statut || i.statut === 'en_attente')
+                .map((i) => (
                 <div
                   key={i.id}
                   className="flex flex-wrap items-start justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
@@ -597,8 +615,8 @@ export default function Membres() {
             <Card>
               <CardHeader titre="Attributions par espace" />
               <div className="space-y-2">
-                {ESPACES.map((e) => {
-                  const membresEspace = MEMBERSHIPS.filter((m) => m.scopeId === e.id)
+                {ESPACES_LUS.map((e) => {
+                  const membresEspace = adhesions.items.filter((m) => m.scopeId === e.id)
                   return (
                     <div
                       key={e.id}
@@ -652,7 +670,7 @@ export default function Membres() {
                 <Field label="Portée" hint="restreindre le rôle à un périmètre précis">
                   <Select value={attribPortee} onChange={(e) => setAttribPortee(e.target.value)}>
                     <option value="org">Toute l’organisation</option>
-                    {ESPACES.map((e) => (
+                    {ESPACES_LUS.map((e) => (
                       <option key={e.id} value={e.id}>
                         Espace {e.code} — {e.offreNom}
                       </option>
@@ -665,7 +683,7 @@ export default function Membres() {
                   className="mt-4"
                   onClick={() => {
                     const cible = lignes.find((l) => l.id === (attribMembre || lignes[0]?.id))
-                    const espace = ESPACES.find((e) => e.id === attribPortee)
+                    const espace = ESPACES_LUS.find((e) => e.id === attribPortee)
                     executer({
                       action: 'member.invite',
                       titre: 'Attribution enregistrée',
@@ -767,7 +785,7 @@ export default function Membres() {
           <Field label="Portée">
             <Select value={invitePortee} onChange={(e) => setInvitePortee(e.target.value)}>
               <option value="org">Toute l’organisation</option>
-              {ESPACES.map((e) => (
+              {ESPACES_LUS.map((e) => (
                 <option key={e.id} value={e.id}>
                   Espace {e.code}
                 </option>

@@ -1,11 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, num, pct } from '@/lib/format'
-import type { LoadBalancer } from '@/lib/types'
+import type { LoadBalancer, PublicIP, VM } from '@/lib/types'
 import { LOAD_BALANCERS, PUBLIC_IPS, VMS } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -240,16 +240,14 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
   const [layer, setLayer] = useState<'l4' | 'l7'>('l7')
   const [exposure, setExposure] = useState<'public' | 'interne'>('public')
   const [vipMode, setVipMode] = useState<'existante' | 'nouvelle'>('existante')
-  const [vip, setVip] = useState(
-    PUBLIC_IPS.find((i) => i.espaceId === espace.id && !i.attachedTo)?.adresse ?? '',
-  )
+  const [vip, setVip] = useState('')
   const [portHttps, setPortHttps] = useState(443)
   const [tlsMin, setTlsMin] = useState('TLS 1.2')
   const [certAuto, setCertAuto] = useState(true)
   const [redirection, setRedirection] = useState(true)
   const [algo, setAlgo] = useState<LoadBalancer['algo']>('least_conn')
   const [sticky, setSticky] = useState(true)
-  const [cibles, setCibles] = useState<string[]>(['vm-web-01', 'vm-web-02'])
+  const [cibles, setCibles] = useState<string[]>([])
   const [waf, setWaf] = useState(true)
   const [rateLimit, setRateLimit] = useState(1200)
   const [hcChemin, setHcChemin] = useState('/healthz')
@@ -260,8 +258,21 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
   /** Erreurs de champs du backend (`422`) : l’assistant reste ouvert et les affiche. */
   const [erreurs, setErreurs] = useState<Record<string, string>>({})
 
-  const ipsLibres = PUBLIC_IPS.filter((i) => i.espaceId === espace.id && !i.attachedTo)
-  const vmsEspace = VMS.filter((v) => v.espaceId === espace.id)
+  // `ips` et `vms` ont chacun un vrai backend (`/ips`, `/vms`) : lire les
+  // graines `PUBLIC_IPS`/`VMS` directement ici renvoyait toujours des IP et des
+  // VM de démonstration (`vm-web-01`…) même en mode API, où l'Espace réel a
+  // d'autres identifiants — même défaut que `offerId`/`reseauId` sur
+  // `/app/vms/new`, corrigé au même patron : état vide au montage, resynchronisé
+  // par effet dès que la vraie liste charge.
+  const ipsCol = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  const ipsLibres = ipsCol.items.filter((i) => i.espaceId === espace.id && !i.attachedTo)
+  useEffect(() => {
+    if (!vip && ipsLibres.length > 0) setVip(ipsLibres[0].adresse)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ipsLibres.length])
+
+  const vmsCol = useCollection<VM>('vms', VMS)
+  const vmsEspace = vmsCol.items.filter((v) => v.espaceId === espace.id)
 
   const lignesCout = [
     { libelle: `Load balancer ${layer.toUpperCase()}`, detail: nom, montant: 18000 },
@@ -630,6 +641,12 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
               titre="Cibles du pool"
               sousTitre="Machines virtuelles ou workloads Kubernetes. Le mélange est possible — utile pendant une migration."
             />
+            {vmsEspace.length === 0 && (
+              <p className="rounded-[6px] border border-dashed border-g-300 bg-g-050 px-3 py-4 text-center text-[12.5px] text-g-500">
+                Aucune machine virtuelle dans cet Espace pour l’instant — le load balancer se crée
+                sans cible, à compléter depuis sa fiche une fois une VM disponible.
+              </p>
+            )}
             <div className="space-y-2">
               {vmsEspace.map((v) => (
                 <label

@@ -16,7 +16,7 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { requete } from '@/lib/api/client'
+import { estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'restauration', label: 'Tests de restauration' },
@@ -174,14 +174,19 @@ export default function Conformite() {
     // Pas d’appel : `POST /attestations/{modele}` génère un modèle du
     // backend (identifiants inconnus d’ici), pas une ligne de ce journal —
     // et `GET /attestations` ne rend pas cette forme. La génération reste
-    // locale, comme la planification des tests et le rapport CSV.
+    // locale, comme la planification des tests et le rapport CSV — mais
+    // seulement en mode maquette : en mode API, `generees.creer()` postait
+    // réellement sur `POST /attestations` (bare), une route qui n’existe pas
+    // (seul `POST /attestations/{attestationId}` existe) — un `405` silencieux
+    // (`.then(recharger, recharger)` avale l’échec) derrière un toast de succès.
     executer({
       action: 'compliance.export',
       titre: `Attestation « ${attestation} » générée`,
       detail: signature
         ? 'Le document signé est disponible au téléchargement. La génération est journalisée dans l’audit.'
         : 'Document produit sans signature électronique : le destinataire devra nous contacter pour en vérifier l’authenticité.',
-      effet: () =>
+      effet: () => {
+        if (estActif()) return
         generees.creer({
           id: generees.identifiant('gen'),
           date: MAINTENANT.slice(0, 10),
@@ -191,7 +196,8 @@ export default function Conformite() {
             : 'Toute la plateforme',
           qui: EQUIPE_SYNELIA[0].nom,
           motif: motif.trim() || destinataire.trim() || 'Motif non renseigné',
-        }),
+        })
+      },
     })
     setDestinataire('')
     setMotif('')

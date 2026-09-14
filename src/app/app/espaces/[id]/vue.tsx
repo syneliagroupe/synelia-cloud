@@ -5,7 +5,19 @@ import { useState } from 'react'
 import { Container, Link2, Plus, Server, Settings2, TrendingUp, Unlink } from 'lucide-react'
 import { cn, seededSeries, trendSeries } from '@/lib/utils'
 import { dateCourte, dateHeure, goHumain, money, num, pct, toHumain } from '@/lib/format'
-import { SITE_LABEL, type EspaceCloud, type K8sCluster, type Offer, type VM, type Volume } from '@/lib/types'
+import {
+  SITE_LABEL,
+  type BackupPlan,
+  type EspaceCloud,
+  type K8sCluster,
+  type Membership,
+  type Network,
+  type Offer,
+  type PublicIP,
+  type RestorePoint,
+  type VM,
+  type Volume,
+} from '@/lib/types'
 import {
   APPLICATIONS,
   BACKUP_PLANS,
@@ -13,12 +25,12 @@ import {
   EVENEMENTS_SUPERVISION,
   K8S_CLUSTERS,
   MEMBERSHIPS,
+  NETWORKS,
   OFFRES,
+  PUBLIC_IPS,
   RESTORE_POINTS,
   VMS,
   VOLUMES,
-  ipsDeLEspace,
-  reseauxDeLEspace,
   userById,
   hrefDuService,
 } from '@/lib/mock'
@@ -54,14 +66,25 @@ export function VueEspace({ id }: { id: string }) {
   // Le catalogue réel prime sur la graine : un tarif changé côté
   // /admin/catalogue doit se voir ici, pas seulement dans l'admin.
   const offresReelles = useCollection<Offer>('offres', OFFRES)
+  // Même collections que `/app/reseau`, `/app/membres` et `/app/sauvegarde` :
+  // avant ce correctif, ces trois onglets lisaient les graines directement
+  // (`reseauxDeLEspace`/`ipsDeLEspace`, `MEMBERSHIPS`, `BACKUP_PLANS`,
+  // `RESTORE_POINTS`) sans jamais passer par l'atelier, donc en mode API la
+  // fiche d'un Espace affichait des réseaux/IP/membres/plans fabriqués au lieu
+  // des vraies collections déjà branchées ailleurs.
+  const reseauxCollection = useCollection<Network>('reseaux', NETWORKS)
+  const ipsCollection = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
+  const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
+  const pointsRestauration = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
   const [onglet, setOnglet] = useState('apercu')
 
   const espace = espaces.items.find((e) => e.id === id)
   const vms = parc.items.filter((v) => v.espaceId === id)
   const clusters = grappes.items.filter((c) => c.espaceId === id)
   const volumes = disques.items.filter((v) => v.espaceId === id)
-  const reseaux = reseauxDeLEspace(id)
-  const ips = ipsDeLEspace(id)
+  const reseaux = reseauxCollection.items.filter((n) => n.espaceId === id)
+  const ips = ipsCollection.items.filter((i) => i.espaceId === id)
 
   // Identifiant inconnu (lien direct, espace supprimé) : la page le dit au
   // lieu de planter sur `espace.code`.
@@ -775,7 +798,7 @@ export function VueEspace({ id }: { id: string }) {
             />
             <StatTile
               libelle="Points de restauration"
-              valeur={RESTORE_POINTS.filter((p) =>
+              valeur={pointsRestauration.items.filter((p) =>
                 vms.some((v) => v.id === p.resourceId),
               ).length}
             />
@@ -797,7 +820,7 @@ export function VueEspace({ id }: { id: string }) {
               }
             />
             <div className="space-y-2">
-              {BACKUP_PLANS.filter((p) => vms.some((v) => v.backupPlanId === p.id)).map((p) => (
+              {plansSauvegarde.items.filter((p) => vms.some((v) => v.backupPlanId === p.id)).map((p) => (
                 <div
                   key={p.id}
                   className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
@@ -903,7 +926,7 @@ export function VueEspace({ id }: { id: string }) {
             }
           />
           <ul className="space-y-2">
-            {MEMBERSHIPS.filter(
+            {adhesions.items.filter(
               (m) =>
                 (m.scopeType === 'espace' && m.scopeId === id) || m.scopeType === 'org',
             ).map((m) => {

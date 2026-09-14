@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { money, num, ventilationTva } from '@/lib/format'
 import { MAINTENANT } from '@/lib/format'
 import { SITE_LABEL, type EspaceCloud, type Site } from '@/lib/types'
-import type { Offer } from '@/lib/types'
+import type { BackupPlan, Offer } from '@/lib/types'
 import { BACKUP_PLANS, ESPACES, OFFRES } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,6 +47,12 @@ export default function NouvelEspace() {
   const router = useRouter()
   const { pousser } = useApp()
   const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
+  // Même correctif que `offerId` un peu plus bas : la validation d'unicité du
+  // code, la liste de peering et la plage CIDR affichée lisaient `ESPACES` (la
+  // graine figée) au lieu du vrai parc — un code déjà pris côté API aurait pu
+  // passer la validation locale et échouer seulement à l'appel.
+  const espacesReels = espaces.items
+  const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
   const { lancerJob } = useAtelier()
   // En mode API, les prix viennent du catalogue réel (`/admin/catalogue`) au
   // lieu de la graine figée : un tarif changé côté admin doit se refléter ici.
@@ -98,7 +104,7 @@ export default function NouvelEspace() {
     if (planSauvegarde !== 'aucun') {
       l.push({
         libelle: 'Sauvegarde incluse dans l’offre',
-        detail: BACKUP_PLANS.find((p) => p.id === planSauvegarde)?.nom ?? '',
+        detail: plansSauvegarde.items.find((p) => p.id === planSauvegarde)?.nom ?? '',
         montant: 0,
       })
     }
@@ -110,7 +116,7 @@ export default function NouvelEspace() {
       })
     }
     return l
-  }, [offre, site, cidr, planSauvegarde, pra])
+  }, [offre, site, cidr, planSauvegarde, pra, plansSauvegarde.items])
 
   const montantTtc = useMemo(() => {
     const mensuelHt = lignes.reduce((a, l) => a + l.montant, 0)
@@ -120,7 +126,7 @@ export default function NouvelEspace() {
   }, [lignes, periodicite])
   const [paye, setPaye] = useState(false)
 
-  const codeValide = /^EC-[A-Z0-9]{2,6}-\d{2}$/.test(code) && !ESPACES.some((e) => e.code === code)
+  const codeValide = /^EC-[A-Z0-9]{2,6}-\d{2}$/.test(code) && !espacesReels.some((e) => e.code === code)
   const cidrValide = /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}\/(2[0-4]|1[6-9])$/.test(cidr)
 
   const peutContinuer =
@@ -380,7 +386,7 @@ export default function NouvelEspace() {
                 required
                 error={
                   code && !codeValide
-                    ? ESPACES.some((e) => e.code === code)
+                    ? espacesReels.some((e) => e.code === code)
                       ? 'Ce code est déjà utilisé.'
                       : 'Format attendu : EC-DBA-04'
                     : undefined
@@ -407,7 +413,7 @@ export default function NouvelEspace() {
             </div>
             <p className="mt-2.5 text-[11.5px] leading-relaxed text-g-500">
               La plage proposée ne chevauche aucune de vos plages existantes (
-              {ESPACES.map((e) => e.cidr).join(', ')}), ce qui rend le peering possible sans
+              {espacesReels.map((e) => e.cidr).join(', ')}), ce qui rend le peering possible sans
               renumérotation. Un /22 offre 1 024 adresses, soit environ quatre réseaux privés de 254
               hôtes.
             </p>
@@ -428,7 +434,7 @@ export default function NouvelEspace() {
               >
                 <Select value={peering} onChange={(e) => setPeering(e.target.value)}>
                   <option value="">Aucun peering</option>
-                  {ESPACES.map((e) => (
+                  {espacesReels.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.code} · {e.cidr} · {e.site}
                     </option>
@@ -461,7 +467,7 @@ export default function NouvelEspace() {
             />
             <Field label="Plan de sauvegarde par défaut">
               <Select value={planSauvegarde} onChange={(e) => setPlanSauvegarde(e.target.value)}>
-                {BACKUP_PLANS.map((p) => (
+                {plansSauvegarde.items.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.nom} · rétention {p.retentionJours} j{p.immutable ? ' · immuable' : ''}
                   </option>
@@ -530,12 +536,12 @@ export default function NouvelEspace() {
                 {
                   cle: 'Peering',
                   valeur: peering
-                    ? ESPACES.find((e) => e.id === peering)?.code ?? '—'
+                    ? espacesReels.find((e) => e.id === peering)?.code ?? '—'
                     : 'Aucun',
                 },
                 {
                   cle: 'Plan de sauvegarde',
-                  valeur: BACKUP_PLANS.find((p) => p.id === planSauvegarde)?.nom ?? 'Aucun',
+                  valeur: plansSauvegarde.items.find((p) => p.id === planSauvegarde)?.nom ?? 'Aucun',
                 },
                 { cle: 'Supervision', valeur: supervision ? 'Incluse' : 'Désactivée' },
                 { cle: 'PRA inter-site', valeur: pra ? 'Activé' : 'Non souscrit' },

@@ -16,14 +16,16 @@ import { GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
-import { estActif, requete } from '@/lib/api/client'
+import { creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
 import type { LigneLog, ManagedDatabase } from '@/lib/types'
 
+// `id` reste le code attendu par le backend (`BaseManageeCreation.palier` :
+// s1/s2/m1/m2/l1/xl1) — seul `label` est un texte d'affichage.
 const PALIERS = [
-  { id: 'db-s', label: 'Small · 2 vCPU · 8 Go' },
-  { id: 'db-m', label: 'Medium · 4 vCPU · 16 Go' },
-  { id: 'db-l', label: 'Large · 8 vCPU · 32 Go' },
-  { id: 'db-xl', label: 'XLarge · 16 vCPU · 64 Go' },
+  { id: 's1', label: 'Small · 2 vCPU · 8 Go' },
+  { id: 'm1', label: 'Medium · 4 vCPU · 16 Go' },
+  { id: 'l1', label: 'Large · 8 vCPU · 32 Go' },
+  { id: 'xl1', label: 'XLarge · 16 vCPU · 64 Go' },
 ]
 
 const MOTEURS: Record<string, { nom: string; teinte: string; port: number }> = {
@@ -114,13 +116,26 @@ export default function BasesManagees() {
               { id: 'ha', label: 'Haute disponibilité', type: 'switch', demi: true, placeholder: 'Deux nœuds' },
               { id: 'pitr', label: 'Restauration à un instant précis', type: 'switch', placeholder: 'Journalisation continue' },
             ]}
-            valeursDepart={{ moteur: 'postgresql', palier: 'db-m', taille: 100, ha: true, pitr: true }}
+            valeursDepart={{ moteur: 'postgresql', palier: 'm1', taille: 100, ha: true, pitr: true }}
             libelleValider="Créer la base"
             operation={(v) => {
               const id = collection.identifiant('db')
               return {
                 titre: `Création de ${v.nom} lancée`,
                 detail: `${MOTEURS[String(v.moteur)]?.nom} · ${v.ha ? 'HA' : 'nœud unique'}`,
+                appel: () =>
+                  creerRessource('/bases', {
+                    espaceId: espace.id,
+                    nom: String(v.nom),
+                    moteur: v.moteur,
+                    version: { postgresql: '16.4', mysql: '8.4', mariadb: '11.4', mongodb: '7.0', redis: '7.4' }[
+                      String(v.moteur)
+                    ] ?? '1.0',
+                    palier: String(v.palier),
+                    ha: Boolean(v.ha),
+                    tailleGo: Number(v.taille),
+                    pitr: Boolean(v.pitr),
+                  }),
                 effet: () =>
                   collection.creer({
                     id,
@@ -151,6 +166,13 @@ export default function BasesManagees() {
                   ],
                 },
                 effetFinal: () => {
+                  // En mode API la base réelle vient du backend, sous son propre
+                  // identifiant : `id` n'est qu'un identifiant local de secours pour
+                  // le mode maquette, PATCH dessus échouerait (base introuvable).
+                  if (estActif()) {
+                    collection.recharger()
+                    return
+                  }
                   collection.modifier(id, { statut: 'running' })
                   setSelection(id)
                 },
@@ -295,7 +317,36 @@ export default function BasesManagees() {
                   </Card>
 
                   <Card>
-                    <CardHeader titre="Caractéristiques" />
+                    <CardHeader
+                      titre="Caractéristiques"
+                      actions={
+                        <BoutonAction
+                          libelle="Supprimer la base"
+                          variant="ghost"
+                          operation={{
+                            action: 'vm.create_delete',
+                            ton: 'warn',
+                            titre: `Suppression de ${base.nom} lancée`,
+                            detail: 'L’instance et son volume sont détruits ; les sauvegardes existantes ne sont pas affectées.',
+                            appel: () => supprimerRessource('/bases', base.id, base.nom),
+                            effet: () => collection.supprimer(base.id),
+                            effetFinal: () => {
+                              collection.recharger()
+                              setSelection('')
+                            },
+                          }}
+                          confirmation={{
+                            ressource: base.nom,
+                            titre: `Supprimer ${base.nom} ?`,
+                            pertes: [
+                              'L’instance et ses données sont détruites, sans retour possible',
+                              'Les applications qui s’y connectent perdent immédiatement l’accès',
+                            ],
+                            libelleAction: 'Supprimer la base',
+                          }}
+                        />
+                      }
+                    />
                     <KeyValueList
                       colonnes={1}
                       items={[

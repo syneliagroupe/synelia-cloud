@@ -156,6 +156,13 @@ export default function Securite() {
   const [expirationSession, setExpirationSession] = useState(true)
   const [empreinteChainage, setEmpreinteChainage] = useState(true)
   const api = estActif()
+  // Export réel (`POST /audit/export`) : contrat = depuis/jusqua/format(csv|json|pdf)/signature.
+  // `syslog` et le périmètre (refus/admin/accès) n'ont pas d'équivalent contrat — désactivés en
+  // mode API plutôt que simulés, comme « Téléchargement local » sur la restauration transverse.
+  const [exportDepuis, setExportDepuis] = useState('2026-07-19')
+  const [exportJusqua, setExportJusqua] = useState('2026-08-19')
+  const [exportFormat, setExportFormat] = useState<'csv' | 'json' | 'pdf' | 'syslog'>('csv')
+  const [exportPerimetre, setExportPerimetre] = useState('tout')
 
   /**
    * `GET /securite/politiques` — l’approbation des déploiements et
@@ -861,26 +868,50 @@ export default function Securite() {
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Du">
-                  <Input type="date" defaultValue="2026-07-19" />
+                  <Input
+                    type="date"
+                    value={exportDepuis}
+                    onChange={(e) => setExportDepuis(e.target.value)}
+                  />
                 </Field>
                 <Field label="Au">
-                  <Input type="date" defaultValue="2026-08-19" />
+                  <Input
+                    type="date"
+                    value={exportJusqua}
+                    onChange={(e) => setExportJusqua(e.target.value)}
+                  />
                 </Field>
               </div>
               <Field label="Format">
-                <Select defaultValue="csv">
+                <Select
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value as typeof exportFormat)}
+                >
                   <option value="csv">CSV — pour un tableur</option>
                   <option value="json">JSON — pour un traitement automatisé</option>
-                  <option value="pdf">PDF signé — pour une remise formelle</option>
-                  <option value="syslog">Syslog RFC 5424 — pour un collecteur</option>
+                  <option value="pdf" disabled={api}>
+                    PDF signé — pour une remise formelle{api ? ' (indisponible : demandez un CSV ou un JSON)' : ''}
+                  </option>
+                  <option value="syslog" disabled={api}>
+                    Syslog RFC 5424 — pour un collecteur{api ? ' (indisponible en mode API)' : ''}
+                  </option>
                 </Select>
               </Field>
               <Field label="Périmètre">
-                <Select defaultValue="tout">
+                <Select
+                  value={exportPerimetre}
+                  onChange={(e) => setExportPerimetre(e.target.value)}
+                >
                   <option value="tout">Toutes les actions</option>
-                  <option value="refus">Refus uniquement</option>
-                  <option value="admin">Actions d’administration uniquement</option>
-                  <option value="acces">Authentification et accès uniquement</option>
+                  <option value="refus" disabled={api}>
+                    Refus uniquement{api ? ' (indisponible en mode API)' : ''}
+                  </option>
+                  <option value="admin" disabled={api}>
+                    Actions d’administration uniquement{api ? ' (indisponible en mode API)' : ''}
+                  </option>
+                  <option value="acces" disabled={api}>
+                    Authentification et accès uniquement{api ? ' (indisponible en mode API)' : ''}
+                  </option>
                 </Select>
               </Field>
               <Switch
@@ -901,19 +932,34 @@ export default function Securite() {
               />
             </div>
             <GatedAction autorise={autorise('compliance.export')} message={refus('compliance.export')}>
-              <Button
+              <BoutonAction
                 className="mt-4"
-                iconBefore={<FileCheck2 size={14} />}
-                onClick={() =>
-                  pousser({
-                    ton: 'ok',
-                    titre: 'Export en préparation',
-                    detail: 'Vous recevrez un lien de téléchargement par courriel dans quelques minutes. Le lien expire après 24 heures.',
-                  })
-                }
-              >
-                Générer l’export
-              </Button>
+                libelle="Générer l’export"
+                icone={<FileCheck2 size={14} />}
+                operation={{
+                  action: 'compliance.export',
+                  titre: 'Export généré',
+                  // Le fichier est réellement produit et déposé côté serveur (`POST
+                  // /audit/export`) : cet écran ne propose pas encore de le télécharger
+                  // directement (gap documenté, pas simulé) — à distinguer de la
+                  // maquette, où rien n'est jamais créé.
+                  detail: api
+                    ? 'Le fichier est déposé côté serveur. Le téléchargement direct depuis cet écran n’est pas encore câblé.'
+                    : 'Démonstration — vous recevriez un lien de téléchargement par courriel dans quelques minutes. Le lien expire après 24 heures.',
+                  appel: api
+                    ? () =>
+                        requete('/audit/export', {
+                          methode: 'POST',
+                          corps: {
+                            depuis: `${exportDepuis}T00:00:00Z`,
+                            jusqua: `${exportJusqua}T23:59:59Z`,
+                            format: exportFormat === 'syslog' ? 'csv' : exportFormat,
+                            signature: empreinteChainage,
+                          },
+                        })
+                    : undefined,
+                }}
+              />
             </GatedAction>
           </Card>
 

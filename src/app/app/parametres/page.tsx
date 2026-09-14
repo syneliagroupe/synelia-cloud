@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Building2, Globe, Palette, Terminal, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, money } from '@/lib/format'
@@ -16,7 +16,17 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource } from '@/lib/api/client'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
+
+/** `GET/PUT /moi/preferences` — préférences du membre connecté, pas de l'organisation
+ * (le sous-titre le dit : « chaque membre peut les surcharger dans son profil »). */
+interface Preferences {
+  langue?: 'fr' | 'en'
+  fuseau?: string
+  sitePrefere?: 'ABJ' | 'GBM'
+  deviseAffichee?: 'XOF' | 'EUR' | 'USD'
+  formatCompact?: boolean
+}
 
 interface Jeton {
   id: string
@@ -93,6 +103,23 @@ export default function Parametres() {
   const [siteDefaut, setSiteDefaut] = useState('ABJ')
   const [horsTaxes, setHorsTaxes] = useState(true)
   const [densiteCompacte, setDensiteCompacte] = useState(false)
+
+  // Les préférences existent réellement côté backend (`GET/PUT /moi/preferences`)
+  // mais n'étaient jamais lues ni écrites depuis cet écran — la graine locale
+  // s'affichait, le bouton « Enregistrer » ne faisait qu'un toast. Chargé une
+  // fois au montage, en mode API seulement.
+  useEffect(() => {
+    if (!estActif()) return
+    requete<Preferences>('/moi/preferences').then((p) => {
+      if (p.langue) setLangue(p.langue)
+      if (p.fuseau === 'Africa/Abidjan' || p.fuseau === 'Africa/Dakar' || p.fuseau === 'Africa/Lagos' || p.fuseau === 'Europe/Paris' || p.fuseau === 'UTC') {
+        setFuseau(p.fuseau)
+      }
+      if (p.sitePrefere) setSiteDefaut(p.sitePrefere)
+      if (p.deviseAffichee) setDevise(p.deviseAffichee)
+      if (typeof p.formatCompact === 'boolean') setDensiteCompacte(p.formatCompact)
+    }, () => {})
+  }, [])
 
   const [mailTechnique, setMailTechnique] = useState('ops@dba.africa')
   const [mailFacturation, setMailFacturation] = useState('compta@dba.africa')
@@ -305,6 +332,17 @@ export default function Parametres() {
               operation={{
                 titre: 'Préférences enregistrées',
                 detail: `${devise} · ${langue === 'fr' ? 'français' : 'anglais'} · ${fuseau} · site ${siteDefaut} par défaut`,
+                appel: () =>
+                  requete('/moi/preferences', {
+                    methode: 'PUT',
+                    corps: {
+                      langue,
+                      fuseau,
+                      sitePrefere: siteDefaut,
+                      deviseAffichee: devise,
+                      formatCompact: densiteCompacte,
+                    },
+                  }),
               }}
             />
           </Card>

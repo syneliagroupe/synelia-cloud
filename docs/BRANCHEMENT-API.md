@@ -199,7 +199,7 @@ collection par collection — seuls les points déjà vérifiés lors des passes
 | `plans-pra` | `/pra` | `pra` | réel | |
 | `conformite-sauvegarde` | `/sauvegarde/conformite` | `sauvegarde` | réel | Tableau calculé depuis les données réelles de sauvegarde. |
 | `projets` | `/projets` | `projets` | réel | PaaS : Magnum/`K8sWorkloadReel`, dépôts (`DepotsReel`). |
-| `deploiements` | `/deploiements` | `deploiements` | réel | |
+| `deploiements` | `/deploiements` | `deploiements` | réel | Persistance, RBAC et journal d'audit réels ; le pipeline lui-même (`ExecuteurAppDeploy`) est un théâtre d'étapes — build/scan/provision/deploy ne construisent aucune image et n'appellent jamais `K8sWorkloadReel` (contrairement à `projets`, qui l'appelle réellement pour un service). Le canari (`/deploiements/{id}/canari`) stocke un pourcentage sur l'environnement sans jamais le faire respecter par un routeur. Voir `DEMO-TODO.md`, Ouvert, 2026-09-14. |
 | `domaines-applicatifs` | `/domaines-applicatifs` | `projets` (`router_domaines`) | réel | |
 | `factures` | `/facturation/factures` | `facturation` | persisté | |
 | `souscriptions` | `/facturation/souscriptions` | `facturation` | persisté | |

@@ -49,6 +49,7 @@ import {
   supprimerRessource,
 } from '@/lib/api/client'
 import { useLectureDegradable } from '@/lib/api/degradable'
+import { telechargerCsv } from '@/lib/export'
 import type { Devis, Invoice, MoyenPaiement, Offer, Subscription } from '@/lib/types'
 
 const ONGLETS = [
@@ -252,16 +253,25 @@ export default function Facturation() {
               operation={{
                 action: 'invoice.view',
                 titre: 'Export de la période préparé',
-                detail:
-                  'Consommation jour par jour, souscriptions et ventilation par étiquette, au format CSV et PDF.',
-                // `POST /facturation/consommation/export` → `202 { url }` : le
-                // fichier s’ouvre dès que le backend l’a produit.
+                detail: 'Consommation jour par jour, au format CSV, pour votre tableur.',
+                // `POST /facturation/consommation/export` journalise l’export côté
+                // audit (`202`), mais l’URL qu’il renvoie (`/travaux/{id}/export`)
+                // ne correspond à aucune route réelle — `travaux/router.py` ne sert
+                // que lecture/relance/annulation d’un travail, jamais un fichier.
+                // Un clic ouvrait donc systématiquement un 404. Le navigateur sait
+                // déjà produire ce CSV lui-même à partir des données chargées :
+                // même patron que `DataTable`/`telechargerCsv` ailleurs dans
+                // l’appli, pas de fichier fantôme à faire fabriquer par le serveur.
                 appel: () =>
-                  requete<{ url?: string }>('/facturation/consommation/export', {
+                  requete('/facturation/consommation/export', {
                     methode: 'POST',
                     corps: { periode: periodeConso, format: 'csv', axe: 'famille' },
-                  }).then((r) => {
-                    if (r?.url) window.open(r.url, '_blank', 'noopener')
+                  }).then(() => {
+                    telechargerCsv(
+                      `consommation-${periodeConso}`,
+                      ['Date', 'Montant (FCFA)', 'vCPU-heures'],
+                      joursConso.map((j) => [j.date, j.montant, j.vcpuHeures ?? 0]),
+                    )
                   }),
               }}
             />
@@ -332,23 +342,41 @@ export default function Facturation() {
         />
         <StatTile
           libelle="Engagement mensuel"
-          valeur={masque(money(SYNTHESE_CLIENT.depenseMois))}
+          // `abonnements` vient déjà du backend en mode API (`useCollection`
+          // plus haut) : sommer les souscriptions réelles plutôt que relire
+          // `SYNTHESE_CLIENT.depenseMois` (mock) évite l’incohérence vue en
+          // direct sur dev01 — « 214 500 FCFA » affiché à côté de « 0
+          // souscriptions actives » pour une organisation qui n’en a aucune.
+          valeur={masque(money(abonnements.reduce((a, s) => a + somme(s), 0)))}
           detail={`${abonnements.length} souscriptions actives`}
         />
         <StatTile
           libelle="Variation sur 30 jours"
-          valeur={masque(
-            `+ ${pct(
-              Math.round(
-                ((SYNTHESE_CLIENT.depenseMois - SYNTHESE_CLIENT.depenseMoisPrecedent) /
-                  SYNTHESE_CLIENT.depenseMoisPrecedent) *
-                  1000,
-              ) / 10,
-              1,
-            )}`,
-          )}
-          ton="warn"
-          detail="Croissance du stockage objet et d’un nouveau service"
+          // Le backend ne renvoie pas encore de total du mois précédent
+          // (`totalMoisPrecedent` reste à `0` dans `metrologie.consommation`) :
+          // afficher une variation calculée sur le mock en mode API la
+          // ferait passer pour un fait. Masqué plutôt que fabriqué, même
+          // discipline que les autres champs sans contrepartie backend.
+          valeur={
+            consommationDistante
+              ? '—'
+              : masque(
+                  `+ ${pct(
+                    Math.round(
+                      ((SYNTHESE_CLIENT.depenseMois - SYNTHESE_CLIENT.depenseMoisPrecedent) /
+                        SYNTHESE_CLIENT.depenseMoisPrecedent) *
+                        1000,
+                    ) / 10,
+                    1,
+                  )}`,
+                )
+          }
+          ton={consommationDistante ? 'neutral' : 'warn'}
+          detail={
+            consommationDistante
+              ? 'Non disponible : le mois précédent n’est pas encore comparé.'
+              : 'Croissance du stockage objet et d’un nouveau service'
+          }
         />
       </div>
 
@@ -402,7 +430,11 @@ export default function Facturation() {
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
                     {masque(money(Math.max(0, ...joursConso.map((j) => j.montant))))}
                   </p>
-                  <p className="text-[10.5px] text-g-500">Restauration de test du 19 août</p>
+                  {/* Anecdote propre au jeu de données maquette : n'a aucun sens une fois
+                      les vraies journées de consommation chargées. */}
+                  {!consommationDistante && (
+                    <p className="text-[10.5px] text-g-500">Restauration de test du 19 août</p>
+                  )}
                 </div>
                 <div>
                   <MicroLabel className="text-g-500">vCPU-heures cumulées</MicroLabel>
@@ -411,11 +443,19 @@ export default function Facturation() {
                   </p>
                 </div>
                 <div>
-                  <MicroLabel className="text-g-500">Prorata au 19 août</MicroLabel>
+                  <MicroLabel className="text-g-500">
+                    {consommationDistante ? 'Consommé à date' : 'Prorata au 19 août'}
+                  </MicroLabel>
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
-                    {masque(money(prorata(SYNTHESE_CLIENT.depenseMois, 19)))}
+                    {masque(
+                      money(consommationDistante ? consommeMois : prorata(SYNTHESE_CLIENT.depenseMois, 19)),
+                    )}
                   </p>
-                  <p className="text-[10.5px] text-g-500">Sur 31 jours</p>
+                  <p className="text-[10.5px] text-g-500">
+                    {consommationDistante
+                      ? `Sur ${joursConso.length} jour${joursConso.length > 1 ? 's' : ''} relevés`
+                      : 'Sur 31 jours'}
+                  </p>
                 </div>
               </div>
             </Card>

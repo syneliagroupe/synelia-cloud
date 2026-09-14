@@ -133,6 +133,12 @@ export default function Catalogue() {
       appel: () =>
         edition
           ? modifierRessource('/admin/catalogue/offres', edition.id, {
+              // `OffreCreation` sert aussi de corps de PATCH côté backend :
+              // `code` et `categorie` y sont obligatoires, les omettre fait
+              // échouer la modification en 422 (« Field required ») alors que
+              // l'écran semble avoir enregistré.
+              code: champs.code,
+              categorie: champs.categorie,
               nom: champs.nom,
               specs: champs.specs,
               caracteristiques: champs.caracteristiques,

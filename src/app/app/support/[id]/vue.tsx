@@ -705,12 +705,13 @@ export function VueTicket({ id }: { id: string }) {
                 sousTitre="Sur les mêmes ressources, ou avec un symptôme proche."
               />
               <div className="space-y-1.5">
-                {TICKETS.filter(
-                  (x) =>
-                    x.id !== t.id &&
-                    (x.service === t.service ||
-                      x.ressourcesLiees.some((r) => t.ressourcesLiees.includes(r))),
-                )
+                {tickets.items
+                  .filter(
+                    (x) =>
+                      x.id !== t.id &&
+                      (x.service === t.service ||
+                        x.ressourcesLiees.some((r) => t.ressourcesLiees.includes(r))),
+                  )
                   .slice(0, 4)
                   .map((x) => (
                     <Link
@@ -732,7 +733,7 @@ export function VueTicket({ id }: { id: string }) {
                     </Link>
                   ))}
               </div>
-              {TICKETS.filter(
+              {tickets.items.filter(
                 (x) =>
                   x.id !== t.id &&
                   (x.service === t.service ||

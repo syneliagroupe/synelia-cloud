@@ -429,31 +429,38 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                   }
                 }}
               />
-              <BoutonAction
-                libelle="Réinitialiser"
-                variant="ghost"
-                icone={<RotateCcw size={12} />}
-                operation={{
-                  action: 'network.manage',
-                  ton: 'warn',
-                  titre: `Zone ${zone.domaine} réinitialisée`,
-                  detail: 'La zone revient au dernier point de reprise publié.',
-                  effet: () =>
-                    zones.modifier(zone.id, () => ({
-                      enregistrements:
-                        ZONES_DNS.find((z) => z.id === zone.id)?.enregistrements ?? [],
-                    })),
-                }}
-                confirmation={{
-                  ressource: zone.domaine,
-                  titre: 'Réinitialiser la zone ?',
-                  pertes: [
-                    'Toutes les modifications non publiées seront perdues',
-                    'La zone revient à son dernier point de reprise',
-                  ],
-                  libelleAction: 'Réinitialiser la zone',
-                }}
-              />
+              {/* Aucun endpoint backend n'a de notion de « point de reprise » sur une zone
+                  Designate réelle — `zones.modifier` sans `appel` déclenchait un `PATCH
+                  /web/dns/{id}` inexistant (405, avalé par `.then(recharger, recharger)`)
+                  tout en affichant un succès : un faux succès en mode API. Réservé à la
+                  maquette, où ce point de reprise existe vraiment (la graine importée). */}
+              {!estActif() && (
+                <BoutonAction
+                  libelle="Réinitialiser"
+                  variant="ghost"
+                  icone={<RotateCcw size={12} />}
+                  operation={{
+                    action: 'network.manage',
+                    ton: 'warn',
+                    titre: `Zone ${zone.domaine} réinitialisée`,
+                    detail: 'La zone revient au dernier point de reprise publié.',
+                    effet: () =>
+                      zones.modifier(zone.id, () => ({
+                        enregistrements:
+                          ZONES_DNS.find((z) => z.id === zone.id)?.enregistrements ?? [],
+                      })),
+                  }}
+                  confirmation={{
+                    ressource: zone.domaine,
+                    titre: 'Réinitialiser la zone ?',
+                    pertes: [
+                      'Toutes les modifications non publiées seront perdues',
+                      'La zone revient à son dernier point de reprise',
+                    ],
+                    libelleAction: 'Réinitialiser la zone',
+                  }}
+                />
+              )}
             </div>
           </div>
 
@@ -732,14 +739,9 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
               titre="Délégation d’un sous-domaine"
               sousTitre="Confier un sous-domaine à d’autres serveurs de noms — par exemple pour un service tiers ou une filiale."
             />
-            <div className="space-y-4">
-              <Field label="Sous-domaine" hint={`sera délégué sous ${zone.domaine}`}>
-                <Input placeholder="labs" />
-              </Field>
-              <Field label="Serveurs de noms cibles" hint="un par ligne">
-                <MonoTextarea rows={3} placeholder={'ns1.exemple-tiers.com\nns2.exemple-tiers.com'} />
-              </Field>
-            </div>
+            {/* Pas de champs affichés ici : le formulaire (mêmes deux champs) est dans la
+                modale ouverte par le bouton — deux jeux de champs pour une seule action
+                aurait laissé le premier saisi puis ignoré au clic. */}
             <GatedAction autorise={autorise('network.manage')} message={refus('network.manage')}>
               <BoutonFormulaire
                 libelle="Créer la délégation"

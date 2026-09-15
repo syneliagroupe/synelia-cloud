@@ -1177,6 +1177,15 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
                       <BoutonAction
                         libelle="Tester"
                         variant="ghost"
+                        // Le contrat n'expose aucun appel de test de webhook (aucune route
+                        // `POST /web/smtp/webhooks/{id}/test`) : en mode API ce bouton n'avait
+                        // ni `appel` ni `effet`, il affichait quand même « Appel de test
+                        // envoyé » sans rien envoyer — un bouton inerte qui ment sur son
+                        // résultat, contraire à la règle « aucun bouton inerte ». Désactivé en
+                        // mode API en attendant que le backend l'expose ; la simulation reste
+                        // en mode maquette.
+                        desactive={api}
+                        nomAccessible={api ? "Test de webhook non exposé par l'API" : undefined}
                         operation={{
                           action: 'secrets.update',
                           ton: 'info',

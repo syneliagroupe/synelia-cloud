@@ -217,12 +217,12 @@ export default function StockageObjet() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatTile libelle="Buckets" valeur={BUCKETS.length} />
+        <StatTile libelle="Buckets" valeur={seaux.items.length} />
         <StatTile libelle="Volume stocké" valeur={goHumain(total)} />
         <StatTile libelle="Objets" valeur={num(objets)} />
         <StatTile
           libelle="Buckets protégés WORM"
-          valeur={BUCKETS.filter((b) => b.objectLock?.actif).length}
+          valeur={seaux.items.filter((b) => b.objectLock?.actif).length}
           ton="ok"
           detail="Anti-rançongiciel"
         />

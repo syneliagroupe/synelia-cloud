@@ -17,6 +17,7 @@ import { LogPeek } from '@/components/business/observabilite'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource } from '@/lib/api/client'
 import { CHAMPS_CLE, type CleS3 } from '../cles'
 
 interface Entree {
@@ -86,6 +87,12 @@ export function VueBucket({ id }: { id: string }) {
   const entrees = useCollection<Entree>(`objets-${id}`, ARBORESCENCE)
   const regles = useCollection<RegleCycle>(`cycle-${id}`, REGLES_CYCLE)
   const [onglet, setOnglet] = useState('objets')
+  /** Identifiants renvoyés une seule fois à la création d’une clé S3. */
+  const [secretS3, setSecretS3] = useState<{
+    accessKeyId: string
+    secret: string
+    endpoint: string
+  } | null>(null)
 
   const bucket = seaux.items.find((b) => b.id === id)
 
@@ -736,6 +743,33 @@ export function VueBucket({ id }: { id: string }) {
                   operation={(v) => ({
                     titre: `Clé ${v.nom} créée`,
                     detail: 'Conservez la valeur secrète maintenant : elle ne sera plus affichée.',
+                    // Le backend exige `droits` dans son vocabulaire ; le
+                    // libellé du formulaire y est traduit ici — même patron
+                    // que la création de clé depuis la liste des buckets.
+                    appel: () =>
+                      creerRessource('/cles-s3', {
+                        nom: String(v.nom),
+                        buckets: [bucket.nom],
+                        droits:
+                          v.portee === 'lecture'
+                            ? 'lecture'
+                            : v.portee === 'ecriture'
+                              ? 'lecture_ecriture'
+                              : 'lecture_ecriture',
+                      }).then((reponse) => {
+                        const r = reponse as {
+                          accessKeyId?: unknown
+                          secretAccessKey?: unknown
+                          endpoint?: unknown
+                        } | null
+                        if (r && typeof r.secretAccessKey === 'string')
+                          setSecretS3({
+                            accessKeyId: String(r.accessKeyId ?? ''),
+                            secret: String(r.secretAccessKey),
+                            endpoint: String(r.endpoint ?? ''),
+                          })
+                        return reponse
+                      }),
                     effet: () =>
                       cles.creer({
                         id: cles.identifiant('ak'),
@@ -744,6 +778,7 @@ export function VueBucket({ id }: { id: string }) {
                         creee: MAINTENANT.slice(0, 10),
                         derniereUtilisation: MAINTENANT,
                       }),
+                    effetFinal: () => cles.recharger(),
                   })}
                 />
               }
@@ -804,6 +839,29 @@ export function VueBucket({ id }: { id: string }) {
               une nouvelle clé. Ce n’est pas une contrainte arbitraire — un secret récupérable est un
               secret compromis dès qu’un accès en lecture au portail est obtenu.
             </Callout>
+            {secretS3 && (
+              <div className="mt-3 rounded-[8px] border border-err/40 bg-err-bg px-3.5 py-3">
+                <p className="text-[12.5px] font-bold text-ink">
+                  Copiez ces identifiants maintenant — le secret ne sera plus jamais affiché
+                </p>
+                <p className="mt-1 font-mono text-[12px] break-all text-ink">
+                  {secretS3.accessKeyId} · {secretS3.secret}
+                </p>
+                {secretS3.endpoint && (
+                  <p className="mt-0.5 font-mono text-[11.5px] break-all text-g-700">
+                    {secretS3.endpoint}
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2"
+                  onClick={() => setSecretS3(null)}
+                >
+                  Je les ai copiés, masquer
+                </Button>
+              </div>
+            )}
           </Card>
 
           <Card>

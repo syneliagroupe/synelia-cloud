@@ -18,7 +18,7 @@ import { MAINTENANT } from '@/lib/format'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Avatar, GatedAction, Tabs } from '@/components/ui/display'
-import { Field, Input, Select, Switch } from '@/components/ui/field'
+import { Field, Input, Select, Switch, Textarea } from '@/components/ui/field'
 import { ConfirmDialog, Drawer, Modal, Tooltip } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
@@ -100,6 +100,7 @@ export default function Membres() {
   const [invitePortee, setInvitePortee] = useState('org')
   const [inviteMfa, setInviteMfa] = useState(true)
   const [inviteMessage, setInviteMessage] = useState(false)
+  const [inviteMessageTexte, setInviteMessageTexte] = useState('')
   const [attribMembre, setAttribMembre] = useState('')
   const [attribRole, setAttribRole] = useState<Role>('project_owner')
   const [attribPortee, setAttribPortee] = useState('org')
@@ -125,7 +126,11 @@ export default function Membres() {
         ? 'Toute l’organisation'
         : (() => {
             const espace = ESPACES_LUS.find((e) => e.id === m.scopeId)
-            return espace ? `Espace ${espace.code}` : m.scopeType
+            // `scopeId` peut viser un Espace disparu (recréé sous un autre
+            // identifiant, supprimé) : afficher `m.scopeType` tel quel
+            // montrerait le nom technique interne (« espace ») au lieu d’une
+            // portée lisible.
+            return espace ? `Espace ${espace.code}` : 'Espace introuvable'
           })()),
     mfa: u.mfaEnabled,
     source: u.idpSource,
@@ -420,24 +425,42 @@ export default function Membres() {
           <Card>
             <CardHeader
               titre="Invitations acceptées récemment"
-              sousTitre="Trente derniers jours."
+              sousTitre={
+                estActif()
+                  ? 'Le backend ne date pas l’acceptation : les plus récemment créées d’abord.'
+                  : 'Trente derniers jours.'
+              }
             />
             <div className="space-y-1.5">
-              {[
-                { email: 'k.toure@dba.africa', role: 'app_admin' as Role, quand: '2026-08-02T09:14:00Z' },
-                { email: 'm.diallo@dba.africa', role: 'billing_admin' as Role, quand: '2026-07-28T16:41:00Z' },
-                { email: 'audit@partenaire.com', role: 'read_only' as Role, quand: '2026-07-24T11:08:00Z' },
-              ].map((i) => (
+              {/* En mode API, `GET /invitations` renvoie un vrai `statut`
+                  (dont « acceptee », posé par `POST /auth/invitations/{jeton}`) :
+                  on le lit au lieu d’une liste de noms fixes qui ne
+                  correspondraient à aucune invitation réellement acceptée. */}
+              {(estActif()
+                ? invitations.items
+                    .filter((i) => i.statut === 'acceptee')
+                    .slice(0, 5)
+                    .map((i) => ({ id: i.id, email: i.email, role: i.role, quand: undefined }))
+                : [
+                    { id: 'a1', email: 'k.toure@dba.africa', role: 'app_admin' as Role, quand: '2026-08-02T09:14:00Z' },
+                    { id: 'a2', email: 'm.diallo@dba.africa', role: 'billing_admin' as Role, quand: '2026-07-28T16:41:00Z' },
+                    { id: 'a3', email: 'audit@partenaire.com', role: 'read_only' as Role, quand: '2026-07-24T11:08:00Z' },
+                  ]
+              ).map((i) => (
                 <div
-                  key={i.email}
+                  key={i.id}
                   className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
                 >
                   <span className="min-w-0 text-[12px] text-ink">{i.email}</span>
                   <span className="shrink-0 text-[10.5px] text-g-500">
-                    {ROLE_LABEL[i.role]} · {dateCourte(i.quand)}
+                    {ROLE_LABEL[i.role]}
+                    {i.quand ? ` · ${dateCourte(i.quand)}` : ''}
                   </span>
                 </div>
               ))}
+              {estActif() && invitations.items.filter((i) => i.statut === 'acceptee').length === 0 && (
+                <p className="text-[11.5px] text-g-500">Aucune invitation acceptée pour l’instant.</p>
+              )}
             </div>
             <ButtonLink size="sm" variant="ghost" className="mt-3" href="/app/securite">
               Voir le journal d’audit
@@ -744,6 +767,7 @@ export default function Membres() {
                       role: inviteRole,
                       scopeType: invitePortee === 'org' ? 'org' : 'espace',
                       scopeId: invitePortee === 'org' ? undefined : invitePortee,
+                      message: inviteMessage && inviteMessageTexte.trim() ? inviteMessageTexte.trim() : undefined,
                     }),
                   effet: () =>
                     invitations.creer({
@@ -756,6 +780,8 @@ export default function Membres() {
                   effetFinal: () => invitations.recharger(),
                 })
                 setInviteEmail('')
+                setInviteMessage(false)
+                setInviteMessageTexte('')
                 setInvitation(false)
               }}
             >
@@ -804,6 +830,15 @@ export default function Membres() {
               onChange={setInviteMessage}
               label="Ajouter un message personnalisé à l’invitation"
             />
+            {inviteMessage && (
+              <Field label="Message" hint="ajouté au courriel d’invitation, avant le lien">
+                <Textarea
+                  value={inviteMessageTexte}
+                  onChange={(e) => setInviteMessageTexte(e.target.value)}
+                  placeholder="Bienvenue dans l’équipe — n’hésite pas si tu as des questions."
+                />
+              </Field>
+            )}
           </div>
           <Callout ton="info" titre="Ce que la personne recevra">
             Un courriel avec un lien vers notre fournisseur d’identité, où elle choisira son mot de
@@ -930,6 +965,18 @@ export default function Membres() {
                   ton: 'warn',
                   titre: `Sessions de ${membreDetail.nom} fermées`,
                   detail: 'La personne devra se reconnecter sur tous ses appareils.',
+                  // `member.invite` gère l'appartenance ; la fermeture de session
+                  // relève de `GET`/`DELETE /securite/sessions`
+                  // (`sso.configure`, que les rôles autorisés ici possèdent aussi).
+                  appel: async () => {
+                    const userId = adhesions.items.find((m) => m.id === membreDetail.id)?.userId
+                    if (!userId) return
+                    const { donnees } = await requete<{ donnees: { id: string }[] }>(
+                      '/securite/sessions',
+                      { query: { userId, parPage: 200 } },
+                    )
+                    await Promise.all(donnees.map((s) => supprimerRessource('/securite/sessions', s.id)))
+                  },
                 }}
               />
             </div>

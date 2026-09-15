@@ -232,7 +232,7 @@ collection par collection — seuls les points déjà vérifiés lors des passes
 | `impayes` | `/admin/facturation/impayes` | `admin` | persisté | |
 | `agents-ia` | `/ia/agents` | `ia_agents` | réel | LiteLLM/OpenRouter. |
 | `modeles-ia` | `/ia/modeles` | `ia_agents` | persisté (catalogue) | Seuls les modèles `invocable: true` sont réellement appelés via LiteLLM/OpenRouter à l'exécution. |
-| `connaissances-ia` | `/ia/connaissances` | `ia_agents` (`connaissances.py`) | simulé côté backend, sauf `SYNELIA_QDRANT_URL` définie | Le code se déclare explicitement « réel seulement si `SYNELIA_QDRANT_URL` est défini... sans cette variable, tout reste simulé et sans réseau » (docstring du fichier). Présence de la variable sur dev01 : à vérifier. |
+| `connaissances-ia` | `/ia/connaissances` | `ia_agents` (`connaissances.py`) | réel sur dev01 | Le code se déclare explicitement « réel seulement si `SYNELIA_QDRANT_URL` est défini... sans cette variable, tout reste simulé et sans réseau » (docstring du fichier). Vérifié en direct (2026-09-15) : `SYNELIA_QDRANT_URL`/`SYNELIA_DOCLING_URL`/`SYNELIA_EMBEDDINGS_URL` sont bien définies sur le conteneur `synelia-backend-dev01-api-1` (`docker inspect`), les conteneurs `qdrant`/`docling`/`infinity` tournent — pipeline Docling → BGE-M3 → Qdrant réel, pas simulé. |
 | `flux-ia` | `/ia/flux` | `ia_agents` (`flux.py`) | réel | Passerelle LiteLLM + recherche documentaire. |
 | `cles-ia` | `/ia/cles` | `ia_agents` | réel | Gestion de clés côté LiteLLM. |
 | `parc-instances` | `/admin/marketplace/instances` | `admin` | persisté | Inventaire, lecture seule. |

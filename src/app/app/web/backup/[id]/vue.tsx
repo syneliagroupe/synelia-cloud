@@ -4,8 +4,14 @@ import { useState } from 'react'
 import { Download, Lock, Play, RotateCcw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, dateHeure, relatif } from '@/lib/format'
-import { SITE_LABEL } from '@/lib/types'
-import { SAUVEGARDES_WEB, hebergementById, sauvegardeWebById, type SauvegardeWeb } from '@/lib/mock'
+import { SITE_LABEL, type WebHosting } from '@/lib/types'
+import {
+  HEBERGEMENTS,
+  SAUVEGARDES_WEB,
+  hebergementById,
+  sauvegardeWebById,
+  type SauvegardeWeb,
+} from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
@@ -15,7 +21,7 @@ import { StatTile } from '@/components/composition/metrics'
 import { Stepper } from '@/components/composition/flow'
 import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
-import { BoutonAction } from '@/components/app/actions'
+import { BoutonAction, useOperation } from '@/components/app/actions'
 import { estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
@@ -47,12 +53,15 @@ export function VueSauvegarde({ id }: { id: string }) {
   const [perimetre, setPerimetre] = useState('Une application')
   const [pointChoisi, setPointChoisi] = useState<string | null>(null)
   const [destination, setDestination] = useState('À côté, sur le même serveur')
-  const [immuable, setImmuable] = useState(true)
+  const executer = useOperation()
 
   const collection = useCollection<SauvegardeWeb>('sauvegardes-web', SAUVEGARDES_WEB)
+  const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
   const p = estActif() ? collection.items.find((s) => s.id === id) : sauvegardeWebById(id)
   if (!p) return null
-  const h = hebergementById(p.hebergementId)
+  const h = estActif()
+    ? hebergements.items.find((x) => x.id === p.hebergementId)
+    : hebergementById(p.hebergementId)
   const dernier = p.executions[0]
 
   return (
@@ -257,17 +266,66 @@ export function VueSauvegarde({ id }: { id: string }) {
             />
             <div className="space-y-3">
               <Field label="Fréquence">
-                <Select defaultValue={p.frequence}>
+                <Select
+                  defaultValue={p.frequence}
+                  onChange={(e) =>
+                    executer({
+                      action: 'backup.plan.write',
+                      titre: `Fréquence changée : ${e.target.value}`,
+                      detail: `${p.nomServi} passe en sauvegarde ${e.target.value}.`,
+                      appel: () =>
+                        requete(`/web/backup/${encodeURIComponent(p.id)}`, {
+                          methode: 'PATCH',
+                          corps: { frequence: e.target.value },
+                        }),
+                      effet: () => collection.modifier(p.id, { frequence: e.target.value as SauvegardeWeb['frequence'] }),
+                      effetFinal: () => collection.recharger(),
+                    })
+                  }
+                >
                   <option value="quotidienne">Quotidienne</option>
                   <option value="bihebdomadaire">Deux fois par semaine</option>
                   <option value="hebdomadaire">Hebdomadaire</option>
                 </Select>
               </Field>
               <Field label="Heure" hint="hors heures de trafic">
-                <Input defaultValue={p.heure} />
+                <Input
+                  defaultValue={p.heure}
+                  onBlur={(e) => {
+                    if (e.target.value === p.heure) return
+                    executer({
+                      action: 'backup.plan.write',
+                      titre: `Heure changée : ${e.target.value}`,
+                      detail: `${p.nomServi} s’exécute désormais à ${e.target.value}.`,
+                      appel: () =>
+                        requete(`/web/backup/${encodeURIComponent(p.id)}`, {
+                          methode: 'PATCH',
+                          corps: { heure: e.target.value },
+                        }),
+                      effet: () => collection.modifier(p.id, { heure: e.target.value }),
+                      effetFinal: () => collection.recharger(),
+                    })
+                  }}
+                />
               </Field>
               <Field label="Rétention" hint="au-delà, les copies sont détruites automatiquement">
-                <Select defaultValue={String(p.retentionJours)}>
+                <Select
+                  defaultValue={String(p.retentionJours)}
+                  onChange={(e) =>
+                    executer({
+                      action: 'backup.plan.write',
+                      titre: `Rétention changée : ${e.target.value} jours`,
+                      detail: `${p.nomServi} conserve désormais ${e.target.value} jours de copies.`,
+                      appel: () =>
+                        requete(`/web/backup/${encodeURIComponent(p.id)}`, {
+                          methode: 'PATCH',
+                          corps: { retentionJours: Number(e.target.value) },
+                        }),
+                      effet: () => collection.modifier(p.id, { retentionJours: Number(e.target.value) }),
+                      effetFinal: () => collection.recharger(),
+                    })
+                  }
+                >
                   <option value="7">7 jours</option>
                   <option value="14">14 jours</option>
                   <option value="30">30 jours</option>
@@ -306,8 +364,21 @@ export function VueSauvegarde({ id }: { id: string }) {
               className="mt-3"
               label="Copies immuables"
               description="Une copie écrite ne peut plus être altérée avant la fin de sa rétention, même par un compte administrateur compromis."
-              checked={immuable}
-              onChange={setImmuable}
+              checked={p.immuable}
+              onChange={(valeur) =>
+                executer({
+                  action: 'backup.plan.write',
+                  titre: valeur ? 'Copies immuables activées' : 'Copies immuables désactivées',
+                  detail: `${p.nomServi} : ${valeur ? 'les copies écrites deviennent verrouillées jusqu’à la fin de leur rétention.' : 'les copies redeviennent modifiables.'}`,
+                  appel: () =>
+                    requete(`/web/backup/${encodeURIComponent(p.id)}`, {
+                      methode: 'PATCH',
+                      corps: { immuable: valeur },
+                    }),
+                  effet: () => collection.modifier(p.id, { immuable: valeur }),
+                  effetFinal: () => collection.recharger(),
+                })
+              }
             />
             <KeyValueList
               className="mt-3 border-t border-g-100 pt-3"

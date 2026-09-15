@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { Download, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
 import { dateCourte, num, pct } from '@/lib/format'
-import { LOAD_BALANCERS, LOGS_EXECUTION, VMS, espaceById } from '@/lib/mock'
-import type { LoadBalancer, VM } from '@/lib/types'
+import { ESPACES, LOAD_BALANCERS, LOGS_EXECUTION, VMS } from '@/lib/mock'
+import type { EspaceCloud, LoadBalancer, VM } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -55,6 +55,7 @@ export function VueLb({ id }: { id: string }) {
   const executer = useOperation()
   const lbs = useCollection<LoadBalancer>('load-balancers', LOAD_BALANCERS)
   const parc = useCollection<VM>('vms', VMS)
+  const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const exceptions = useCollection<Exception>(`waf-exceptions-${id}`, EXCEPTIONS_GRAINE)
   const [onglet, setOnglet] = useState('apercu')
   /**
@@ -84,7 +85,7 @@ export function VueLb({ id }: { id: string }) {
   }, [id])
 
   const lb = lbs.items.find((l) => l.id === id)
-  const espace = lb ? espaceById(lb.espaceId) : undefined
+  const espace = lb ? espaces.items.find((e) => e.id === lb.espaceId) : undefined
 
   if (!lb) {
     return (

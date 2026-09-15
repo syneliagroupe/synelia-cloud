@@ -5,8 +5,8 @@ import { Download, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
 import { dateCourte, goHumain, num, pct } from '@/lib/format'
 import { SITE_LABEL, ROLE_LABEL, type Role } from '@/lib/types'
-import { K8S_CLUSTERS, espaceById } from '@/lib/mock'
-import type { K8sCluster } from '@/lib/types'
+import { ESPACES, K8S_CLUSTERS } from '@/lib/mock'
+import type { EspaceCloud, K8sCluster } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -91,6 +91,7 @@ export function VueCluster({ id }: { id: string }) {
   const { autorise, refus, pousser, api } = useApp()
   const executer = useOperation()
   const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const [onglet, setOnglet] = useState('apercu')
   /** Brouillons d'édition des pools, par nom de pool. */
   const [brouillons, setBrouillons] = useState<
@@ -127,7 +128,7 @@ export function VueCluster({ id }: { id: string }) {
   const uniteK8s = (metrique: string) => metriquesK8s?.find((s) => s.metrique === metrique)?.unite
 
   const cluster = grappes.items.find((c) => c.id === id)
-  const espace = cluster ? espaceById(cluster.espaceId) : undefined
+  const espace = cluster ? espaces.items.find((e) => e.id === cluster.espaceId) : undefined
 
   if (!cluster) {
     return (
@@ -700,28 +701,28 @@ users:
                     disabled={!brouillons[p.nom]}
                     onClick={() => {
                       const b = brouillons[p.nom] ?? {}
+                      const pool = {
+                        ...p,
+                        nodes: b.nodes ?? p.nodes,
+                        diskGo: b.disk ?? p.diskGo,
+                        autoscale: p.autoscale
+                          ? { min: b.min ?? p.autoscale.min, max: b.max ?? p.autoscale.max }
+                          : undefined,
+                      }
                       executer({
                         action: 'espace.quota.update',
                         titre: `Pool ${p.nom} redimensionné`,
                         detail: `${b.nodes ?? p.nodes} nœuds · ${b.disk ?? p.diskGo ?? 100} Go par nœud`,
+                        appel: () =>
+                          requete(
+                            `/kubernetes/${encodeURIComponent(cluster.id)}/pools/${encodeURIComponent(p.nom)}`,
+                            { methode: 'PATCH', corps: pool },
+                          ),
                         effet: () =>
                           grappes.modifier(cluster.id, (c) => ({
-                            pools: c.pools.map((x) =>
-                              x.nom === p.nom
-                                ? {
-                                    ...x,
-                                    nodes: b.nodes ?? x.nodes,
-                                    diskGo: b.disk ?? x.diskGo,
-                                    autoscale: x.autoscale
-                                      ? {
-                                          min: b.min ?? x.autoscale.min,
-                                          max: b.max ?? x.autoscale.max,
-                                        }
-                                      : undefined,
-                                  }
-                                : x,
-                            ),
+                            pools: c.pools.map((x) => (x.nom === p.nom ? pool : x)),
                           })),
+                        effetFinal: () => grappes.recharger(),
                       })
                       setBrouillons((prev) => {
                         const suite = { ...prev }
@@ -739,7 +740,13 @@ users:
                     action: 'espace.quota.update',
                     ton: 'info',
                     titre: `Mise à jour progressive du pool ${p.nom}`,
+                    appel: () =>
+                      requete(
+                        `/kubernetes/${encodeURIComponent(cluster.id)}/pools/${encodeURIComponent(p.nom)}`,
+                        { methode: 'PATCH', corps: p },
+                      ),
                     job: { workflow: 'k8s.pool.roll', cible: `${cluster.nom} · ${p.nom}` },
+                    effetFinal: () => grappes.recharger(),
                   }}
                 />
                 <IconButton
@@ -953,10 +960,16 @@ users:
                         action: 'espace.quota.update',
                         ton: 'warn',
                         titre: `${nom} retiré du cluster`,
+                        appel: () =>
+                          requete(`/kubernetes/${encodeURIComponent(cluster.id)}/modules`, {
+                            methode: 'PUT',
+                            corps: { modules: cluster.modules.filter((x) => x !== m) },
+                          }),
                         effet: () =>
                           grappes.modifier(cluster.id, (c) => ({
                             modules: c.modules.filter((x) => x !== m),
                           })),
+                        effetFinal: () => grappes.recharger(),
                       }}
                       confirmation={{
                         ressource: nom,

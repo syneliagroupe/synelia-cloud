@@ -2,20 +2,20 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import QRCode from 'qrcode'
-import { KeyRound, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
+import { KeyRound, Lock, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CopyField } from '@/components/ui/display'
-import { Switch } from '@/components/ui/field'
+import { Field, Input, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { SkeletonCards } from '@/components/composition/states'
-import { BoutonAction } from '@/components/app/actions'
+import { BoutonAction, useOperation } from '@/components/app/actions'
 import { useApp } from '@/components/app/contexte'
 import { ApiError, estActif, requete } from '@/lib/api/client'
 
-/** `GET /moi` : seul le champ `mfaEnabled` intéresse cet écran. */
+/** `GET /moi` : récupère les détails complets du compte. */
 interface MoiReponse {
-  utilisateur: { mfaEnabled: boolean }
+  utilisateur: { mfaEnabled: boolean; nom: string; fonction?: string }
 }
 
 /** `POST /moi/mfa` : secret et codes de secours, renvoyés une seule fois. */
@@ -37,6 +37,18 @@ export default function MonCompte() {
   const [qr, setQr] = useState<string | null>(null)
   const [sauvegarde, setSauvegarde] = useState(false)
 
+  const [actuel, setActuel] = useState('')
+  const [nouveau, setNouveau] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [erreurMotDePasse, setErreurMotDePasse] = useState<string | null>(null)
+
+  const [nom, setNom] = useState('')
+  const [fonction, setFonction] = useState('')
+  const [telephone, setTelephone] = useState('')
+  const [erreurInfos, setErreurInfos] = useState<string | null>(null)
+
+  const executer = useOperation()
+
   const charger = useCallback(() => {
     if (!api) return
     setChargement(true)
@@ -44,7 +56,19 @@ export default function MonCompte() {
     requete<MoiReponse>('/moi').then(
       (r) => {
         setMfaActif(r.utilisateur.mfaEnabled)
+        setNom(r.utilisateur.nom)
+        setFonction(r.utilisateur.fonction || '')
         setChargement(false)
+        // Load telephone from preferences
+        requete<{ telephone?: string }>('/moi/preferences').then(
+          (prefs) => {
+            setTelephone(prefs.telephone || '')
+          },
+          () => {
+            // Silently fail - preferences are optional
+            setTelephone('')
+          },
+        )
       },
       (e: unknown) => {
         setErreur(
@@ -119,6 +143,132 @@ export default function MonCompte() {
               </Button>
             </div>
           </div>
+        </Card>
+      )}
+
+      {api && !chargement && !erreur && (
+        <Card>
+          <CardHeader titre="Mot de passe" sousTitre="Change le mot de passe de votre propre compte." />
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault()
+              setErreurMotDePasse(null)
+              if (nouveau !== confirmation) {
+                setErreurMotDePasse('La confirmation ne correspond pas au nouveau mot de passe.')
+                return
+              }
+              executer({
+                titre: 'Mot de passe changé',
+                detail: 'Utilisez-le dès votre prochaine connexion.',
+                appel: () =>
+                  requete('/moi/mot-de-passe', {
+                    methode: 'PUT',
+                    corps: { actuel, nouveau },
+                  }),
+                onErreur: (e) => setErreurMotDePasse(e.champs?.actuel ?? e.champs?.nouveau ?? e.message),
+                effetFinal: () => {
+                  setActuel('')
+                  setNouveau('')
+                  setConfirmation('')
+                },
+              })
+            }}
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="Mot de passe actuel">
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  value={actuel}
+                  onChange={(e) => setActuel(e.target.value)}
+                />
+              </Field>
+              <Field label="Nouveau mot de passe" hint="8 caractères minimum">
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={nouveau}
+                  onChange={(e) => setNouveau(e.target.value)}
+                />
+              </Field>
+              <Field label="Confirmer le nouveau mot de passe">
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmation}
+                  onChange={(e) => setConfirmation(e.target.value)}
+                />
+              </Field>
+            </div>
+            {erreurMotDePasse && <p className="text-[12.5px] font-medium text-err">{erreurMotDePasse}</p>}
+            <Button
+              type="submit"
+              iconBefore={<Lock size={14} />}
+              disabled={actuel.length === 0 || nouveau.length < 8 || confirmation.length === 0}
+            >
+              Changer le mot de passe
+            </Button>
+          </form>
+        </Card>
+      )}
+
+      {api && !chargement && !erreur && (
+        <Card>
+          <CardHeader
+            titre="Informations personnelles"
+            sousTitre="Nom, fonction et numéro de téléphone de votre compte."
+          />
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault()
+              setErreurInfos(null)
+              executer({
+                titre: 'Informations mises à jour',
+                detail: 'Vos informations personnelles ont été enregistrées.',
+                appel: () =>
+                  requete('/moi', {
+                    methode: 'PATCH',
+                    corps: { nom, fonction, telephone },
+                  }),
+                onErreur: (e) => setErreurInfos(e.message),
+                effetFinal: () => {
+                  // Refresh user data
+                  charger()
+                },
+              })
+            }}
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="Nom">
+                <Input
+                  value={nom}
+                  onChange={(e) => setNom(e.target.value)}
+                  placeholder="Votre nom complet"
+                />
+              </Field>
+              <Field label="Fonction" hint="Ex: Chef de projet">
+                <Input
+                  value={fonction}
+                  onChange={(e) => setFonction(e.target.value)}
+                  placeholder="Votre fonction"
+                />
+              </Field>
+              <Field label="Numéro de téléphone" hint="Format international">
+                <Input
+                  type="tel"
+                  value={telephone}
+                  onChange={(e) => setTelephone(e.target.value)}
+                  placeholder="+225 XX XX XX XX"
+                />
+              </Field>
+            </div>
+            {erreurInfos && <p className="text-[12.5px] font-medium text-err">{erreurInfos}</p>}
+            <Button type="submit" disabled={!nom.trim()}>
+              Enregistrer
+            </Button>
+          </form>
         </Card>
       )}
 

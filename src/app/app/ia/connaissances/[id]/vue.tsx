@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Cloud, FolderGit2, Globe, HardDrive, Plus, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateHeure, goHumain, jetons, money, num, pct, relatif } from '@/lib/format'
@@ -17,12 +18,15 @@ import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CodeBlock, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Select, Slider, Switch } from '@/components/ui/field'
+import { Tooltip } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState, ErrorState } from '@/components/composition/states'
 import { PASSERELLE_IA } from '@/lib/mock/ia'
+import { estActif, supprimerRessource } from '@/lib/api/client'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { BoutonAction } from '@/components/app/actions'
 
 const ONGLETS = [
   { id: 'source', label: 'Source & indexation' },
@@ -60,6 +64,7 @@ function coutIndexation(base: BaseConnaissance): number {
 
 export function VueBase({ baseId }: { baseId: string }) {
   const espace = useEspace()
+  const router = useRouter()
   const { autorise, refus, pousser } = useApp()
   const [onglet, setOnglet] = useState('source')
 
@@ -93,9 +98,34 @@ export function VueBase({ baseId }: { baseId: string }) {
         titre={base.nom}
         sousTitre={`${base.source.libelle} · ${num(base.documents)} documents, ${num(base.fragments)} fragments. Nous lisons la source là où elle vit et n’en gardons que les vecteurs.`}
         actions={
-          <GatedAction autorise={peutEcrire} message={refus('ia.knowledge.write')}>
-            <Button iconBefore={<Plus size={14} />}>Créer une base</Button>
-          </GatedAction>
+          <>
+            <BoutonAction
+              libelle="Supprimer"
+              variant="ghost"
+              operation={{
+                action: 'ia.knowledge.write',
+                ton: 'warn',
+                titre: `Base « ${base.nom} » supprimée`,
+                appel: () => supprimerRessource('/ia/connaissances', base.id, base.nom),
+                effet: () => basesCol.supprimer(base.id),
+                effetFinal: () => {
+                  basesCol.recharger()
+                  router.push('/app/ia/connaissances')
+                },
+              }}
+              confirmation={{
+                ressource: base.nom,
+                pertes: [
+                  `Les ${num(base.fragments)} fragments vectorisés sont détruits, sans retour possible`,
+                  'Les documents source ne sont pas touchés : nous n’en gardions que les vecteurs',
+                  'Tout agent qui cite cette base perd cette source de réponse',
+                ],
+              }}
+            />
+            <GatedAction autorise={peutEcrire} message={refus('ia.knowledge.write')}>
+              <Button iconBefore={<Plus size={14} />}>Créer une base</Button>
+            </GatedAction>
+          </>
         }
       />
 
@@ -174,22 +204,38 @@ export function VueBase({ baseId }: { baseId: string }) {
                           titre="Indexation"
                           sousTitre="Une réindexation complète relit toute la source et recalcule tous les vecteurs."
                           actions={
-                            <GatedAction autorise={peutEcrire} message={refus('ia.knowledge.write')}>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                iconBefore={<RefreshCw size={13} />}
-                                onClick={() =>
-                                  pousser({
-                                    ton: 'info',
-                                    titre: 'Réindexation lancée',
-                                    detail: `${base.nom} — suivez l’avancement dans le centre de tâches.`,
-                                  })
-                                }
-                              >
-                                Réindexer
-                              </Button>
-                            </GatedAction>
+                            // Le contrat (`POST /ia/connaissances/{id}/documents`) ne sait
+                            // qu'ingérer un nouveau document ; il n'existe pas de route pour
+                            // relire la source et recalculer les vecteurs sans contenu neuf.
+                            // Désactivé plutôt que simulé en mode API — même patron que la
+                            // destination « Téléchargement local » de l'assistant de
+                            // restauration (`src/app/app/sauvegarde/page.tsx`).
+                            estActif() ? (
+                              <Tooltip content="Non pris en charge par l’API aujourd’hui — seule l’ingestion d’un nouveau document déclenche un vrai recalcul des vecteurs.">
+                                <span className="inline-flex cursor-not-allowed opacity-45 [&_*]:pointer-events-none">
+                                  <Button size="sm" variant="secondary" iconBefore={<RefreshCw size={13} />}>
+                                    Réindexer
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              <GatedAction autorise={peutEcrire} message={refus('ia.knowledge.write')}>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  iconBefore={<RefreshCw size={13} />}
+                                  onClick={() =>
+                                    pousser({
+                                      ton: 'info',
+                                      titre: 'Réindexation lancée',
+                                      detail: `${base.nom} — suivez l’avancement dans le centre de tâches.`,
+                                    })
+                                  }
+                                >
+                                  Réindexer
+                                </Button>
+                              </GatedAction>
+                            )
                           }
                         />
                         <div className="space-y-3.5">

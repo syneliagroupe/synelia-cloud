@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   BookOpen,
   Check,
@@ -33,7 +34,7 @@ import {
   modeleParSlug,
   outilParId,
 } from '@/lib/mock'
-import { ApiError, creerRessource, estActif, modifierRessource } from '@/lib/api/client'
+import { ApiError, creerRessource, estActif, modifierRessource, supprimerRessource } from '@/lib/api/client'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, SolutionLogo, Tabs } from '@/components/ui/display'
@@ -44,7 +45,7 @@ import { QuotaBar, StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { useApp, useEspace, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
-import { BoutonFormulaire } from '@/components/app/actions'
+import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
 
 const ONGLETS = [
   { id: 'consigne', label: 'Rôle & consigne' },
@@ -90,6 +91,7 @@ function ConsigneAnnotee({ texte }: { texte: string }) {
 export function VueAgent({ agentId }: { agentId: string }) {
   const maintenant = useMaintenant()
   const espace = useEspace()
+  const router = useRouter()
   const { autorise, refus, pousser } = useApp()
   const [onglet, setOnglet] = useState('consigne')
   const [aRestaurer, setARestaurer] = useState<string | null>(null)
@@ -218,6 +220,28 @@ export function VueAgent({ agentId }: { agentId: string }) {
                     </Button>
                   </GatedAction>
                 )}
+                <BoutonAction
+                  libelle="Supprimer"
+                  variant="ghost"
+                  operation={{
+                    action: 'ia.agent.write',
+                    ton: 'warn',
+                    titre: `Agent « ${agent.nom} » supprimé`,
+                    appel: () => supprimerRessource('/ia/agents', agent.id, agent.nom),
+                    effet: () => agentsCol.supprimer(agent.id),
+                    effetFinal: () => {
+                      agentsCol.recharger()
+                      router.push('/app/ia/agents')
+                    },
+                  }}
+                  confirmation={{
+                    ressource: agent.nom,
+                    pertes: [
+                      'La consigne et les réglages de cet agent sont détruits, sans retour possible',
+                      'Tout appel à /ia/agents/{id}/invoquer sur cet agent échoue ensuite',
+                    ],
+                  }}
+                />
               </span>
             }
           />

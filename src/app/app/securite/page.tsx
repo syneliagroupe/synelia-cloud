@@ -458,8 +458,14 @@ export default function Securite() {
                 {[
                   {
                     t: 'Deuxième facteur obligatoire',
-                    etat: 'warn' as const,
-                    d: `${USERS_ORG.filter((u) => !u.mfaEnabled).length} membre(s) s’authentifient encore avec un mot de passe seul. Le rendre obligatoire au niveau de l’organisation force son activation à la prochaine connexion.`,
+                    // Reflète le même calcul que la tuile « Deuxième facteur » au-dessus :
+                    // ce point de contrôle annonçait « constats issus de votre
+                    // configuration réelle » tout en restant figé sur « À traiter »
+                    // même quand tous les membres avaient déjà activé le MFA.
+                    etat: USERS_ORG.length && USERS_ORG.every((u) => u.mfaEnabled) ? ('ok' as const) : ('warn' as const),
+                    d: USERS_ORG.filter((u) => !u.mfaEnabled).length
+                      ? `${USERS_ORG.filter((u) => !u.mfaEnabled).length} membre(s) s’authentifient encore avec un mot de passe seul. Le rendre obligatoire au niveau de l’organisation force son activation à la prochaine connexion.`
+                      : 'Tous les membres de l’organisation ont activé un deuxième facteur.',
                     action: { l: 'Voir les membres', h: '/app/membres' },
                   },
                   {

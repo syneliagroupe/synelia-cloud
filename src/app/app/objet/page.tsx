@@ -12,7 +12,7 @@ import { CodeBlock, GatedAction } from '@/components/ui/display'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { creerRessource } from '@/lib/api/client'
@@ -22,9 +22,11 @@ const PRIX_GO = { chaud: 1.5, froid: 0.62 }
 
 export default function StockageObjet() {
   const { autorise, refus } = useApp()
+  const espace = useEspace()
   const executer = useOperation()
   const seaux = useCollection<Bucket>('buckets', BUCKETS)
   const cles = useCollection<CleS3>('cles-s3', CLES_S3)
+  const buckets = seaux.items.filter((b) => b.espaceId === espace.id)
   const [creationOuverte, setCreationOuverte] = useState(false)
   /** Identifiants renvoyés une seule fois à la création d’une clé S3. */
   const [secretS3, setSecretS3] = useState<{
@@ -32,9 +34,9 @@ export default function StockageObjet() {
     secret: string
     endpoint: string
   } | null>(null)
-  const total = seaux.items.reduce((a, b) => a + b.tailleGo, 0)
-  const objets = seaux.items.reduce((a, b) => a + b.objets, 0)
-  const cout = seaux.items.reduce((a, b) => a + Math.round(b.tailleGo * PRIX_GO[b.classe]), 0)
+  const total = buckets.reduce((a, b) => a + b.tailleGo, 0)
+  const objets = buckets.reduce((a, b) => a + b.objets, 0)
+  const cout = buckets.reduce((a, b) => a + Math.round(b.tailleGo * PRIX_GO[b.classe]), 0)
 
   const colonnes: Array<Colonne<Bucket>> = [
     {
@@ -202,6 +204,7 @@ export default function StockageObjet() {
                 seaux.creer({
                   id: seaux.identifiant('bkt'),
                   orgId: 'org-dba',
+                  espaceId: espace.id,
                   nom: String(v.nom),
                   region: v.region as Site,
                   classe: v.classe as Bucket['classe'],
@@ -217,12 +220,12 @@ export default function StockageObjet() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatTile libelle="Buckets" valeur={seaux.items.length} />
+        <StatTile libelle="Buckets" valeur={buckets.length} />
         <StatTile libelle="Volume stocké" valeur={goHumain(total)} />
         <StatTile libelle="Objets" valeur={num(objets)} />
         <StatTile
           libelle="Buckets protégés WORM"
-          valeur={seaux.items.filter((b) => b.objectLock?.actif).length}
+          valeur={buckets.filter((b) => b.objectLock?.actif).length}
           ton="ok"
           detail="Anti-rançongiciel"
         />
@@ -230,7 +233,7 @@ export default function StockageObjet() {
       </div>
 
       <DataTable
-        lignes={seaux.items}
+        lignes={buckets}
         colonnes={colonnes}
         placeholderRecherche="Rechercher un bucket…"
         filtres={[
@@ -283,7 +286,7 @@ export default function StockageObjet() {
                     type: 'select',
                     options: [
                       { value: 'tous', label: 'Tous les buckets' },
-                      ...seaux.items.map((b) => ({ value: b.nom, label: b.nom })),
+                      ...buckets.map((b) => ({ value: b.nom, label: b.nom })),
                     ],
                   },
                 ]}

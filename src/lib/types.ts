@@ -310,6 +310,7 @@ export interface Volume {
 export interface Bucket {
   id: string
   orgId: string
+  espaceId: string
   nom: string
   region: Site
   classe: 'chaud' | 'froid'

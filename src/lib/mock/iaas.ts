@@ -679,6 +679,7 @@ export const BUCKETS: Bucket[] = [
   {
     id: 'bkt-1',
     orgId: 'org-dba',
+    espaceId: 'ec-dba-01',
     nom: 'dba-sauvegardes-abj',
     region: 'ABJ',
     classe: 'chaud',
@@ -693,6 +694,7 @@ export const BUCKETS: Bucket[] = [
   {
     id: 'bkt-2',
     orgId: 'org-dba',
+    espaceId: 'ec-dba-02',
     nom: 'dba-sauvegardes-gbm',
     region: 'GBM',
     classe: 'froid',
@@ -706,6 +708,7 @@ export const BUCKETS: Bucket[] = [
   {
     id: 'bkt-3',
     orgId: 'org-dba',
+    espaceId: 'ec-dba-01',
     nom: 'dba-medias-publics',
     region: 'ABJ',
     classe: 'chaud',
@@ -718,6 +721,7 @@ export const BUCKETS: Bucket[] = [
   {
     id: 'bkt-4',
     orgId: 'org-dba',
+    espaceId: 'ec-dba-01',
     nom: 'dba-exports-reversibilite',
     region: 'ABJ',
     classe: 'froid',

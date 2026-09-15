@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { RotateCw, Trash2, XCircle } from 'lucide-react'
 import { relatif } from '@/lib/format'
 import type { ProvisioningJob } from '@/lib/types'
+import { requete } from '@/lib/api/client'
 import { JOBS } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
@@ -104,6 +105,7 @@ export default function CentreDeTaches() {
                 titre: `Reprise de « ${j.label} »`,
                 detail:
                   'Le job repart de l’étape échouée. Les étapes déjà réussies ne sont pas rejouées.',
+                appel: () => requete(`/travaux/${encodeURIComponent(j.id)}/relance`, { methode: 'POST' }),
                 effet: () => reprendreJob(j.id),
               }}
             />
@@ -117,6 +119,8 @@ export default function CentreDeTaches() {
                 ton: 'warn',
                 titre: `« ${j.label} » annulée`,
                 detail: 'Les ressources déjà réservées ont été libérées.',
+                appel: () =>
+                  requete(`/travaux/${encodeURIComponent(j.id)}/annulation`, { methode: 'POST' }),
                 effet: () =>
                   jobs.modifier(j.id, (job) => ({
                     statut: 'rolled_back',
@@ -126,6 +130,7 @@ export default function CentreDeTaches() {
                         : t,
                     ),
                   })),
+                effetFinal: () => jobs.recharger(),
               }}
             />
           )}

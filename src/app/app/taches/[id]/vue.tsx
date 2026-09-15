@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { ArrowLeft, RotateCcw } from 'lucide-react'
 import { relatif } from '@/lib/format'
 import type { ProvisioningJob } from '@/lib/types'
+import { requete } from '@/lib/api/client'
 import { JOBS, JOBS_PLATEFORME } from '@/lib/mock'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { ButtonLink } from '@/components/ui/button'
@@ -70,6 +71,8 @@ export function VueSuiviTache({ id }: { id: string }) {
                   titre: `Reprise de « ${job.label} »`,
                   detail:
                     'Le job repart de l’étape échouée. Les étapes déjà réussies ne sont pas rejouées.',
+                  appel: () =>
+                    requete(`/travaux/${encodeURIComponent(job.id)}/relance`, { methode: 'POST' }),
                   effet: () => reprendreJob(job.id),
                 }}
               />

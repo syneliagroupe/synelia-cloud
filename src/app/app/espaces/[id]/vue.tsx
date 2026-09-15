@@ -8,6 +8,7 @@ import { dateCourte, dateHeure, goHumain, money, num, pct, toHumain } from '@/li
 import {
   SITE_LABEL,
   type BackupPlan,
+  type ServiceProjet,
   type EspaceCloud,
   type K8sCluster,
   type Membership,
@@ -19,7 +20,6 @@ import {
   type Volume,
 } from '@/lib/types'
 import {
-  APPLICATIONS,
   BACKUP_PLANS,
   ESPACES,
   EVENEMENTS_SUPERVISION,
@@ -29,6 +29,7 @@ import {
   OFFRES,
   PUBLIC_IPS,
   RESTORE_POINTS,
+  SERVICES_PROJET,
   VMS,
   VOLUMES,
   userById,
@@ -77,6 +78,7 @@ export function VueEspace({ id }: { id: string }) {
   const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
   const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
   const pointsRestauration = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
+  const services = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
   const [onglet, setOnglet] = useState('apercu')
 
   const espace = espaces.items.find((e) => e.id === id)
@@ -408,18 +410,21 @@ export function VueEspace({ id }: { id: string }) {
                               id: 'application',
                               label: 'Application',
                               type: 'select',
-                              options: APPLICATIONS.map((a) => ({ value: a.id, label: a.nom })),
+                              options: services.items
+                                .filter((s) => s.appId)
+                                .map((s) => ({ value: s.appId!, label: s.nom })),
                             },
                           ]}
                           libelleValider="Rattacher"
                           operation={(f) => {
-                            const app = APPLICATIONS.find((a) => a.id === f.application)
+                            const appId = String(f.application)
+                            const svc = services.items.find((s) => s.appId === appId)
                             return {
-                              titre: `${v.nom} rattachée à ${app?.nom ?? f.application}`,
+                              titre: `${v.nom} rattachée à ${svc?.nom ?? appId}`,
                               effet: () =>
                                 parc.modifier(v.id, {
-                                  applicationId: app?.id,
-                                  applicationNom: app?.nom,
+                                  applicationId: appId,
+                                  applicationNom: svc?.nom,
                                 }),
                             }
                           }}
@@ -505,15 +510,21 @@ export function VueEspace({ id }: { id: string }) {
                               id: 'application',
                               label: 'Application',
                               type: 'select',
-                              options: APPLICATIONS.map((a) => ({ value: a.id, label: a.nom })),
+                              options: services.items
+                                .filter((s) => s.appId)
+                                .map((s) => ({ value: s.appId!, label: s.nom })),
                             },
                           ]}
                           libelleValider="Rattacher"
-                          operation={(f) => ({
-                            titre: `${c.nom} rattaché à ${f.application}`,
-                            effet: () =>
-                              grappes.modifier(c.id, { applicationId: String(f.application) }),
-                          })}
+                          operation={(f) => {
+                            const appId = String(f.application)
+                            const svc = services.items.find((s) => s.appId === appId)
+                            return {
+                              titre: `${c.nom} rattaché à ${svc?.nom ?? appId}`,
+                              effet: () =>
+                                grappes.modifier(c.id, { applicationId: appId }),
+                            }
+                          }}
                         />
                       )}
                     </span>

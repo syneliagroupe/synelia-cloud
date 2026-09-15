@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Download, FileCheck2, Fingerprint, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateHeure, pct, relatif } from '@/lib/format'
-import { CONFORMITE, ORG_COURANTE, USERS } from '@/lib/mock'
-import { ROLE_LABEL, type Role } from '@/lib/types'
+import { CONFORMITE, MEMBERSHIPS, ORG_COURANTE, USERS, userById } from '@/lib/mock'
+import { ROLE_LABEL, type ConformiteLigne, type Membership, type Role } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, GatedAction, Tabs } from '@/components/ui/display'
@@ -39,6 +39,12 @@ interface SessionActive {
   agent?: string | null
   debut?: string
 }
+
+/** `useCollection` exige un champ `id` ; la conformité s'identifie par ressource —
+ *  même collection réelle (`/sauvegarde/conformite`) que l'onglet Conformité de
+ *  `/app/sauvegarde`, ne pas la relire depuis la graine ici. */
+type ConformiteAvecId = ConformiteLigne & { id: string }
+const CONFORMITE_AVEC_ID: ConformiteAvecId[] = CONFORMITE.map((c) => ({ ...c, id: c.ressourceId }))
 
 /**
  * `GET/PUT /securite/politiques` — l’écran ne règle que trois interrupteurs :
@@ -137,15 +143,29 @@ export default function Securite() {
   const { autorise, refus, perm, pousser, organisations, organisationId } = useApp()
   const executer = useOperation()
   const sessions = useCollection<SessionActive>('sessions', SESSIONS)
+  const CONFORMITE = useCollection<ConformiteAvecId>('conformite-sauvegarde', CONFORMITE_AVEC_ID).items
+  // Même collection réelle (`/membres`, `Membre.utilisateur.mfaEnabled`) que
+  // `/app/membres` — pas la graine `USERS`, figée et indépendante de l'org réelle.
+  const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
+  const USERS_ORG = adhesions.items
+    .filter((m) => estActif() || m.orgId === ORG_COURANTE.id)
+    .map((m) => userById(m.userId) ?? (m as unknown as { utilisateur?: (typeof USERS)[number] }).utilisateur)
+    .filter((u): u is (typeof USERS)[number] => !!u)
   // Le backend nomme les mêmes champs autrement : on normalise une fois pour
   // que l’onglet lise une seule forme (un `lieu` absent plantait l’affichage).
+  // `GET /securite/sessions` ne renvoie pas de géolocalisation (pas de champ
+  // `lieu`) : replier sur l'adresse IP ferait passer *toute* session réelle
+  // pour « hors du pays », l'IP ne contenant jamais « Côte d'Ivoire ». On
+  // distingue donc « lieu inconnu » de « lieu connu et hors du pays ».
   const sessionsNorm = sessions.items.map((x) => ({
     ...x,
     nom: x.nom ?? x.utilisateurNom ?? x.email ?? '—',
     appareil: x.appareil ?? x.agent ?? '—',
+    lieuConnu: Boolean(x.lieu),
     lieu: x.lieu ?? x.ip,
     ouverte: x.ouverte ?? x.debut ?? MAINTENANT,
   }))
+  const horsDuPays = sessionsNorm.filter((x) => x.lieuConnu && !x.lieu.includes('Côte d’Ivoire'))
   const nomOrg = organisations.find((o) => o.id === organisationId)?.nom ?? ORG_COURANTE.nom
   const [onglet, setOnglet] = useState('audit')
   const [detail, setDetail] = useState<string | null>(null)
@@ -253,15 +273,13 @@ export default function Securite() {
         />
         <StatTile
           libelle="Deuxième facteur"
-          valeur={pct(
-            Math.round((USERS.filter((u) => u.mfaEnabled).length / USERS.length) * 100),
-          )}
-          ton={USERS.every((u) => u.mfaEnabled) ? 'ok' : 'warn'}
-          detail={
-            api
-              ? 'Démonstration — pas encore une lecture réelle'
-              : `${USERS.filter((u) => !u.mfaEnabled).length} membre(s) sans deuxième facteur`
+          valeur={
+            USERS_ORG.length
+              ? pct(Math.round((USERS_ORG.filter((u) => u.mfaEnabled).length / USERS_ORG.length) * 100))
+              : '—'
           }
+          ton={USERS_ORG.every((u) => u.mfaEnabled) ? 'ok' : 'warn'}
+          detail={`${USERS_ORG.filter((u) => !u.mfaEnabled).length} membre(s) sans deuxième facteur`}
         />
         <StatTile
           libelle="Règle 3-2-1 respectée"
@@ -441,7 +459,7 @@ export default function Securite() {
                   {
                     t: 'Deuxième facteur obligatoire',
                     etat: 'warn' as const,
-                    d: `${USERS.filter((u) => !u.mfaEnabled).length} membre(s) s’authentifient encore avec un mot de passe seul. Le rendre obligatoire au niveau de l’organisation force son activation à la prochaine connexion.`,
+                    d: `${USERS_ORG.filter((u) => !u.mfaEnabled).length} membre(s) s’authentifient encore avec un mot de passe seul. Le rendre obligatoire au niveau de l’organisation force son activation à la prochaine connexion.`,
                     action: { l: 'Voir les membres', h: '/app/membres' },
                   },
                   {
@@ -643,11 +661,13 @@ export default function Securite() {
             />
             <StatTile
               libelle="Hors du pays"
-              valeur={sessionsNorm.filter((x) => !x.lieu.includes('Côte d’Ivoire')).length}
-              ton={
-                sessionsNorm.some((x) => !x.lieu.includes('Côte d’Ivoire')) ? 'warn' : 'ok'
+              valeur={sessionsNorm.some((x) => x.lieuConnu) ? horsDuPays.length : '—'}
+              ton={horsDuPays.length > 0 ? 'warn' : 'ok'}
+              detail={
+                sessionsNorm.some((x) => x.lieuConnu)
+                  ? 'À vérifier si personne n’est en déplacement'
+                  : 'Localisation non disponible pour ces sessions'
               }
-              detail="À vérifier si personne n’est en déplacement"
             />
             <StatTile
               libelle="Expiration d’inactivité"
@@ -718,14 +738,15 @@ export default function Securite() {
                           Session courante
                         </Badge>
                       )}
-                      {!x.lieu.includes('Côte d’Ivoire') && (
+                      {x.lieuConnu && !x.lieu.includes('Côte d’Ivoire') && (
                         <Badge tone="warn" size="sm">
                           Connexion hors du pays
                         </Badge>
                       )}
                     </div>
                     <p className="mt-1 text-[11.5px] text-g-500">
-                      <span className="font-mono">{x.ip}</span> · {x.lieu} · ouverte{' '}
+                      <span className="font-mono">{x.ip}</span> ·{' '}
+                      {x.lieuConnu ? x.lieu : 'localisation non détectée'} · ouverte{' '}
                       {relatif(x.ouverte, maintenant)} · dernière activité {relatif(x.derniereActivite, maintenant)}
                     </p>
                   </div>

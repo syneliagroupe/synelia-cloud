@@ -101,6 +101,7 @@ interface RelaisSmtpDistant {
   authentification: { spf: string; dkim: string; dmarc: string; selecteurDkim?: string }
   quota: { parJour: number; parHeure: number; utiliseJour: number }
   reputation: { tauxRemise: number; tauxRebond: number; plaintes: number; listeNoire: boolean }
+  ipDediee?: string | null
   actif: boolean
 }
 
@@ -302,6 +303,26 @@ export default function Smtp() {
   const parHeure = api ? (relais?.quota.parHeure ?? 0) : SMTP.quotas.parHeure
   const relaisActif = api ? relais?.actif === true : true
 
+  /**
+   * Répartition des statuts de livraison : en mode API, comptée sur le
+   * journal réellement chargé (`/web/smtp/messages`, jusqu’à 50 messages).
+   * Affichait auparavant `SMTP.livraison` sans condition — les mêmes
+   * 4 964/172/88/18 messages fictifs pour toute organisation, même une
+   * qui vient d’envoyer deux courriels.
+   */
+  const repartition = api
+    ? (() => {
+        const comptes = new Map<string, number>()
+        journal.forEach((j) => comptes.set(j.statut, (comptes.get(j.statut) ?? 0) + 1))
+        const total = journal.length
+        return Array.from(comptes.entries()).map(([statut, nombre]) => ({
+          statut,
+          nombre,
+          pct: total > 0 ? (nombre / total) * 100 : 0,
+        }))
+      })()
+    : SMTP.livraison
+
   /** `POST /web/smtp/test` — un message d’essai part réellement par le relais. */
   const envoyerTest = () => {
     const destinataire = destinataireTest.trim()
@@ -493,68 +514,103 @@ export default function Smtp() {
                 titre="Répartition des livraisons"
                 sousTitre="Dernières 24 heures."
               />
-              <StackedBar
-                segments={SMTP.livraison.map((l) => ({
-                  label: LIBELLE_STATUT[l.statut],
-                  valeur: l.nombre,
-                  couleur:
-                    l.statut === 'delivre'
-                      ? 'var(--color-ok)'
-                      : l.statut === 'differe'
-                        ? 'var(--color-warn)'
-                        : l.statut === 'rejete'
-                          ? 'var(--color-err)'
-                          : 'var(--color-m-600)',
-                }))}
-              />
-              <div className="mt-4 space-y-1.5 border-t border-g-100 pt-3.5">
-                {SMTP.livraison.map((l) => (
-                  <div key={l.statut} className="flex items-baseline justify-between gap-3">
-                    <span className="text-[12px] text-g-700">{LIBELLE_STATUT[l.statut]}</span>
-                    <span className="tnum shrink-0 text-[12px]">
-                      <span className="font-semibold text-ink">{num(l.nombre)}</span>
-                      <span className="ml-1.5 text-g-500">{pct(l.pct, 1)}</span>
-                    </span>
+              {api && repartition.length === 0 ? (
+                <p className="text-[12px] text-g-500">Aucun message dans le journal chargé.</p>
+              ) : (
+                <>
+                  <StackedBar
+                    segments={repartition.map((l) => ({
+                      label: LIBELLE_STATUT[l.statut] ?? l.statut,
+                      valeur: l.nombre,
+                      couleur:
+                        l.statut === 'delivre'
+                          ? 'var(--color-ok)'
+                          : l.statut === 'differe'
+                            ? 'var(--color-warn)'
+                            : l.statut === 'rejete'
+                              ? 'var(--color-err)'
+                              : 'var(--color-m-600)',
+                    }))}
+                  />
+                  <div className="mt-4 space-y-1.5 border-t border-g-100 pt-3.5">
+                    {repartition.map((l) => (
+                      <div key={l.statut} className="flex items-baseline justify-between gap-3">
+                        <span className="text-[12px] text-g-700">
+                          {LIBELLE_STATUT[l.statut] ?? l.statut}
+                        </span>
+                        <span className="tnum shrink-0 text-[12px]">
+                          <span className="font-semibold text-ink">{num(l.nombre)}</span>
+                          <span className="ml-1.5 text-g-500">{pct(l.pct, 1)}</span>
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <Callout ton="warn" className="mt-4" titre="1,7 % de rejets, dont la cause est connue">
-                88 rejets viennent d’adresses qui n’existent plus, toutes issues d’une liste
-                d’abonnés importée en 2023. Nettoyer cette liste ferait passer le taux de livraison
-                de 94,7 % à plus de 98 %, et améliorerait votre réputation auprès des fournisseurs.
-              </Callout>
+                </>
+              )}
+              {!api && (
+                <Callout ton="warn" className="mt-4" titre="1,7 % de rejets, dont la cause est connue">
+                  88 rejets viennent d’adresses qui n’existent plus, toutes issues d’une liste
+                  d’abonnés importée en 2023. Nettoyer cette liste ferait passer le taux de livraison
+                  de 94,7 % à plus de 98 %, et améliorerait votre réputation auprès des fournisseurs.
+                </Callout>
+              )}
             </Card>
 
             <Card>
               <CardHeader titre="Réputation" sousTitre="Ce que les fournisseurs pensent de votre adresse IP." />
               <div className="flex justify-center py-2">
                 <GaugeCircle
-                  valeur={SMTP.reputation.score}
+                  valeur={api ? (relais?.reputation.tauxRemise ?? 0) : SMTP.reputation.score}
                   min={0}
                   max={100}
                   cible={85}
-                  libelle="Score global"
+                  libelle={api ? 'Taux de remise' : 'Score global'}
                 />
               </div>
               <KeyValueList
                 className="mt-2"
                 colonnes={1}
-                items={[
-                  {
-                    cle: 'Adresse IP d’envoi',
-                    valeur: `${SMTP.reputation.ip}${SMTP.reputation.dediee ? ' — dédiée à votre organisation' : ' — partagée'}`,
-                  },
-                  {
-                    cle: 'Listes noires',
-                    valeur:
-                      SMTP.reputation.listesNoires === 0
-                        ? 'Absente des 42 listes surveillées'
-                        : `Présente dans ${SMTP.reputation.listesNoires} liste(s)`,
-                  },
-                  { cle: 'Enregistrement PTR', valeur: 'mail-dba.synelia.cloud — cohérent' },
-                  { cle: 'Boucle de retour Microsoft', valeur: 'Inscrite — plaintes remontées en temps réel' },
-                  { cle: 'Google Postmaster', valeur: 'Domaine vérifié · réputation « élevée »' },
-                ]}
+                items={
+                  api
+                    ? [
+                        {
+                          cle: 'Adresse IP d’envoi',
+                          valeur: relais?.ipDediee
+                            ? `${relais.ipDediee} — dédiée à votre organisation`
+                            : 'Partagée — non exposée par l’API',
+                        },
+                        {
+                          cle: 'Listes noires',
+                          valeur: relais?.reputation.listeNoire
+                            ? 'Présente dans au moins une liste'
+                            : 'Aucune liste noire détectée',
+                        },
+                        {
+                          cle: 'Rebonds · plaintes',
+                          valeur: `${pct(relais?.reputation.tauxRebond ?? 0, 1)} · ${pct(relais?.reputation.plaintes ?? 0, 2)}`,
+                        },
+                        {
+                          cle: 'Enregistrement PTR, boucle Microsoft, Google Postmaster',
+                          valeur: 'non exposés par l’API',
+                        },
+                      ]
+                    : [
+                        {
+                          cle: 'Adresse IP d’envoi',
+                          valeur: `${SMTP.reputation.ip}${SMTP.reputation.dediee ? ' — dédiée à votre organisation' : ' — partagée'}`,
+                        },
+                        {
+                          cle: 'Listes noires',
+                          valeur:
+                            SMTP.reputation.listesNoires === 0
+                              ? 'Absente des 42 listes surveillées'
+                              : `Présente dans ${SMTP.reputation.listesNoires} liste(s)`,
+                        },
+                        { cle: 'Enregistrement PTR', valeur: 'mail-dba.synelia.cloud — cohérent' },
+                        { cle: 'Boucle de retour Microsoft', valeur: 'Inscrite — plaintes remontées en temps réel' },
+                        { cle: 'Google Postmaster', valeur: 'Domaine vérifié · réputation « élevée »' },
+                      ]
+                }
               />
             </Card>
           </div>

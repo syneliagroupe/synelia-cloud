@@ -350,9 +350,16 @@ export default function Statut() {
                 placeholder="prenom.nom@organisation.ci"
                 className="flex-1"
                 aria-label="Adresse e-mail"
+                disabled
               />
-              <Button>S’abonner</Button>
+              <Button disabled title="Abonnement par e-mail pas encore disponible">
+                S’abonner
+              </Button>
             </div>
+            <p className="mt-1.5 text-[11.5px] text-g-500">
+              Pas encore disponible : cette page publie l’état en direct, mais rien n’envoie encore
+              de notification par e-mail.
+            </p>
             <div className="mt-4 grid grid-cols-1 gap-3 border-t border-g-100 pt-4 sm:grid-cols-2">
               <div className="flex items-start gap-2.5">
                 <Webhook size={14} className="mt-0.5 shrink-0 text-p-700" />

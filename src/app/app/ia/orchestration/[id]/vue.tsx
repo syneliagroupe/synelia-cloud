@@ -38,7 +38,7 @@ import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { LogPeek } from '@/components/business/observabilite'
-import { creerRessource } from '@/lib/api/client'
+import { creerRessource, estActif } from '@/lib/api/client'
 import { useOperation } from '@/components/app/actions'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
@@ -813,7 +813,9 @@ export function VueFlux({ fluxId }: { fluxId: string }) {
   const [entreeTest, setEntreeTest] = useState('')
 
   const fluxCol = useCollection<FluxOrchestration>('flux-ia', FLUX_ORCHESTRATION)
-  const flux = fluxCol.items.filter((f) => f.espaceId === espace.id)
+  // Voir `page.tsx` de la section : le backend ne rattache pas encore un flux
+  // à un Espace Cloud à la création, donc pas de filtre par Espace en mode API.
+  const flux = fluxCol.items.filter((f) => (estActif() ? true : f.espaceId === espace.id))
   const trouve = flux.find((f) => f.id === fluxId)
   // Un flux réel (exécuteur natif, FONC-02) ne porte pas encore de métriques
   // agrégées : le backend les laisse `null`, absentes du JSON. Ramenées à 0

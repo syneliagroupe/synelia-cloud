@@ -29493,6 +29493,64 @@
             "$ref": "#/components/responses/Serveur"
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Travaux de provisioning"
+        ],
+        "operationId": "purgerTravail",
+        "summary": "Retirer une tâche terminée du centre de tâches",
+        "description": "Refusé si le travail est encore en file ou en cours. Le journal d’audit garde la trace après la purge.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Organisation"
+          },
+          {
+            "$ref": "#/components/parameters/Langue"
+          },
+          {
+            "$ref": "#/components/parameters/Confirmation"
+          },
+          {
+            "name": "travailId",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du travail.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "job-1"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Supprimé. Aucun corps."
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalide"
+          },
+          "401": {
+            "$ref": "#/components/responses/NonAuthentifie"
+          },
+          "403": {
+            "$ref": "#/components/responses/Interdit"
+          },
+          "404": {
+            "$ref": "#/components/responses/Introuvable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflit"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalidee"
+          },
+          "429": {
+            "$ref": "#/components/responses/TropDeRequetes"
+          },
+          "500": {
+            "$ref": "#/components/responses/Serveur"
+          }
+        }
       }
     },
     "/travaux/{travailId}/annulation": {
@@ -39713,6 +39771,75 @@
         "responses": {
           "204": {
             "description": "Supprimé. Aucun corps."
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalide"
+          },
+          "401": {
+            "$ref": "#/components/responses/NonAuthentifie"
+          },
+          "403": {
+            "$ref": "#/components/responses/Interdit"
+          },
+          "404": {
+            "$ref": "#/components/responses/Introuvable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TropDeRequetes"
+          },
+          "500": {
+            "$ref": "#/components/responses/Serveur"
+          }
+        }
+      }
+    },
+    "/web/smtp/webhooks/{webhookId}/test": {
+      "post": {
+        "tags": [
+          "Web Cloud — relais SMTP"
+        ],
+        "operationId": "testerWebhookSmtp",
+        "summary": "Envoyer un appel de test au webhook",
+        "x-rbac": "service.admin",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Organisation"
+          },
+          {
+            "$ref": "#/components/parameters/Langue"
+          },
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du webhook.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Succès.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "envoye": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "integer",
+                      "format": "int32"
+                    }
+                  },
+                  "required": [
+                    "envoye"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Invalide"

@@ -29,7 +29,9 @@ export default function ConsommationIA() {
   // pas une moyenne historique — la passerelle LiteLLM ne journalise pas
   // encore la dépense par jour (`/spend/logs` → aucune base connectée), donc
   // il n'existe pas de série quotidienne réelle à extrapoler autrement.
-  const maintenant = new Date()
+  // `refMaintenant` (pas `new Date()`) : le rendu doit rester déterministe
+  // entre serveur et client (§ CLAUDE.md « Déterminisme du rendu »).
+  const maintenant = new Date(refMaintenant)
   const joursEcoules = maintenant.getUTCDate()
   const joursDuMois = new Date(
     Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth() + 1, 0),

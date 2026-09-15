@@ -81,6 +81,17 @@ const bord = fusion(
         params: [chemin('travailId', 'Identifiant du travail.', 'job-1')],
         ok: ref('TravailProvisioning'),
       }),
+      delete: op({
+        tag: T_TRAVAUX,
+        id: 'purgerTravail',
+        resume: 'Retirer une tâche terminée du centre de tâches',
+        detail:
+          'Refusé si le travail est encore en file ou en cours. Le journal d’audit garde la trace après la purge.',
+        params: [chemin('travailId', 'Identifiant du travail.', 'job-1')],
+        destructif: true,
+        code: 204,
+        erreurs: [409],
+      }),
     },
   },
   action({

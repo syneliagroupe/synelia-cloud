@@ -549,14 +549,20 @@ export function VueSauvegarde({ id }: { id: string }) {
                 />
                 <KeyValueList
                   items={[
-                    { cle: 'Périmètre', valeur: 'Une application — boutique.dba.africa' },
+                    { cle: 'Périmètre', valeur: `${perimetre} — ${p.serveur}` },
                     {
                       cle: 'Point de restauration',
-                      valeur: dernier ? dateHeure(dernier.ts) : '—',
+                      valeur: (() => {
+                        const point = p.executions.find((e) => e.id === pointChoisi) ?? dernier
+                        return point ? dateHeure(point.ts) : '—'
+                      })(),
                     },
-                    { cle: 'Destination', valeur: 'À côté, sur le même serveur' },
+                    { cle: 'Destination', valeur: destination },
                     { cle: 'Durée estimée', valeur: '6 à 9 minutes' },
-                    { cle: 'Impact sur la production', valeur: 'Aucun' },
+                    {
+                      cle: 'Impact sur la production',
+                      valeur: destination.startsWith('Par-dessus') ? 'Écrasement des données actuelles' : 'Aucun',
+                    },
                   ]}
                 />
                 <BoutonAction

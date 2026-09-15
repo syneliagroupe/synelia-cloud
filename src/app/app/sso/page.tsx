@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, CheckCircle2, Link2, RefreshCw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateHeure, relatif } from '@/lib/format'
-import { ESPACES, ORG_COURANTE, SERVICES_MANAGES, USERS } from '@/lib/mock'
+import { ESPACES, MEMBERSHIPS, ORG_COURANTE, SERVICES_MANAGES, userById } from '@/lib/mock'
 import { ROLES_CLIENT } from '@/lib/rbac'
-import { ROLE_LABEL, type Role } from '@/lib/types'
+import { ROLE_LABEL, type Membership, type Role, type User } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -86,6 +86,7 @@ export default function Sso() {
   const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
   const executer = useOperation()
   const correspondances = useCollection<Correspondance>('correspondances-sso', CORRESPONDANCES)
+  const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
   const [onglet, setOnglet] = useState('etat')
   const [emailSimule, setEmailSimule] = useState('k.toure@dba.africa')
   const [groupesSimules, setGroupesSimules] = useState('SYN-CLOUD-DEV-PROD\nTout le personnel')
@@ -232,7 +233,13 @@ export default function Sso() {
     )
   }
 
-  const federes = USERS.filter((u) => u.idpSource !== 'local').length
+  // En mode API, les membres arrivent embarqués sous `utilisateur` (`GET /membres`) :
+  // les identifiants du backend sont inconnus de `userById`, lecture mock seule. Même
+  // repli que `/app/membres` (`userById(m.userId) ?? m.utilisateur`).
+  const membresConnus = adhesions.items
+    .map((m) => userById(m.userId) ?? (m as unknown as { utilisateur?: User }).utilisateur)
+    .flatMap((u) => (u ? [u] : []))
+  const federes = membresConnus.filter((u) => u.idpSource !== 'local').length
   const servicesSso = SERVICES_MANAGES.filter((s) => s.sso.actif).length
 
   return (
@@ -271,7 +278,7 @@ export default function Sso() {
         <StatTile
           libelle="Comptes fédérés"
           valeur={federes}
-          detail={`sur ${USERS.length} membres`}
+          detail={`sur ${membresConnus.length} membres`}
           ton="ok"
         />
         <StatTile

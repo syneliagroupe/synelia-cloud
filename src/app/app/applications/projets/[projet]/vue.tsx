@@ -313,15 +313,11 @@ function TiroirCreation({
   const [description, setDescription] = useState('')
   const [moteur, setMoteur] = useState<MoteurBase>('postgresql')
   const [version, setVersion] = useState('')
-  const [utilisateur, setUtilisateur] = useState('')
-  const [motDePasse, setMotDePasse] = useState('')
   const choix = MOTEURS_DISPONIBLES.find((m) => m.moteur === moteur)!
 
   if (!type) return null
 
-  const peutCreer =
-    nom.trim().length > 0 &&
-    (type !== 'base' || (utilisateur.trim().length > 0 && motDePasse.trim().length > 0))
+  const peutCreer = nom.trim().length > 0
 
   /** Un service naît en construction, puis passe en marche à la fin du job — sauf
    * une application sans source : rien à démarrer tant qu'elle n'est pas
@@ -331,14 +327,22 @@ function TiroirCreation({
     const ressources =
       type === 'base' ? { cpu: 2, ramMo: 4096, diskGo: 100 } : { cpu: 1, ramMo: 2048, diskGo: 10 }
     const cout = type === 'base' ? 24800 : 9400
-    const utilisateurBase = utilisateur.trim()
+    // Même dérivation que `utilisateur_base()` côté backend (`modules/projets/service.py`) :
+    // jamais préfixé `pg_`, que PostgreSQL refuse pour un rôle. Le mot de passe, lui, est
+    // toujours généré côté serveur (`_mot_de_passe()`, `secrets`, pas `random`) — l'API
+    // n'accepte aucun couple identifiant/mot de passe fourni à la création (vérifié en
+    // direct : un `POST` qui en envoie un voit sa valeur silencieusement ignorée), donc ce
+    // formulaire ne les demande plus. Ils se consultent ensuite depuis l'onglet Connexion de
+    // la fiche du service (`GET .../identifiants`).
+    const brut = `${nom.trim().replace(/-/g, '_')}_user`
+    const utilisateurBase = brut.startsWith('pg_') ? `u_${brut}` : brut
 
     executer({
       action: 'app.deploy',
       titre: `${TYPE_SERVICE_LABEL[type]} « ${nom.trim()} » en création`,
       detail:
         type === 'base'
-          ? `${MOTEUR_LABEL[moteur]} ${version || choix.versions[0]}, joint au réseau privé du projet — aucun port ouvert sur Internet.`
+          ? `${MOTEUR_LABEL[moteur]} ${version || choix.versions[0]}, joint au réseau privé du projet — aucun port ouvert sur Internet. Identifiant et mot de passe générés automatiquement, consultables ensuite depuis l’onglet Connexion.`
           : `Coquille créée dans ${env}. Branchez un dépôt Git ou une image depuis sa fiche pour la déployer.`,
       appel: () =>
         creerRessource(`/projets/${encodeURIComponent(projet.id)}/services`, {
@@ -347,9 +351,7 @@ function TiroirCreation({
           type,
           environnement: env,
           ressources,
-          ...(type === 'base'
-            ? { moteur, version: version || choix.versions[0], utilisateur: utilisateurBase, motDePasse }
-            : {}),
+          ...(type === 'base' ? { moteur, version: version || choix.versions[0] } : {}),
         }),
       effet: () =>
         lesServices.creer({
@@ -372,7 +374,7 @@ function TiroirCreation({
                 base: {
                   nom: nom.trim().replace(/-/g, '_'),
                   utilisateur: utilisateurBase,
-                  motDePasse,
+                  motDePasse: `demo-${idService.slice(-8)}`,
                   hoteInterne: `${nom.trim()}.${projet.id}.interne`,
                   port: PORT_MOTEUR[moteur],
                 },
@@ -478,29 +480,11 @@ function TiroirCreation({
                 ))}
               </Select>
             </Field>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Utilisateur" required>
-                <Input
-                  value={utilisateur}
-                  onChange={(e) => setUtilisateur(e.target.value)}
-                  className="font-mono"
-                  placeholder={`${nom.trim().replace(/-/g, '_') || 'app'}_user`}
-                />
-              </Field>
-              <Field label="Mot de passe" required>
-                <Input
-                  type="password"
-                  value={motDePasse}
-                  onChange={(e) => setMotDePasse(e.target.value)}
-                  autoComplete="new-password"
-                />
-              </Field>
-            </div>
             <Callout ton="violet" titre="Accessible depuis le projet uniquement">
               La base est jointe au réseau privé du projet. Aucun port n’est ouvert sur Internet
               tant que vous ne l’exposez pas explicitement, et cette exposition demande une liste
-              d’adresses autorisées. Le mot de passe ne sera plus jamais réaffiché en clair ; sa
-              révélation depuis la fiche du service est journalisée.
+              d’adresses autorisées. Identifiant et mot de passe sont générés automatiquement à la
+              création ; consultez-les ensuite depuis l’onglet Connexion de la fiche du service.
             </Callout>
           </>
         )}

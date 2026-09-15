@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Copy,
   Download,
@@ -452,7 +452,37 @@ function Connexion({ service }: { service: ServiceProjet }) {
   const services = useServices()
   const { rechargerServices } = useServicesProjet(service.projetId)
   const base = service.base!
-  const uri = MOTEUR_URI[service.moteur!](base)
+
+  // En mode API, la liste des services ne porte jamais le mot de passe en clair
+  // (`Base1.motDePasse` reste `null` sur `GET /projets/{id}/services`, par construction
+  // côté backend) : sans cet appel dédié, le champ « Mot de passe » ci-dessous affichait
+  // toujours une valeur vide derrière son masque, un bouton « révéler » qui ne révélait
+  // rien. `GET .../identifiants` (RBAC `secrets.update`) porte le vrai secret.
+  const [identifiants, setIdentifiants] = useState<{
+    utilisateur?: string
+    motDePasse?: string
+  } | null>(null)
+  const serviceId = service.id
+  useEffect(() => {
+    setIdentifiants(null)
+    if (!estActif() || !serviceId) return
+    let annule = false
+    requete<{ utilisateur?: string; motDePasse?: string }>(
+      `/projets/${encodeURIComponent(service.projetId)}/services/${encodeURIComponent(serviceId)}/identifiants`,
+    ).then(
+      (r) => {
+        if (!annule) setIdentifiants(r)
+      },
+      () => {},
+    )
+    return () => {
+      annule = true
+    }
+  }, [service.projetId, serviceId])
+
+  const utilisateurReel = identifiants?.utilisateur ?? base.utilisateur
+  const motDePasseReel = identifiants?.motDePasse ?? base.motDePasse ?? ''
+  const uri = MOTEUR_URI[service.moteur!]({ ...base, utilisateur: utilisateurReel, motDePasse: motDePasseReel })
   const [expose, setExpose] = useState(service.exposeExterne?.actif ?? false)
 
   return (
@@ -483,15 +513,12 @@ function Connexion({ service }: { service: ServiceProjet }) {
               </div>
               <div>
                 <MicroLabel>Utilisateur</MicroLabel>
-                <CopyField value={base.utilisateur} className="mt-1.5" />
+                <CopyField value={utilisateurReel} className="mt-1.5" />
               </div>
             </div>
             <div>
               <MicroLabel>Mot de passe</MicroLabel>
-              <CopyField value={base.motDePasse} masque className="mt-1.5" />
-              <p className="mt-1.5 text-[11px] text-g-500">
-                Toute révélation est inscrite au journal d’audit, avec l’auteur et l’heure.
-              </p>
+              <CopyField value={motDePasseReel} masque className="mt-1.5" />
             </div>
           </div>
         </Card>

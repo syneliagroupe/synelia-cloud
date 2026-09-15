@@ -4,9 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { GitCommitHorizontal, RotateCcw, ShieldCheck } from 'lucide-react'
 import { dateHeure, duree, relatif } from '@/lib/format'
-import { APPLICATIONS, DEPLOIEMENTS, ENVIRONNEMENTS, appById, envById,
-  hrefDuService,
-} from '@/lib/mock'
+import { DEPLOIEMENTS, appById, hrefDuService } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -67,6 +65,12 @@ export default function Deploiements() {
 
   const selection = ouvert ? lesDeploiements.items.find((d) => d.id === ouvert) : undefined
 
+  // Comptés depuis les déploiements réellement chargés (réels en mode API, de
+  // la graine sinon) — pas depuis l'ancien modèle PaaS figé (§ « Partie 11 »),
+  // qui n'a plus aucun lien avec ce qui est effectivement suivi.
+  const appsSuivies = [...new Set(lesDeploiements.items.map((d) => d.appId))]
+  const envsSuivis = new Set(lesDeploiements.items.map((d) => d.envId)).size
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -76,10 +80,11 @@ export default function Deploiements() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {APPLICATIONS.length} applications suivies
+              {appsSuivies.length} application{appsSuivies.length > 1 ? 's' : ''} suivie
+              {appsSuivies.length > 1 ? 's' : ''}
             </Badge>
             <Badge tone="neutral" size="sm">
-              {ENVIRONNEMENTS.length} environnements
+              {envsSuivis} environnement{envsSuivis > 1 ? 's' : ''}
             </Badge>
           </>
         }
@@ -148,7 +153,7 @@ export default function Deploiements() {
                 libelle: 'Application',
                 options: [
                   { value: 'tous', label: 'Toutes les applications' },
-                  ...APPLICATIONS.map((a) => ({ value: a.id, label: a.nom })),
+                  ...appsSuivies.map((id) => ({ value: id, label: appById(id)?.nom ?? id })),
                 ],
               },
             ]}
@@ -165,7 +170,7 @@ export default function Deploiements() {
               {
                 id: 'app',
                 entete: 'Application / environnement',
-                cle: (d) => `${appById(d.appId)?.nom ?? ''} ${envById(d.envId)?.nom ?? ''}`,
+                cle: (d) => `${appById(d.appId)?.nom ?? ''} ${d.envNom}`,
                 rendu: (d) => (
                   <span className="block min-w-0">
                     <Link
@@ -174,9 +179,10 @@ export default function Deploiements() {
                     >
                       {appById(d.appId)?.nom ?? d.appId}
                     </Link>
-                    <span className="block text-[11px] text-g-500">
-                      {envById(d.envId)?.nom ?? d.envId}
-                    </span>
+                    {/* d.envNom vient du déploiement lui-même (le contrat le porte) — envById()
+                        ne résout que les environnements de la graine, jamais ceux créés par
+                        l'API réelle. */}
+                    <span className="block text-[11px] text-g-500">{d.envNom}</span>
                   </span>
                 ),
               },
@@ -331,7 +337,7 @@ export default function Deploiements() {
                 <span className="flex flex-wrap items-baseline gap-2">
                   <span>{appById(selection.appId)?.nom ?? selection.appId}</span>
                   <span className="font-mono text-[12px] font-normal text-g-500">
-                    {selection.version} · {envById(selection.envId)?.nom}
+                    {selection.version} · {selection.envNom}
                   </span>
                 </span>
               }

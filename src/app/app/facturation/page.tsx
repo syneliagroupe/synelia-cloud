@@ -1311,20 +1311,26 @@ export default function Facturation() {
                             libelle="PDF"
                             variant="ghost"
                             icone={<Download size={12} />}
+                            // En mode API, un devis sans `pdfUrl` (le backend n'édite
+                            // jamais ce champ pour l'instant, aucun devis réel n'en
+                            // porte) désactive le bouton plutôt que de faire croire à
+                            // un téléchargement : sans `appel`, `useOperation` retombe
+                            // sur le chemin simulé et affiche quand même une
+                            // notification de succès, sans rien produire.
+                            desactive={enApi && !d.pdfUrl}
+                            nomAccessible={
+                              enApi && !d.pdfUrl
+                                ? 'PDF non disponible pour ce devis : demandez-le à votre contact commercial'
+                                : undefined
+                            }
                             operation={{
                               action: 'invoice.view',
                               ton: 'info',
                               titre: 'Devis téléchargé',
                               detail: `${d.numero} · valable jusqu’au ${dateCourte(d.validite)}`,
-                              // Le backend porte `pdfUrl` sur le devis ; sans lui,
-                              // le chemin maquette (notification) reste.
-                              appel: (d as Devis & { pdfUrl?: string }).pdfUrl
+                              appel: d.pdfUrl
                                 ? () => {
-                                    window.open(
-                                      (d as Devis & { pdfUrl?: string }).pdfUrl,
-                                      '_blank',
-                                      'noopener',
-                                    )
+                                    window.open(d.pdfUrl, '_blank', 'noopener')
                                     return Promise.resolve()
                                   }
                                 : undefined,
@@ -1448,6 +1454,19 @@ export default function Facturation() {
                   ton: 'info',
                   titre: 'Détail des lignes exporté',
                   detail: `${detail.lignes.length} ligne(s), avec l’étiquette de répartition de chacune.`,
+                  // Même bug que « Exporter la période » (commit 73ef40c) : sans `appel`,
+                  // le bouton n'affichait qu'une notification de succès sans jamais rien
+                  // produire — aucune donnée à faire fabriquer par le serveur pour un
+                  // fichier que le navigateur sait déjà générer depuis les lignes déjà
+                  // chargées.
+                  appel: () => {
+                    telechargerCsv(
+                      `${detail.numero}-lignes`,
+                      ['Ligne', 'Référence', 'Quantité', 'Prix unitaire (FCFA)', 'Montant HT (FCFA)'],
+                      detail.lignes.map((l) => [l.libelle, l.ref, l.quantite, l.pu, l.total]),
+                    )
+                    return Promise.resolve()
+                  },
                 }}
               />
               {detail.statut === 'impayee' && (

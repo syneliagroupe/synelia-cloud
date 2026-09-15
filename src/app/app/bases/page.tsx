@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { cn, seededSeries, surfaceMarque } from '@/lib/utils'
 import { dateCourte, goHumain, money, num, pct } from '@/lib/format'
@@ -57,6 +57,7 @@ const REQUETES_LENTES: LigneLog[] = [
 export default function BasesManagees() {
   const espace = useEspace()
   const { autorise, refus } = useApp()
+  const [motDePasseRegenere, setMotDePasseRegenere] = useState<string | null>(null)
   const collection = useCollection<ManagedDatabase>('bases-managees', BASES_MANAGEES)
   const bases = collection.items.filter((b) => b.espaceId === espace.id)
   const [selection, setSelection] = useState(bases[0]?.id ?? '')
@@ -74,6 +75,28 @@ export default function BasesManagees() {
 
   const base = bases.find((b) => b.id === selection)
   const moteur = base ? MOTEURS[base.moteur] : undefined
+
+  // L'utilisateur réel (`synelia_postgresql`…) vient du backend, pas d'un
+  // générique « app » : sans cet appel, la chaîne de connexion affichée
+  // mentirait sur l'identifiant à utiliser. Silencieux hors mode API ou en
+  // cas de refus (le rôle courant peut ne pas porter `secrets.update`).
+  const [identifiants, setIdentifiants] = useState<{ utilisateur: string } | null>(null)
+  const baseId = base?.id
+  useEffect(() => {
+    setIdentifiants(null)
+    setMotDePasseRegenere(null)
+    if (!estActif() || !baseId) return
+    let annule = false
+    requete<{ utilisateur: string }>(`/bases/${encodeURIComponent(baseId)}/identifiants`).then(
+      (r) => {
+        if (!annule) setIdentifiants(r)
+      },
+      () => {},
+    )
+    return () => {
+      annule = true
+    }
+  }, [baseId])
 
   return (
     <div className="space-y-5">
@@ -289,6 +312,36 @@ export default function BasesManagees() {
                     <CardHeader
                       titre="Chaîne de connexion"
                       sousTitre="Ne codez jamais le mot de passe en dur : référencez le coffre de secrets."
+                      actions={
+                        <BoutonAction
+                          libelle="Régénérer le mot de passe"
+                          variant="ghost"
+                          size="sm"
+                          operation={{
+                            action: 'secrets.update',
+                            ton: 'warn',
+                            titre: `Mot de passe de ${base.nom} régénéré`,
+                            detail:
+                              'Affiché une seule fois ci-dessous. Le moteur en cours d’exécution garde l’ancien mot de passe tant que la configuration applicative n’est pas mise à jour.',
+                            appel: () =>
+                              requete<{ motDePasse: string }>(
+                                `/bases/${encodeURIComponent(base.id)}/identifiants/rotation`,
+                                { methode: 'POST', corps: {} },
+                              ).then((r) => {
+                                setMotDePasseRegenere(r.motDePasse)
+                                return r
+                              }),
+                          }}
+                          confirmation={{
+                            ressource: base.nom,
+                            titre: `Régénérer le mot de passe de ${base.nom} ?`,
+                            pertes: [
+                              'Toute application qui utilise encore l’ancien mot de passe perdra sa connexion',
+                            ],
+                            libelleAction: 'Régénérer',
+                          }}
+                        />
+                      }
                     />
                     <div className="space-y-3">
                       <CopyField label="Hôte" value={base.host} />
@@ -297,11 +350,11 @@ export default function BasesManagees() {
                         label="Chaîne de connexion"
                         masque
                         value={
-                          base.moteur === 'postgresql'
-                            ? `postgresql://app:••••••••@${base.host}:${moteur.port}/${base.nom}?sslmode=require`
-                            : base.moteur === 'redis'
-                              ? `rediss://default:••••••••@${base.host}:${moteur.port}/0`
-                              : `mysql://app:••••••••@${base.host}:${moteur.port}/${base.nom}?ssl-mode=REQUIRED`
+                          base.moteur === 'redis'
+                            ? `rediss://${identifiants?.utilisateur ?? 'default'}:••••••••@${base.host}:${moteur.port}/0`
+                            : base.moteur === 'postgresql'
+                              ? `postgresql://${identifiants?.utilisateur ?? 'app'}:••••••••@${base.host}:${moteur.port}/${base.nom}?sslmode=require`
+                              : `mysql://${identifiants?.utilisateur ?? 'app'}:••••••••@${base.host}:${moteur.port}/${base.nom}?ssl-mode=REQUIRED`
                         }
                       />
                       <CopyField
@@ -309,6 +362,11 @@ export default function BasesManagees() {
                         value={`{{ vault:org-dba/db/${base.nom}#url }}`}
                       />
                     </div>
+                    {motDePasseRegenere && (
+                      <Callout ton="warn" className="mt-4" titre="Nouveau mot de passe — affiché une seule fois">
+                        <CopyField className="mt-2" value={motDePasseRegenere} masque mono />
+                      </Callout>
+                    )}
                     <Callout ton="info" className="mt-4" titre="TLS obligatoire">
                       Les connexions non chiffrées sont refusées par le moteur. Le certificat serveur
                       est signé par notre autorité interne, dont le paquet racine est disponible dans
@@ -734,7 +792,18 @@ export default function BasesManagees() {
                                       ],
                                     },
                                     effetFinal: () =>
-                                      collection.modifier(base.id, { version: x.v }),
+                                      // `PATCH /bases/{id}` reprend le schéma de création
+                                      // (`espaceId`/`nom`/`moteur`/`palier` obligatoires) : un
+                                      // correctif partiel (`{ version }` seul) échoue en 422
+                                      // côté backend, avalé silencieusement par le
+                                      // `.then(recharger, recharger)` de `collection.modifier`.
+                                      collection.modifier(base.id, {
+                                        espaceId: base.espaceId,
+                                        nom: base.nom,
+                                        moteur: base.moteur,
+                                        palier: base.palier,
+                                        version: x.v,
+                                      }),
                                   }
                                 : {}),
                             })}

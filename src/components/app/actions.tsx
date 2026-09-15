@@ -178,7 +178,10 @@ export function useOperation() {
         ? libelleWorkflow(def, spec.job?.cible ?? '')
         : (spec.job?.label ?? spec.titre)
 
-      if (spec.job) {
+      // En mode API sans `appel`, on n'affiche pas de faux job local puisque
+      // le centre de tâches lit `GET /travaux` et le job local n'y apparaîtrait jamais.
+      // `lancerJob` ne crée que pour la maquette ou pour l'API quand il y a un `appel` réel.
+      if (spec.job && !estActif()) {
         lancerJob({
           ...spec.job,
           alFin: def
@@ -206,9 +209,9 @@ export function useOperation() {
         titre: spec.titre,
         detail:
           spec.detail ??
-          (def
+          (def && !estActif()
             ? `${def.lancement} Suivi dans le centre de tâches.`
-            : spec.job
+            : spec.job && !estActif()
               ? 'Avancement suivi dans le centre de tâches.'
               : undefined),
       })

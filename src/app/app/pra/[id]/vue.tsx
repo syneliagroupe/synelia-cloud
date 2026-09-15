@@ -67,14 +67,6 @@ export function VuePra({ id }: { id: string }) {
     )
   }
 
-  /** Séquence d'une bascule : un groupe par étape, dans l'ordre déclaré. */
-  const etapesBascule = (reelle: boolean) => [
-    ...(reelle ? ['Arrêter les écritures sur le site source'] : ['Créer le réseau isolé de test']),
-    ...plan.groupes.map((g) => `Démarrer le groupe ${g.ordre} · ${g.nom}`),
-    reelle ? 'Basculer le DNS public' : 'Vérifier les services dans le réseau isolé',
-    'Contrôler la santé des services',
-  ]
-
   const basculeDeTest = () =>
     executer({
       action: 'dr.failover.test',
@@ -502,6 +494,14 @@ export function VuePra({ id }: { id: string }) {
                 ton: 'warn',
                 titre: 'Retour arrière engagé',
                 detail: `La resynchronisation inverse doit se terminer avant la bascule DNS de retour vers ${SITE_LABEL[plan.siteSource]}.`,
+                // Comme la bascule réelle ci-dessus : en mode API, `appel` remplace la
+                // simulation locale par le vrai `POST /pra/{id}/retour` (confirmation par
+                // le nom exact, déjà exigée par le dialogue de confirmation du bouton).
+                appel: () =>
+                  requete(`/pra/${encodeURIComponent(plan.id)}/retour`, {
+                    methode: 'POST',
+                    corps: { confirmation: plan.nom },
+                  }),
                 job: {
                   type: 'dr.failback',
                   label: `Retour arrière · ${plan.nom}`,

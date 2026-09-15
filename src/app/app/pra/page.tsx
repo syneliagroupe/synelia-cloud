@@ -3,18 +3,19 @@
 import Link from 'next/link'
 import { ArrowRight, FileDown, Plus } from 'lucide-react'
 import { dateCourte, dureeMin, pct } from '@/lib/format'
-import { SITE_COURT } from '@/lib/types'
+import { SITE_COURT, SITE_LABEL } from '@/lib/types'
 import { DR_PLANS } from '@/lib/mock'
 import type { DRPlan } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
-import { ButtonLink } from '@/components/ui/button'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { DrPlanSummary } from '@/components/business/infra'
 import { useCollection } from '@/components/app/atelier'
+import { BoutonFormulaire } from '@/components/app/actions'
 
 export default function ListePra() {
-  const DR_PLANS_ITEMS = useCollection<DRPlan>('plans-pra', DR_PLANS).items
+  const plans = useCollection<DRPlan>('plans-pra', DR_PLANS)
+  const DR_PLANS_ITEMS = plans.items
   const testes = DR_PLANS_ITEMS.filter((p) => p.exercices.length > 0)
   const dernier = testes.flatMap((p) => p.exercices).sort((a, b) => b.date.localeCompare(a.date))[0]
   const conformes = DR_PLANS_ITEMS.filter(
@@ -28,9 +29,59 @@ export default function ListePra() {
         titre="Plan de reprise"
         sousTitre="Un plan de reprise qui n’a jamais été exercé n’est pas un plan, c’est une intention. Nous affichons systématiquement la cible et le constaté côte à côte, et nous exerçons vos plans trimestriellement en réseau isolé."
         actions={
-          <ButtonLink href="/app/pra" iconBefore={<Plus size={14} />}>
-            Nouveau plan de reprise
-          </ButtonLink>
+          <BoutonFormulaire
+            libelle="Nouveau plan de reprise"
+            icone={<Plus size={14} />}
+            variant="primary"
+            action="dr.failover.test"
+            titre="Créer un plan de reprise"
+            description="Le site source et le site de repli, les cibles de RPO et de RTO. L’ordre de démarrage et les ressources répliquées se composent ensuite depuis la fiche du plan."
+            champs={[
+              { id: 'nom', label: 'Nom du plan', placeholder: 'ERP · reprise Grand-Bassam', obligatoire: true },
+              {
+                id: 'siteSource',
+                label: 'Site source',
+                type: 'select',
+                options: [
+                  { value: 'ABJ', label: SITE_LABEL.ABJ },
+                  { value: 'GBM', label: SITE_LABEL.GBM },
+                ],
+              },
+              {
+                id: 'siteRepli',
+                label: 'Site de repli',
+                type: 'select',
+                options: [
+                  { value: 'GBM', label: SITE_LABEL.GBM },
+                  { value: 'ABJ', label: SITE_LABEL.ABJ },
+                ],
+              },
+              { id: 'rpoCibleMin', label: 'RPO cible (minutes)', type: 'nombre', min: 1, demi: true },
+              { id: 'rtoCibleMin', label: 'RTO cible (minutes)', type: 'nombre', min: 1, demi: true },
+            ]}
+            valeursDepart={{ rpoCibleMin: 15, rtoCibleMin: 60 }}
+            libelleValider="Créer le plan"
+            operation={(v) => ({
+              titre: `Plan « ${v.nom} » créé`,
+              detail: 'Composez l’ordre de démarrage et les groupes de ressources depuis la fiche du plan.',
+              effet: () =>
+                plans.creer({
+                  id: plans.identifiant('pra'),
+                  orgId: 'org-dba',
+                  nom: String(v.nom),
+                  siteSource: v.siteSource as DRPlan['siteSource'],
+                  siteRepli: v.siteRepli as DRPlan['siteRepli'],
+                  rpoCibleMin: Number(v.rpoCibleMin),
+                  rpoConstateMin: 0,
+                  rtoCibleMin: Number(v.rtoCibleMin),
+                  rtoConstateMin: 0,
+                  groupes: [],
+                  replication: { mode: 'planifie', retardS: 0 },
+                  exercices: [],
+                  statut: 'jamais_teste',
+                }),
+            })}
+          />
         }
       />
 

@@ -6,7 +6,7 @@ import { Building2, Plus, ShieldAlert, UserCog } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, MAINTENANT, money, num, relatif } from '@/lib/format'
 import { ELEVATIONS, EQUIPE_SYNELIA, IMPAYES, libellePlan, ORGANISATIONS, USERS } from '@/lib/mock'
-import type { Elevation } from '@/lib/mock'
+import type { Elevation, Impaye } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -20,11 +20,12 @@ import { useApp } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire, useOperation } from '@/components/app/actions'
 import type { Organisation } from '@/lib/types'
-import { creerRessource } from '@/lib/api/client'
+import { creerRessource, requete } from '@/lib/api/client'
 
 export default function Organisations() {
   const { autorise, refus, pousser } = useApp()
   const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
+  const impayes = useCollection<Impaye>('impayes', IMPAYES)
   const atelier = useAtelier()
   const executer = useOperation()
 
@@ -88,7 +89,7 @@ export default function Organisations() {
   const actives = orgs.items.filter((o) => o.statut === 'active')
   const suspendues = orgs.items.filter((o) => o.statut === 'suspendue')
   const caTotal = orgs.items.reduce((a, o) => a + (o.caMensuel ?? 0), 0)
-  const orgsImpayees = new Set(IMPAYES.map((i) => i.org))
+  const orgsImpayees = new Set(impayes.items.map((i) => i.org))
 
   return (
     <div className="space-y-5">
@@ -129,7 +130,7 @@ export default function Organisations() {
         <StatTile libelle="Organisations actives" valeur={actives.length} ton="ok" />
         <StatTile
           libelle="Secteurs représentés"
-          valeur={new Set(ORGANISATIONS.map((o) => o.secteur ?? o.pays)).size}
+          valeur={new Set(orgs.items.map((o) => o.secteur ?? o.pays)).size}
           ton="violet"
           detail={`sur ${orgs.items.length} organisations`}
         />
@@ -174,7 +175,7 @@ export default function Organisations() {
                 libelle: 'Secteur',
                 options: [
                   { value: 'tous', label: 'Tous les secteurs' },
-                  ...[...new Set(ORGANISATIONS.map((o) => o.secteur).filter(Boolean))].map(
+                  ...[...new Set(orgs.items.map((o) => o.secteur).filter(Boolean))].map(
                     (sect) => ({ value: sect as string, label: sect as string }),
                   ),
                 ],
@@ -371,6 +372,19 @@ export default function Organisations() {
                         titre: `Élévation de ${v.duree} h demandée sur ${o.nom}`,
                         detail:
                           'Une entrée apparaît immédiatement dans le journal d’audit du client, avec votre nom et le motif.',
+                        // Même appel réel que le bouton équivalent de la fiche organisation
+                        // (`[id]/vue.tsx`) : sans `appel`, ce bouton se contentait d'écrire dans
+                        // l'atelier local (mode maquette) même en mode API — aucune ligne
+                        // `sessions_auth` ni entrée d'audit ne partait réellement côté backend.
+                        appel: () =>
+                          requete(`/organisations/${encodeURIComponent(o.id)}/emprunt-identite`, {
+                            methode: 'POST',
+                            corps: {
+                              motif: String(v.motif),
+                              ecriture: v.perimetre === 'intervention',
+                              dureeMin: Number(v.duree) * 60,
+                            },
+                          }),
                         effet: () =>
                           creerElevation(o.id, {
                             id: `elv-${o.id}-${v.duree}`,

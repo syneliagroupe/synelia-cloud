@@ -41,7 +41,7 @@ import {
   type Role,
   type Ticket,
 } from '@/lib/types'
-import type { Elevation } from '@/lib/mock'
+import type { Elevation, Impaye } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Avatar, GatedAction, Skeleton, Tabs } from '@/components/ui/display'
@@ -113,6 +113,7 @@ export function VueOrganisation({ id }: { id: string }) {
   const libellePlan = (plan: string) => offres.items.find((o) => o.code === plan)?.nom ?? plan
   const elevations = useCollection<Elevation>(`elevations-${id}`, ELEVATIONS)
   const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
+  const impayes = useCollection<Impaye>('impayes', IMPAYES)
   const espacesOrg = useRessourcesOrganisation<EspaceCloud>(id, 'espaces')
   const membresOrg = useRessourcesOrganisation<Membership>(id, 'membres')
   const ticketsOrg = useRessourcesOrganisation<Ticket>(id, 'tickets')
@@ -185,7 +186,7 @@ export function VueOrganisation({ id }: { id: string }) {
   // reste sur la maquette dans les deux modes — cf. mémoire « services_manages fully simulated ».
   const services = org.id === 'org-dba' ? SERVICES_MANAGES : []
   const souscriptions = SOUSCRIPTIONS.filter((s) => s.orgId === org.id)
-  const impayeReleve = IMPAYES.find((i) => i.org === org.nom)
+  const impayeReleve = impayes.items.find((i) => i.org === org.nom)
 
   return (
     <div className="space-y-5">

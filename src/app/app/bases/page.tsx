@@ -5,10 +5,10 @@ import { Plus } from 'lucide-react'
 import { cn, seededSeries, surfaceMarque } from '@/lib/utils'
 import { dateCourte, goHumain, money, num, pct } from '@/lib/format'
 import { BASES_MANAGEES } from '@/lib/mock'
-import { Badge, MicroLabel } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
-import { Field, Input, Select, Switch } from '@/components/ui/field'
+import { Field, Input, Select } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { HealthBadge, QuotaBar, StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
@@ -62,13 +62,6 @@ export default function BasesManagees() {
   const bases = collection.items.filter((b) => b.espaceId === espace.id)
   const [selection, setSelection] = useState(bases[0]?.id ?? '')
   const [creationOuverte, setCreationOuverte] = useState(false)
-  const [reseaux, setReseaux] = useState([
-    '10.0.1.0/24 · prod-front',
-    '10.0.4.0/24 · ci-cd',
-    '10.99.0.0/24 · pool VPN',
-  ])
-  const [restreint, setRestreint] = useState(true)
-  const [ipsExternes, setIpsExternes] = useState(false)
   const [instantPitr, setInstantPitr] = useState('2026-08-19T14:00')
   const [destinationPitr, setDestinationPitr] = useState('nouvelle')
   const [onglet, setOnglet] = useState('connexion')
@@ -824,70 +817,17 @@ export default function BasesManagees() {
               {onglet === 'reseau' && (
                 <Card>
                   <CardHeader
-                    titre="Restriction réseau"
-                    sousTitre="Par défaut, la base n’est joignable que depuis les réseaux privés de son Espace Cloud."
+                    titre="Acces reseau"
+                    sousTitre="Les bases gerees n'ont pas acces a Internet par conception."
                   />
-                  <div className="space-y-3.5">
-                    <Switch
-                      checked={restreint}
-                      onChange={setRestreint}
-                      label="Restreindre aux réseaux privés de l’espace"
-                      description={`Seules les ressources de ${espace.code} (${espace.cidr}) peuvent se connecter. Aucune exposition sur Internet.`}
-                    />
-                    <Switch
-                      checked={ipsExternes}
-                      onChange={setIpsExternes}
-                      label="Autoriser des adresses IP externes"
-                      description="À n’activer que temporairement, pour une migration ou un outil d’administration ponctuel. Chaque adresse autorisée élargit la surface d’attaque."
-                    />
-                  </div>
-                  <div className="mt-4 border-t border-g-100 pt-4">
-                    <MicroLabel className="mb-2">Réseaux autorisés</MicroLabel>
-                    <div className="space-y-2">
-                      {reseaux.map((r) => (
-                        <div
-                          key={r}
-                          className="flex items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2"
-                        >
-                          <span className="font-mono text-[12px] text-ink">{r}</span>
-                          <span className="flex items-center gap-2">
-                            <Badge tone="ok" size="sm">
-                              Autorisé
-                            </Badge>
-                            <BoutonAction
-                              libelle="Retirer"
-                              variant="ghost"
-                              operation={{
-                                action: 'network.manage',
-                                ton: 'warn',
-                                titre: `${r.split(' · ')[0]} retiré des réseaux autorisés`,
-                                effet: () => setReseaux((prev) => prev.filter((x) => x !== r)),
-                              }}
-                            />
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <BoutonFormulaire
-                      libelle="Ajouter un réseau"
-                      variant="ghost"
-                      className="mt-2.5"
-                      icone={<Plus size={12} />}
-                      action="network.manage"
-                      titre="Autoriser un réseau"
-                      description="Une base mutualisée n’a pas à être joignable depuis Internet : n’autorisez que des plages privées, sauf migration ponctuelle."
-                      champs={[
-                        { id: 'cidr', label: 'Plage', placeholder: '10.0.5.0/24', obligatoire: true },
-                        { id: 'libelle', label: 'À quoi elle sert', placeholder: 'outillage BI' },
-                      ]}
-                      libelleValider="Autoriser"
-                      operation={(f) => ({
-                        titre: `${f.cidr} autorisé`,
-                        effet: () =>
-                          setReseaux((prev) => [...prev, `${f.cidr}${f.libelle ? ` · ${f.libelle}` : ''}`]),
-                      })}
-                    />
-                  </div>
+                  <Callout ton="info" titre="Aucun acces distant — par conception">
+                    Cette base de donnees geree n'a pas d'adresse IP flottante et n'est joignable que
+                    depuis les reseaux prives de son Espace Cloud{' '}
+                    <span className="font-mono text-[12px]">({espace.cidr})</span>. C'est une
+                    propriete immuable du service, qui garantit l'isolation de vos donnees par rapport
+                    a Internet. Aucune configuration de pare-feu ou de liste d'acces n'est proposee:
+                    cette restriction est encodee dans l'infrastructure sous-jacente.
+                  </Callout>
                 </Card>
               )}
             </>

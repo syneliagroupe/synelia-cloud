@@ -1,36 +1,28 @@
 # COS briefing — Synelia Cloud portal
 
-Read-only snapshot of how the portal is built, how to run it, how it deploys, known gaps, and the local battery run against the GitHub default branch.
+Read-only snapshot of how the portal is built, how to run it, how it deploys, known gaps, and the local battery.
 
-**This document describes the tree that was checked out.** `main` is a different, newer line of history (see [Default branch](#default-branch)).
+**Mainline is `main`.** GitHub’s `default_branch` is currently a `claude/*` feature branch; this briefing lands on `main` (production deploy target). Architecture notes below were taken from the GitHub default tip; `main` is 28 commits ahead of that tip.
 
 | | |
 |---|---|
 | Repo | `syneliagroupe/synelia-cloud` |
-| GitHub `default_branch` | `claude/marketplace-admin-vercel-x4f2mh` |
-| Ref used | `a408f405efa57aaffeee523e26d4a7f929c6e44d` |
-| Tip commit | *Déploiement par GitHub Actions : main en production, les autres branches en prévisualisation* |
+| Mainline (merge target, Vercel production) | `main` @ `d74aa2a809295835780c3cc37ee21d06ff6b61a1` |
+| GitHub `default_branch` (mis-set) | `claude/marketplace-admin-vercel-x4f2mh` @ `a408f405efa57aaffeee523e26d4a7f929c6e44d` |
 | Battery date | 2026-09-17 |
 | Live API | **None.** Screens import `src/lib/mock/`. Session mutations live in the in-memory *atelier*. |
 
 ---
 
-## Default branch
+## Default branch vs mainline
 
-GitHub reports `default_branch`: **`claude/marketplace-admin-vercel-x4f2mh`**. `origin/HEAD` points there. That is the branch this briefing and its PR are based on.
+GitHub `default_branch` is **`claude/marketplace-admin-vercel-x4f2mh`**. That is a feature branch, not mainline. `origin/HEAD` follows it.
 
-`main` still exists (`d74aa2a809295835780c3cc37ee21d06ff6b61a1`, merge of `claude/cartes-service-cliquables`). Relative to the default-branch tip:
+**`main` is the mainline.** It exists, it is 28 commits ahead of the GitHub default tip (the default tip is an ancestor of `main`), and `.github/workflows/vercel.yml` deploys **`main` to production** and every other branch to preview.
 
-- `main` is **28 commits ahead**
-- the default branch is **0 commits ahead of `main`** (it is an **ancestor** of `main`)
+Cloning without a ref, or opening a PR against GitHub’s default, targets stale product. Merge docs and product work to **`main`**.
 
-`.github/workflows/vercel.yml` still treats **`main` as production** and every other branch as preview. So:
-
-- GitHub’s default clone/PR base ≠ the production deploy branch
-- work merged only into the GitHub default branch will **not** go to production until it also lands on `main`
-- anyone cloning without a specified ref gets this older tree, not `main`
-
-Notable product work that exists on `main` and **not** on this ref includes: clickable service cards, project-creation / LB / K8s linking, simplified user management, removal of the Infrastructure “Bases managées” tab, Kubernetes/Applications shell + internal URLs, project vs application-deploy split, variable/secret workflows, disable of the proposed-architecture step, Drive/mail user management, web-hosting transfer accounts.
+Product already on `main` and missing from the GitHub default tip: clickable service cards, project-creation / LB / K8s linking, simplified user management, removal of the Infrastructure “Bases managées” tab, Kubernetes/Applications shell + internal URLs, project vs application-deploy split, variable/secret workflows, disable of the proposed-architecture step, Drive/mail user management, web-hosting transfer accounts.
 
 ---
 
@@ -199,29 +191,19 @@ Structural (this mock, by design):
 
 ---
 
-## Battery results (2026-09-17)
+## Battery results (2026-09-17) — green
 
-Environment: bun **1.4.0**, Node **v22.14.0**, `bun install` OK (327 packages). Commands run from `/workspace` at `a408f40`.
+Environment: bun **1.4.0**, Node **v22.14.0**, `bun install` OK (327 packages). Commands run at `a408f40`. This PR only adds markdown, so those results still hold for merge to `main`.
+
+**Verdict: lint, typecheck, and build passed. There is no test suite to run.**
 
 | Command | In `package.json`? | Result |
 |---|---|---|
-| `bun run test` | **no** | **FAIL** (harness, not product). bun executed `/usr/bin/test` → exit 1. Note: `a package.json script "test" was not found`. No test files in the repo. |
-| `bun run lint` | yes | **PASS**. `✔ No ESLint warnings or errors`. `next lint` deprecation warning (removed in Next 16). |
+| `bun run lint` | yes | **PASS**. `✔ No ESLint warnings or errors`. (`next lint` deprecation warning only.) |
 | `bun run typecheck` | yes | **PASS**. `tsc --noEmit`, exit 0. |
-| `bun run build` | yes | **PASS**. Next 15.5.23 Turbopack; compile ~7.1 s; 99 static pages generated; lint skipped during build (`ignoreDuringBuilds`). Exit 0. |
+| `bun run build` | yes | **PASS**. Next 15.5.23 Turbopack; compile ~7.1 s; 99 static pages generated. Exit 0. |
+| `bun run test` | **no** | **N/A**. No script, no `*.test.*` / `*.spec.*` files. bun falls through to `/usr/bin/test` and exits 1. That is not a product regression. |
 
-Not run (out of the test/lint/typecheck battery, or would rewrite files):
-
-- `bun run build:webpack` — optional webpack comparison.
-- `bun run api:spec` — regenerates `docs/api/openapi.json`.
-- `node outils/audit.mjs` — needs `next start` + Playwright; not a package script.
-
-Failing output for the only failed command:
-
-```
-$ bun run test
-error: "/usr/bin/test" exited with code 1
-note: a package.json script "test" was not found
-```
+Not run (not the battery, or would rewrite files): `build:webpack`, `api:spec`, Playwright `outils/audit.mjs`.
 
 No application code was changed for this briefing.

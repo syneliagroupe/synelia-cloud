@@ -135,7 +135,7 @@ export default function ComposerServeurs() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Espace Cloud" hint="Le quota et le site en découlent.">
                 <Select value={espaceId} onChange={(e) => setEspaceId(e.target.value)}>
-                  {ESPACES.map((e) => (
+                  {espaces.items.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.code} — {e.offreNom}
                     </option>

@@ -5,11 +5,26 @@ import { cn } from '@/lib/utils'
 import { money } from '@/lib/format'
 import { CATEGORIE_LABEL } from '@/lib/types'
 import { CATALOGUE, CONTRAT_INTEGRATION } from '@/lib/mock'
+import { lirePublicServeur } from '@/lib/api/public-serveur'
+import { fusionnerFicheCatalogue, type FicheCataloguePublique } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { SolutionLogo } from '@/components/ui/display'
 import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
 import { AppelFinal, Container, SiteSection } from '@/components/site/blocs'
+
+/**
+ * La fiche publiée (`GET /public/catalogue/services/{slug}`) quand l’API
+ * est active, complétée par la fiche locale de même `slug` ; la fiche
+ * locale seule sinon, ou si le backend ne répond pas.
+ */
+async function ficheDe(slug: string) {
+  const locale = CATALOGUE.find((c) => c.slug === slug)
+  const distante = await lirePublicServeur<FicheCataloguePublique>(
+    `/public/catalogue/services/${encodeURIComponent(slug)}`,
+  )
+  return distante ? fusionnerFicheCatalogue(distante, locale) : locale
+}
 
 export async function generateMetadata({
   params,
@@ -17,7 +32,7 @@ export async function generateMetadata({
   params: Promise<{ service: string }>
 }): Promise<Metadata> {
   const { service } = await params
-  const s = CATALOGUE.find((c) => c.slug === service)
+  const s = await ficheDe(service)
   return {
     title: s ? `${s.nom} — ${s.solutionOSS} opéré par Synelia` : 'Service introuvable',
     description: s?.description,
@@ -51,7 +66,7 @@ export default async function FicheServicePublique({
   params: Promise<{ service: string }>
 }) {
   const { service: slug } = await params
-  const s = CATALOGUE.find((c) => c.slug === slug)
+  const s = await ficheDe(slug)
   if (!s) notFound()
 
   const prixEntree = s.paliers.reduce<{ valeur: number; unite: string } | null>((acc, p) => {

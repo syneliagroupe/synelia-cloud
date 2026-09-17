@@ -20,11 +20,13 @@ import { Button } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
 import { ConfirmDialog } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { RpoRtoGauge } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'composition', label: 'Composition' },
@@ -40,16 +42,30 @@ export function VuePra({ id }: { id: string }) {
   const [onglet, setOnglet] = useState('composition')
   const [bascule, setBascule] = useState(false)
 
-  const plan = plans.items.find((p) => p.id === id)!
-  const [ordre, setOrdre] = useState(plan.groupes)
+  const plan = plans.items.find((p) => p.id === id)
+  // L’ordre initial vient du plan quand il est déjà là ; sinon la liste vide,
+  // complétée à l’arrivée de la collection (garde ci-dessous).
+  const [ordre, setOrdre] = useState(plan?.groupes ?? [])
 
-  /** Séquence d'une bascule : un groupe par étape, dans l'ordre déclaré. */
-  const etapesBascule = (reelle: boolean) => [
-    ...(reelle ? ['Arrêter les écritures sur le site source'] : ['Créer le réseau isolé de test']),
-    ...plan.groupes.map((g) => `Démarrer le groupe ${g.ordre} · ${g.nom}`),
-    reelle ? 'Basculer le DNS public' : 'Vérifier les services dans le réseau isolé',
-    'Contrôler la santé des services',
-  ]
+  if (!plan) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          fil={[
+            { label: 'Espace client', href: '/app' },
+            { label: 'Plan de reprise', href: '/app/pra' },
+            { label: 'Introuvable' },
+          ]}
+          titre="Plan introuvable"
+        />
+        <EmptyState
+          titre="Ce plan de reprise n’existe pas ou plus"
+          phrase="Il a peut-être été supprimé, ou vous avez suivi un lien vers une autre organisation."
+          action={{ libelle: 'Retour aux plans', href: '/app/pra' }}
+        />
+      </div>
+    )
+  }
 
   const basculeDeTest = () =>
     executer({
@@ -57,8 +73,13 @@ export function VuePra({ id }: { id: string }) {
       ton: 'info',
       titre: 'Bascule de test lancée en réseau isolé',
       detail: `Durée estimée ${dureeMin(plan.rtoCibleMin)}. Aucun impact sur la production.`,
+      appel: () =>
+        requete(`/pra/${encodeURIComponent(plan.id)}/bascule`, {
+          methode: 'POST',
+          corps: { type: 'test' },
+        }),
       job: { workflow: 'dr.failover.test', cible: plan.nom },
-      effetFinal: () =>
+      effetFinal: () => {
         plans.modifier(plan.id, (p) => ({
           statut: 'operationnel',
           rtoConstateMin: p.rtoConstateMin || p.rtoCibleMin,
@@ -73,7 +94,9 @@ export function VuePra({ id }: { id: string }) {
             },
             ...p.exercices,
           ],
-        })),
+        }))
+        plans.recharger()
+      },
     })
 
   return (
@@ -471,6 +494,14 @@ export function VuePra({ id }: { id: string }) {
                 ton: 'warn',
                 titre: 'Retour arrière engagé',
                 detail: `La resynchronisation inverse doit se terminer avant la bascule DNS de retour vers ${SITE_LABEL[plan.siteSource]}.`,
+                // Comme la bascule réelle ci-dessus : en mode API, `appel` remplace la
+                // simulation locale par le vrai `POST /pra/{id}/retour` (confirmation par
+                // le nom exact, déjà exigée par le dialogue de confirmation du bouton).
+                appel: () =>
+                  requete(`/pra/${encodeURIComponent(plan.id)}/retour`, {
+                    methode: 'POST',
+                    corps: { confirmation: plan.nom },
+                  }),
                 job: {
                   type: 'dr.failback',
                   label: `Retour arrière · ${plan.nom}`,
@@ -687,8 +718,15 @@ export function VuePra({ id }: { id: string }) {
             ton: 'warn',
             titre: 'Bascule réelle engagée',
             detail: `Séquence de ${plan.groupes.length} groupes en cours. Suivi dans le centre de tâches.`,
+            // La confirmation voyage dans le corps, pas en paramètre : le
+            // dialogue a déjà fait saisir le nom exact du plan.
+            appel: () =>
+              requete(`/pra/${encodeURIComponent(plan.id)}/bascule`, {
+                methode: 'POST',
+                corps: { type: 'reel', confirmation: plan.nom },
+              }),
             job: { workflow: 'dr.failover.real', cible: `${plan.nom} → ${SITE_LABEL[plan.siteRepli]}` },
-            effetFinal: () =>
+            effetFinal: () => {
               plans.modifier(plan.id, (p) => ({
                 exercices: [
                   {
@@ -701,7 +739,9 @@ export function VuePra({ id }: { id: string }) {
                   },
                   ...p.exercices,
                 ],
-              })),
+              }))
+              plans.recharger()
+            },
           })
         }
         titre="Déclencher une bascule réelle"

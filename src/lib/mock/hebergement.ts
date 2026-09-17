@@ -706,22 +706,26 @@ function etatEntree(
 }
 
 /**
- * Entrées Web Cloud d'une organisation, domaines et hébergements confondus.
- *
- * `source` permet de composer les entrées depuis l'atelier plutôt que depuis la
- * graine : le panneau de la section doit montrer un domaine acheté pendant la
- * session, et l'hébergement qu'on vient de lui attacher.
+ * Assemble les entrées Web Cloud depuis trois listes — domaines, hébergements,
+ * zones — quelle qu’en soit la provenance (graines locales ou collections
+ * distantes : le backend nomme les mêmes champs). L’URL reste le nom servi.
  */
-export function entreesWebCloud(
-  orgId: string = ORG_COURANTE.id,
-  source?: { domaines?: Domaine[]; hebergements?: WebHosting[] },
+export function assemblerEntrees(
+  domaines: Domaine[],
+  hebergements: WebHosting[],
+  zones: DnsZone[],
 ): EntreeWebCloud[] {
-  const domaines = (source?.domaines ?? DOMAINES).filter((d) => d.orgId === orgId)
-  const hebergements = (source?.hebergements ?? HEBERGEMENTS).filter((h) => h.orgId === orgId)
-
   const depuisDomaines = domaines.map<EntreeWebCloud>((d) => {
-    const hebergement = hebergements.find((h) => h.domaine === d.nom)
-    const zone = d.zoneId ? ZONES_DNS.find((z) => z.id === d.zoneId) : undefined
+    const hebergement = hebergements.find(
+      (h) => h.id === d.hebergementId || h.domaine === d.nom,
+    )
+    // `zoneId` n'est posé qu'à la commande d'un domaine avec zone incluse : une
+    // zone rapatriée après coup (`POST /web/dns`) n'a aucun moyen de s'y relier
+    // (le contrat ne permet pas de patcher `zoneId`), donc le repli par nom
+    // évite qu'une zone fraîchement créée reste invisible sur sa propre fiche.
+    const zone = d.zoneId
+      ? zones.find((z) => z.id === d.zoneId)
+      : zones.find((z) => z.domaine === d.nom)
     const sousTitre = hebergement
       ? `${hebergement.palier} · ${hebergement.serveur.nom}`
       : zone
@@ -743,6 +747,15 @@ export function entreesWebCloud(
     }))
 
   return [...depuisDomaines, ...orphelins]
+}
+
+/** Entrées Web Cloud d'une organisation, domaines et hébergements confondus. */
+export function entreesWebCloud(orgId: string = ORG_COURANTE.id): EntreeWebCloud[] {
+  return assemblerEntrees(
+    DOMAINES.filter((d) => d.orgId === orgId),
+    HEBERGEMENTS.filter((h) => h.orgId === orgId),
+    ZONES_DNS,
+  )
 }
 
 export const entreeWebCloudById = (id: string, orgId?: string) =>

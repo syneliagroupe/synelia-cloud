@@ -16,6 +16,7 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'restauration', label: 'Tests de restauration' },
@@ -170,13 +171,22 @@ export default function Conformite() {
 
   const genererAttestation = () => {
     if (!attestation) return
+    // Pas d’appel : `POST /attestations/{modele}` génère un modèle du
+    // backend (identifiants inconnus d’ici), pas une ligne de ce journal —
+    // et `GET /attestations` ne rend pas cette forme. La génération reste
+    // locale, comme la planification des tests et le rapport CSV — mais
+    // seulement en mode maquette : en mode API, `generees.creer()` postait
+    // réellement sur `POST /attestations` (bare), une route qui n’existe pas
+    // (seul `POST /attestations/{attestationId}` existe) — un `405` silencieux
+    // (`.then(recharger, recharger)` avale l’échec) derrière un toast de succès.
     executer({
       action: 'compliance.export',
       titre: `Attestation « ${attestation} » générée`,
       detail: signature
         ? 'Le document signé est disponible au téléchargement. La génération est journalisée dans l’audit.'
         : 'Document produit sans signature électronique : le destinataire devra nous contacter pour en vérifier l’authenticité.',
-      effet: () =>
+      effet: () => {
+        if (estActif()) return
         generees.creer({
           id: generees.identifiant('gen'),
           date: MAINTENANT.slice(0, 10),
@@ -186,7 +196,8 @@ export default function Conformite() {
             : 'Toute la plateforme',
           qui: EQUIPE_SYNELIA[0].nom,
           motif: motif.trim() || destinataire.trim() || 'Motif non renseigné',
-        }),
+        })
+      },
     })
     setDestinataire('')
     setMotif('')
@@ -204,6 +215,7 @@ export default function Conformite() {
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Conformité' }]}
         titre="Conformité"
         sousTitre="Tests de restauration réellement exécutés, exercices de reprise avec leurs échecs, vulnérabilités ouvertes, constats d’audit non clos. Un tableau de conformité qui n’affiche que du vert n’a aucune valeur : celui-ci montre aussi ce qui ne va pas."
         actions={
@@ -488,6 +500,14 @@ export default function Conformite() {
                 operation={{
                   action: 'compliance.export',
                   titre: 'Planification des tests enregistrée',
+                  // `POST /admin/conformite/tests-restauration` → `202` : la
+                  // campagne du mois part sur l’échantillon réglé ici et se
+                  // suit dans le centre de tâches.
+                  appel: () =>
+                    requete('/admin/conformite/tests-restauration', {
+                      methode: 'POST',
+                      corps: { perimetre: 'toutes', echantillonPct: partParc },
+                    }),
                   detail: `${partParc} % du parc tiré au sort chaque mois, ${
                     profondeur === 'complet'
                       ? 'en restauration complète avec vérification des données'
@@ -1076,7 +1096,13 @@ export default function Conformite() {
               sousTitre="Chaque génération est journalisée dans l’audit, avec le demandeur et le périmètre."
             />
             <div className="space-y-1.5">
-              {generees.items.map((x) => (
+              {generees.items
+                // En mode API, `GET /attestations` renvoie des modèles à
+                // générer, pas des lignes de journal : on ne garde que les
+                // lignes qui en sont (attestation + date), les autres
+                // n’ont rien à faire dans cet historique.
+                .filter((x) => typeof x.attestation === 'string' && typeof x.date === 'string')
+                .map((x) => (
                 <div
                   key={x.id}
                   className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"

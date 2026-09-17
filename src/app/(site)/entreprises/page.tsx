@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { Check, ShieldCheck } from 'lucide-react'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field'
-import { FormulaireSite } from '@/components/site/formulaire'
+import { FormulaireContact } from './formulaire-contact'
 import { Card } from '@/components/composition/card'
 import {
   AppelFinal,
@@ -181,7 +181,7 @@ export default function Entreprises() {
             </div>
 
             <Card className="lg:p-6">
-              <FormulaireSite
+              <FormulaireContact
                 libelle="Demander un rendez-vous"
                 titreSucces="Demande enregistrée"
                 phraseSucces="Un architecte basé à Abidjan reprend votre demande. Pas de file d’attente internationale, pas de qualification par un centre d’appels."
@@ -278,7 +278,7 @@ export default function Entreprises() {
                   label="J’accepte d’être contacté par Synelia au sujet de cette demande"
                   description="Vos coordonnées ne sont utilisées que pour cette prise de contact et ne sont transmises à aucun tiers. Vous pouvez demander leur suppression à tout moment."
                 />
-              </FormulaireSite>
+              </FormulaireContact>
             </Card>
           </div>
         </Container>

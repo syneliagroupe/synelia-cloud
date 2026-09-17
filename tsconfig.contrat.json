@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "plugins": [], "incremental": false, "noEmit": true },
+  "include": ["outils/contrat/**/*.ts", "src/lib/types.ts"],
+  "exclude": ["node_modules"]
+}

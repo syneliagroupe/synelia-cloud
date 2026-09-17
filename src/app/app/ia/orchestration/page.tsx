@@ -1,15 +1,36 @@
 'use client'
 
 import { money, num, pct } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
 import { FLUX_ORCHESTRATION } from '@/lib/mock'
+import type { FluxOrchestration } from '@/lib/types'
 import { Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { useEspace } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
 export default function Orchestration() {
   const espace = useEspace()
-  const flux = FLUX_ORCHESTRATION.filter((f) => f.espaceId === espace.id)
+  const fluxCol = useCollection<FluxOrchestration>('flux-ia', FLUX_ORCHESTRATION)
+  // Le backend ne rattache pas encore un flux à un Espace Cloud à la création
+  // (`FluxOrchestrationCreation.espaceId` optionnel, `""` par défaut — même
+  // repli que les agents) : en mode API, la liste n'est pas filtrée par
+  // Espace, sous peine de masquer tous les flux réels.
+  //
+  // L'exécuteur natif est réel (FONC-02), mais un flux créé via l'API ne porte
+  // pas encore de métriques agrégées (`executions7j`…) : le backend les laisse
+  // à `null`, absentes de la réponse JSON. On les ramène à 0 une bonne fois
+  // ici plutôt que de garder `?? 0` à chaque lecture plus bas.
+  const flux = fluxCol.items
+    .filter((f) => (estActif() ? true : f.espaceId === espace.id))
+    .map((f) => ({
+      ...f,
+      executions7j: f.executions7j ?? 0,
+      dureeMedianeS: f.dureeMedianeS ?? 0,
+      tauxSuccesPct: f.tauxSuccesPct ?? 0,
+      coutParExecution: f.coutParExecution ?? 0,
+    }))
   const publies = flux.filter((f) => f.statut === 'publie')
   const executions = flux.reduce((a, f) => a + f.executions7j, 0)
   const cout = flux.reduce((a, f) => a + f.coutParExecution * f.executions7j, 0)

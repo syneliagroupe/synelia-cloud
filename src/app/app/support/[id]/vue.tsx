@@ -16,12 +16,15 @@ import { Button, ButtonLink } from '@/components/ui/button'
 import { Avatar, Tabs } from '@/components/ui/display'
 import { Field, MonoTextarea, Select, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { Timeline } from '@/components/composition/flow'
 import { EventList, GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
+import { creerRessource, modifierRessource } from '@/lib/api/client'
 import type { Ticket } from '@/lib/types'
+import { useMaintenant } from '@/components/app/contexte'
 
 const LIBELLE_STATUT: Record<Ticket['statut'], string> = {
   ouvert: 'Ouvert',
@@ -60,6 +63,7 @@ const ONGLETS = [
 ]
 
 export function VueTicket({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   const executer = useOperation()
   const tickets = useCollection<Ticket>('tickets', TICKETS)
   const [onglet, setOnglet] = useState('echanges')
@@ -67,7 +71,28 @@ export function VueTicket({ id }: { id: string }) {
   const [lectureContexte, setLectureContexte] = useState(true)
   const [interventionAutorisee, setInterventionAutorisee] = useState(false)
 
-  const t = tickets.items.find((x) => x.id === id)!
+  const t = tickets.items.find((x) => x.id === id)
+
+  if (!t) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          fil={[
+            { label: 'Espace client', href: '/app' },
+            { label: 'Support', href: '/app/support' },
+            { label: 'Introuvable' },
+          ]}
+          titre="Ticket introuvable"
+        />
+        <EmptyState
+          titre="Ce ticket n’existe pas ou plus"
+          phrase="Il a peut-être été fermé depuis plus de trente-six mois, ou vous avez suivi un lien vers une autre organisation."
+          action={{ libelle: 'Retour au support', href: '/app/support' }}
+        />
+      </div>
+    )
+  }
+
   const ouvert = !['resolu', 'ferme'].includes(t.statut)
 
   const premiereReponse = t.messages.find((m) => m.role === 'synelia')
@@ -111,7 +136,9 @@ export function VueTicket({ id }: { id: string }) {
                   executer({
                     titre: 'Ticket marqué comme résolu',
                     detail: 'Il reste consultable et peut être réouvert pendant sept jours.',
+                    appel: () => modifierRessource('/support/tickets', t.id, { statut: 'resolu' }),
                     effet: () => tickets.modifier(t.id, { statut: 'resolu', slaRestantMin: undefined }),
+                    effetFinal: () => tickets.recharger(),
                   })
                 }
               >
@@ -126,7 +153,12 @@ export function VueTicket({ id }: { id: string }) {
                   titre: 'Escalade demandée',
                   detail:
                     'Le responsable d’astreinte est notifié et reprend le ticket. L’engagement de résolution ne change pas : c’est le niveau d’attention qui change.',
+                  appel: () =>
+                    creerRessource(`/support/tickets/${encodeURIComponent(t.id)}/escalade`, {
+                      motif: 'Escalade demandée depuis le portail',
+                    }),
                   effet: () => tickets.modifier(t.id, { statut: 'en_cours' }),
+                  effetFinal: () => tickets.recharger(),
                 }}
               />
             </>
@@ -138,7 +170,9 @@ export function VueTicket({ id }: { id: string }) {
                 ton: 'info',
                 titre: `Ticket ${t.numero} réouvert`,
                 detail: 'L’équipe qui l’avait traité est notifiée en priorité.',
+                appel: () => modifierRessource('/support/tickets', t.id, { statut: 'ouvert' }),
                 effet: () => tickets.modifier(t.id, { statut: 'ouvert' }),
+                effetFinal: () => tickets.recharger(),
               }}
             />
           )
@@ -220,7 +254,7 @@ export function VueTicket({ id }: { id: string }) {
                   <span className="flex min-w-0 items-center gap-2.5">
                     <Avatar nom={m.auteur} size="sm" />
                     <span className="min-w-0">
-                      <span className="block text-[13px] font-bold text-ink">{m.auteur}</span>
+                      <span className="block text-[12.5px] font-bold text-ink">{m.auteur}</span>
                       <span className="block text-[11px] text-g-500">
                         {m.role === 'synelia' ? 'Équipe Synelia Cloud' : ORG_LABEL}
                       </span>
@@ -228,7 +262,7 @@ export function VueTicket({ id }: { id: string }) {
                   </span>
                   <span className="shrink-0 text-right">
                     <span className="block text-[11px] text-g-700">{dateHeure(m.date)}</span>
-                    <span className="block text-[11px] text-g-500">{relatif(m.date)}</span>
+                    <span className="block text-[10px] text-g-500">{relatif(m.date, maintenant)}</span>
                   </span>
                 </div>
                 <p className="mt-3 whitespace-pre-line text-[13px] leading-relaxed text-ink">
@@ -239,7 +273,7 @@ export function VueTicket({ id }: { id: string }) {
                     {m.pieces.map((p) => (
                       <span
                         key={p}
-                        className="flex items-center gap-1.5 rounded-[5px] border border-g-300 bg-white px-2 py-1 font-mono text-[11px] text-ink"
+                        className="flex items-center gap-1.5 rounded-[5px] border border-g-300 bg-white px-2 py-1 font-mono text-[10.5px] text-ink"
                       >
                         <Paperclip size={10} className="text-g-500" />
                         {p}
@@ -291,6 +325,10 @@ export function VueTicket({ id }: { id: string }) {
                       executer({
                         titre: 'Réponse envoyée',
                         detail: `L’équipe est notifiée. Engagement de réponse : ${dureeMin(t.slaCible.premiereReponseMin)}.`,
+                        appel: () =>
+                          creerRessource(`/support/tickets/${encodeURIComponent(t.id)}/messages`, {
+                            contenu: reponse,
+                          }),
                         effet: () =>
                           tickets.modifier(t.id, (x) => ({
                             statut: 'en_cours',
@@ -304,6 +342,7 @@ export function VueTicket({ id }: { id: string }) {
                               },
                             ],
                           })),
+                        effetFinal: () => tickets.recharger(),
                       })
                       setReponse('')
                     }}
@@ -322,7 +361,7 @@ export function VueTicket({ id }: { id: string }) {
                     <p className="text-[13px] font-semibold text-ink">
                       Ce ticket est {t.statut === 'resolu' ? 'résolu' : 'fermé'}
                     </p>
-                    <p className="text-[12px] text-g-500">
+                    <p className="text-[11.5px] text-g-500">
                       Il reste consultable indéfiniment. Une réouverture est possible pendant sept
                       jours ; au-delà, ouvrez un nouveau ticket en le référençant.
                     </p>
@@ -368,7 +407,7 @@ export function VueTicket({ id }: { id: string }) {
                       key={r}
                       className="flex items-center justify-between gap-2 rounded-[5px] border border-g-300 px-2.5 py-1.5"
                     >
-                      <span className="min-w-0 truncate font-mono text-[12px] text-ink">{r}</span>
+                      <span className="min-w-0 truncate font-mono text-[11.5px] text-ink">{r}</span>
                       <Button size="sm" variant="ghost" onClick={() => setOnglet('contexte')}>
                         Voir
                       </Button>
@@ -514,14 +553,14 @@ export function VueTicket({ id }: { id: string }) {
                 <tbody>
                   {t.ressourcesLiees.map((r, i) => (
                     <tr key={r} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2 font-mono text-[12px] font-semibold text-ink">{r}</td>
-                      <td className="px-3 py-2 text-[12px] text-g-700">
+                      <td className="px-3 py-2 font-mono text-[11.5px] font-semibold text-ink">{r}</td>
+                      <td className="px-3 py-2 text-[11.5px] text-g-700">
                         {i % 2 === 0 ? 'OpenStack · OS-ABJ-01' : 'Kubernetes · k8s-dba-prod'}
                       </td>
                       <td className="px-3 py-2 font-mono text-[11px] text-g-500">
                         {i % 2 === 0 ? `hv-abj-0${(i % 4) + 1}` : `ns/org-dba-prod`}
                       </td>
-                      <td className="px-3 py-2 text-[12px] text-g-700">Abidjan · ABJ-1</td>
+                      <td className="px-3 py-2 text-[11.5px] text-g-700">Abidjan · ABJ-1</td>
                       <td className="px-3 py-2">
                         <Badge tone={i === 0 ? 'warn' : 'ok'} dot size="sm">
                           {i === 0 ? 'Dégradé' : 'Sain'}
@@ -610,12 +649,12 @@ export function VueTicket({ id }: { id: string }) {
                     'rounded-[6px] border px-3 py-2.5',
                     delaiPremiereReponse !== undefined &&
                       delaiPremiereReponse <= t.slaCible.premiereReponseMin
-                      ? 'border-ok/40'
-                      : 'border-warn/40',
+                      ? 'border-ok/40 bg-ok-bg'
+                      : 'border-warn/40 bg-warn-bg',
                   )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[13px] font-semibold text-ink">Première réponse</span>
+                    <span className="text-[12.5px] font-semibold text-ink">Première réponse</span>
                     <Badge
                       tone={
                         delaiPremiereReponse !== undefined &&
@@ -630,7 +669,7 @@ export function VueTicket({ id }: { id: string }) {
                         : 'En attente'}
                     </Badge>
                   </div>
-                  <p className="mt-0.5 text-[12px] text-g-700">
+                  <p className="mt-0.5 text-[11.5px] text-g-700">
                     Le délai est mesuré entre l’ouverture du ticket et le premier message de nos
                     équipes qui n’est pas un accusé de réception automatique.
                   </p>
@@ -638,7 +677,7 @@ export function VueTicket({ id }: { id: string }) {
 
                 <div className="rounded-[6px] border border-g-300 px-3 py-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                    <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                       <Clock size={12} className="text-g-500" />
                       Résolution
                     </span>
@@ -648,7 +687,7 @@ export function VueTicket({ id }: { id: string }) {
                         : 'Tenue'}
                     </Badge>
                   </div>
-                  <p className="mt-0.5 text-[12px] text-g-700">
+                  <p className="mt-0.5 text-[11.5px] text-g-700">
                     L’horloge est suspendue pendant les périodes d’attente de votre réponse. Elle
                     reprend dès que vous répondez.
                   </p>
@@ -666,12 +705,13 @@ export function VueTicket({ id }: { id: string }) {
                 sousTitre="Sur les mêmes ressources, ou avec un symptôme proche."
               />
               <div className="space-y-1.5">
-                {TICKETS.filter(
-                  (x) =>
-                    x.id !== t.id &&
-                    (x.service === t.service ||
-                      x.ressourcesLiees.some((r) => t.ressourcesLiees.includes(r))),
-                )
+                {tickets.items
+                  .filter(
+                    (x) =>
+                      x.id !== t.id &&
+                      (x.service === t.service ||
+                        x.ressourcesLiees.some((r) => t.ressourcesLiees.includes(r))),
+                  )
                   .slice(0, 4)
                   .map((x) => (
                     <Link
@@ -687,13 +727,13 @@ export function VueTicket({ id }: { id: string }) {
                           {LIBELLE_STATUT[x.statut]}
                         </Badge>
                       </div>
-                      <p className="mt-0.5 font-mono text-[11px] text-g-500">
-                        {x.numero} · {relatif(x.createdAt)}
+                      <p className="mt-0.5 font-mono text-[10.5px] text-g-500">
+                        {x.numero} · {relatif(x.createdAt, maintenant)}
                       </p>
                     </Link>
                   ))}
               </div>
-              {TICKETS.filter(
+              {tickets.items.filter(
                 (x) =>
                   x.id !== t.id &&
                   (x.service === t.service ||

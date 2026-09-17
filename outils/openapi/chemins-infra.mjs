@@ -81,6 +81,17 @@ const bord = fusion(
         params: [chemin('travailId', 'Identifiant du travail.', 'job-1')],
         ok: ref('TravailProvisioning'),
       }),
+      delete: op({
+        tag: T_TRAVAUX,
+        id: 'purgerTravail',
+        resume: 'Retirer une tâche terminée du centre de tâches',
+        detail:
+          'Refusé si le travail est encore en file ou en cours. Le journal d’audit garde la trace après la purge.',
+        params: [chemin('travailId', 'Identifiant du travail.', 'job-1')],
+        destructif: true,
+        code: 204,
+        erreurs: [409],
+      }),
     },
   },
   action({
@@ -186,6 +197,7 @@ const vms = fusion(
       filtre('tag', chaine()),
       filtre('applicationId', chaine()),
     ],
+    erreursCreation: [404],
   }),
   {
     '/vms/lot': {
@@ -200,7 +212,7 @@ const vms = fusion(
         ok: ref('TravailProvisioning'),
         code: 202,
         rbac: 'vm.create_delete',
-        erreurs: [409, 402],
+        erreurs: [409, 402, 404],
       }),
     },
     '/vms/{vmId}/materiel': {
@@ -374,6 +386,7 @@ const k8s = fusion(
     rbacEcriture: 'vm.create_delete',
     filtres: [filtreEspace, filtreSite, filtre('statut', liste(['running', 'degraded', 'provisioning', 'updating']))],
     sansModification: true,
+    erreursCreation: [404],
   }),
   {
     '/kubernetes/versions': {
@@ -471,6 +484,32 @@ const k8s = fusion(
         params: [idCluster],
         ok: ref('Kubeconfig'),
         rbac: 'component.restart',
+      }),
+    },
+    '/kubernetes/{clusterId}/metriques': {
+      get: op({
+        tag: T_K8S,
+        id: 'obtenirMetriquesK8s',
+        resume: 'Obtenir les métriques d’un cluster',
+        detail:
+          'Agrège les diagnostics Nova/libvirt des VM réelles derrière le cluster (masters et ' +
+          'workers, retrouvées via la stack Heat du cluster Magnum) — un instantané réel, pas un ' +
+          'historique, même mécanique que `GET /vms/{vmId}/metriques`.',
+        params: [idCluster],
+        ok: objet(
+          {
+            series: tableau(ref('Serie')),
+            noeuds: tableau(
+              objet(
+                { id: chaine(), statut: chaine(), vcpu: entier(), cpu: nombre(), ram: nombre() },
+                ['id', 'statut'],
+              ),
+            ),
+          },
+          ['series', 'noeuds'],
+        ),
+        rbac: 'org.dashboard.view',
+        erreurs: [424],
       }),
     },
   },
@@ -1032,7 +1071,7 @@ const protection = fusion(
     corps: ref('DemandeRestauration'),
     corpsRequis: true,
     rbac: 'backup.restore',
-    erreurs: [409],
+    erreurs: [409, 404],
   }),
   action({
     tag: T_PROTECTION,

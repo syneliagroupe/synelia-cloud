@@ -13,12 +13,20 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, num, relatif } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
+import type { DnsZone, Domaine, SiteWeb, WebHosting } from '@/lib/types'
+import type { Certificat, DriveDomaine, MessagerieDomaine, ServeurBases } from '@/lib/mock'
 import {
   CERTIFICATS,
+  DOMAINES,
   HEBERGEMENTS,
   MESSAGERIES,
+  DRIVES,
   ORG_COURANTE,
+  SERVEURS_BASES,
   SITES_WEB,
+  ZONES_DNS,
+  assemblerEntrees,
   drivesDeLOrg,
   entreesWebCloud,
   joursAvant,
@@ -29,15 +37,53 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
+import { useCollection } from '@/components/app/atelier'
+import { useMaintenant } from '@/components/app/contexte'
 
 export default function AccueilWebCloud() {
-  const entrees = entreesWebCloud()
-  const heberges = HEBERGEMENTS.filter((h) => h.orgId === ORG_COURANTE.id)
+  const maintenant = useMaintenant()
+  // Domaines, hébergements, sites, bases, messageries, drives et certificats
+  // ont chacun un vrai backend (`/web/domaines`, `/web/hebergements`,
+  // `/web/sites`, `/web/bases`, `/web/emails`, `/web/drive`, `/web/ssl`,
+  // `/web/dns`) : `useCollection` en sert les données réelles quand l'API est
+  // active, et retombe sur la graine sinon. Les sauvegardes web n'ont pas
+  // encore de section câblée sur un vrai backend : elles restent sur la
+  // graine, comme `/app/web/backup` lui-même.
+  const domainesCol = useCollection<Domaine>('domaines', DOMAINES)
+  const hebergementsCol = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
+  const sitesWebCol = useCollection<SiteWeb>('sites-web', SITES_WEB)
+  const messageriesCol = useCollection<MessagerieDomaine>('messageries', MESSAGERIES)
+  const drivesCol = useCollection<DriveDomaine>('drives', DRIVES)
+  const certificatsCol = useCollection<Certificat>('certificats', CERTIFICATS)
+  const serveursBasesCol = useCollection<ServeurBases>('serveurs-bases', SERVEURS_BASES)
+  const zonesDnsCol = useCollection<DnsZone>('zones-dns', ZONES_DNS)
+
+  // En mode API, le backend filtre déjà par organisation (et les identifiants
+  // du jeu local lui sont inconnus) : la maquette seule restreint au
+  // périmètre fictif, via les sélecteurs de `lib/mock`.
+  const entrees = estActif()
+    ? assemblerEntrees(domainesCol.items, hebergementsCol.items, zonesDnsCol.items)
+    : entreesWebCloud()
+  const heberges = estActif()
+    ? hebergementsCol.items
+    : hebergementsCol.items.filter((h) => h.orgId === ORG_COURANTE.id)
   const miens = new Set(heberges.map((h) => h.id))
-  const sites = SITES_WEB.filter((s) => miens.has(s.hebergementId))
-  const moteurs = serveursBasesDeLOrg()
-  const messageries = messageriesDeLOrg()
-  const drives = drivesDeLOrg()
+  const sites = sitesWebCol.items.filter((s) => miens.has(s.hebergementId))
+  const perimetreMoteurs = new Set(serveursBasesDeLOrg().map((m) => m.id))
+  const moteurs = estActif()
+    ? serveursBasesCol.items
+    : serveursBasesCol.items.filter((m) => perimetreMoteurs.has(m.id))
+  const perimetreMessageries = new Set(messageriesDeLOrg().map((m) => m.id))
+  const messageries = estActif()
+    ? messageriesCol.items
+    : messageriesCol.items.filter((m) => perimetreMessageries.has(m.id))
+  const perimetreDrives = new Set(drivesDeLOrg().map((d) => d.id))
+  const drives = estActif()
+    ? drivesCol.items
+    : drivesCol.items.filter((d) => perimetreDrives.has(d.id))
+  const certificats = certificatsCol.items
+  // Pas de backend pour les sauvegardes web : reste sur la graine, comme la
+  // section `/app/web/backup` elle-même.
   const plans = sauvegardesWebDeLOrg()
 
   const boites = messageries.reduce((a, m) => a + m.boites.length, 0)
@@ -53,7 +99,7 @@ export default function AccueilWebCloud() {
         href: `/app/web/domaines/${encodeURIComponent(e.id)}`,
         jours: joursAvant(e.domaine!.expiration),
       })),
-    ...CERTIFICATS.filter((c) => !c.renouvellementAuto && c.etat === 'actif').map((c) => ({
+    ...certificats.filter((c) => !c.renouvellementAuto && c.etat === 'actif').map((c) => ({
       quoi: `${c.hote} — certificat non renouvelé`,
       detail: `Expire dans ${joursAvant(c.expire)} jours et le renouvellement automatique est coupé.`,
       href: `/app/web/ssl/${c.id}`,
@@ -87,14 +133,14 @@ export default function AccueilWebCloud() {
       detail: `${sites.length} sites installés`,
     },
     {
-      nom: 'Databases',
+      nom: 'Bases de données',
       href: '/app/web/bases',
       icone: <Database size={16} />,
       valeur: moteurs.filter((m) => m.actif).length,
       detail: `${moteurs.length - moteurs.filter((m) => m.actif).length} à activer`,
     },
     {
-      nom: 'Emails',
+      nom: 'Messagerie',
       href: '/app/web/emails',
       icone: <Mail size={16} />,
       valeur: boites,
@@ -118,11 +164,11 @@ export default function AccueilWebCloud() {
       nom: 'SSL',
       href: '/app/web/ssl',
       icone: <ShieldCheck size={16} />,
-      valeur: CERTIFICATS.filter((c) => c.etat === 'actif').length,
-      detail: `${CERTIFICATS.filter((c) => c.etat === 'en_emission').length} en émission`,
+      valeur: certificats.filter((c) => c.etat === 'actif').length,
+      detail: `${certificats.filter((c) => c.etat === 'en_emission').length} en émission`,
     },
     {
-      nom: 'Backup',
+      nom: 'Sauvegardes',
       href: '/app/web/backup',
       icone: <HardDrive size={16} />,
       valeur: plans.length,
@@ -233,20 +279,24 @@ export default function AccueilWebCloud() {
                     </Badge>
                   </div>
                   <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <QuotaBar
-                      libelle="Processeur"
-                      utilise={h.serveur.chargeCpuPct}
-                      total={100}
-                      compact
-                      formateur={(v) => `${v} %`}
-                    />
-                    <QuotaBar
-                      libelle="Mémoire"
-                      utilise={h.serveur.ramUtiliseePct}
-                      total={100}
-                      compact
-                      formateur={(v) => `${v} %`}
-                    />
+                    {h.serveur.chargeCpuPct != null && (
+                      <QuotaBar
+                        libelle="Processeur"
+                        utilise={h.serveur.chargeCpuPct}
+                        total={100}
+                        compact
+                        formateur={(v) => `${v} %`}
+                      />
+                    )}
+                    {h.serveur.ramUtiliseePct != null && (
+                      <QuotaBar
+                        libelle="Mémoire"
+                        utilise={h.serveur.ramUtiliseePct}
+                        total={100}
+                        compact
+                        formateur={(v) => `${v} %`}
+                      />
+                    )}
                     <QuotaBar
                       libelle="Disque"
                       utilise={h.espaceUtiliseGo}
@@ -280,7 +330,7 @@ export default function AccueilWebCloud() {
                         {p.nomServi}
                       </span>
                       <span className="block text-[11px] text-g-500">
-                        {d ? `${relatif(d.ts)} · ${d.taille}` : 'Aucune exécution'}
+                        {d ? `${relatif(d.ts, maintenant)} · ${d.taille}` : 'Aucune exécution'}
                       </span>
                     </span>
                     <Badge
@@ -303,7 +353,7 @@ export default function AccueilWebCloud() {
             sousTitre="Échéance technique, tous hôtes confondus."
           />
           <ul className="divide-y divide-g-100">
-            {[...CERTIFICATS]
+            {[...certificats]
               .sort((a, b) => joursAvant(a.expire) - joursAvant(b.expire))
               .slice(0, 4)
               .map((c) => {

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { MAINTENANT } from '@/lib/format'
 import { goHumain, money, num } from '@/lib/format'
@@ -14,6 +15,7 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
+import { creerRessource, requete, supprimerRessource } from '@/lib/api/client'
 
 const PRIX_GO: Record<Volume['classe'], number> = {
   nvme: 5.4,
@@ -34,6 +36,7 @@ export default function Stockage() {
   const { autorise, refus } = useApp()
   const disques = useCollection<Volume>('volumes', VOLUMES)
   const parc = useCollection<VM>('vms', VMS)
+  const [creationOuverte, setCreationOuverte] = useState(false)
   const volumes = disques.items.filter((v) => v.espaceId === espace.id)
   const machines = parc.items.filter((v) => v.espaceId === espace.id)
 
@@ -155,7 +158,13 @@ export default function Stockage() {
             libelleValider="Étendre"
             operation={(f) => ({
               titre: `${v.nom} étendu à ${num(Number(f.taille))} Go`,
+              appel: () =>
+                requete(`/volumes/${encodeURIComponent(v.id)}/extension`, {
+                  methode: 'POST',
+                  corps: { tailleGo: Number(f.taille) },
+                }),
               effet: () => disques.modifier(v.id, { tailleGo: Number(f.taille) }),
+              effetFinal: () => disques.recharger(),
             })}
           />
           {v.attachedTo ? (
@@ -167,12 +176,15 @@ export default function Stockage() {
                 ton: 'warn',
                 titre: `${v.nom} détaché`,
                 detail: 'Le volume reste facturé tant qu’il existe.',
+                appel: () =>
+                  requete(`/volumes/${encodeURIComponent(v.id)}/attachement`, { methode: 'DELETE' }),
                 effet: () =>
                   disques.modifier(v.id, {
                     attachedTo: undefined,
                     attachedLabel: undefined,
                     montage: undefined,
                   }),
+                effetFinal: () => disques.recharger(),
               }}
             />
           ) : (
@@ -196,16 +208,42 @@ export default function Stockage() {
                 const cible = machines.find((m) => m.id === f.machine)
                 return {
                   titre: `${v.nom} attaché à ${cible?.nom ?? ''}`,
+                  appel: () =>
+                    requete(`/volumes/${encodeURIComponent(v.id)}/attachement`, {
+                      methode: 'PUT',
+                      corps: { vmId: cible?.id, montage: String(f.montage) || undefined },
+                    }),
                   effet: () =>
                     disques.modifier(v.id, {
                       attachedTo: cible?.id,
                       attachedLabel: cible?.nom,
                       montage: String(f.montage) || undefined,
                     }),
+                  effetFinal: () => disques.recharger(),
                 }
               }}
             />
           )}
+          <BoutonAction
+            libelle="Supprimer"
+            variant="ghost"
+            desactive={Boolean(v.attachedTo)}
+            operation={{
+              action: 'network.manage',
+              ton: 'warn',
+              titre: `Volume ${v.nom} supprimé`,
+              appel: () => supprimerRessource('/volumes', v.id, v.nom),
+              effet: () => disques.supprimer(v.id),
+              effetFinal: () => disques.recharger(),
+            }}
+            confirmation={{
+              ressource: v.nom,
+              pertes: [
+                `Les ${goHumain(v.tailleGo)} de données sont détruites, sans retour possible`,
+                'La facturation du volume cesse dès la suppression',
+              ],
+            }}
+          />
         </span>
       ),
     },
@@ -230,12 +268,22 @@ export default function Stockage() {
             action="network.manage"
             titre="Créer un volume"
             description="Un volume est un disque indépendant du système : il s’étend à chaud, se déplace d’une machine à l’autre et se sauvegarde séparément."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={champsVolume}
             valeursDepart={{ taille: 100, classe: 'ssd', chiffre: true }}
             libelleValider="Créer le volume"
             operation={(v) => ({
               titre: `Volume ${v.nom} créé`,
               detail: `${v.taille} Go · ${String(v.classe).toUpperCase()} · détaché`,
+              appel: () =>
+                creerRessource('/volumes', {
+                  espaceId: espace.id,
+                  nom: String(v.nom),
+                  tailleGo: Number(v.taille),
+                  classe: v.classe,
+                  chiffre: Boolean(v.chiffre),
+                }),
               effet: () =>
                 disques.creer({
                   id: disques.identifiant('vol'),
@@ -254,6 +302,7 @@ export default function Stockage() {
                           ? 900
                           : 120,
                 }),
+              effetFinal: () => disques.recharger(),
             })}
           />
         }
@@ -333,7 +382,7 @@ export default function Stockage() {
           titre: 'Aucun volume dans cet espace',
           phrase:
             'Un volume est un disque indépendant du système. Il s’étend à chaud, se déplace d’une machine à l’autre, et se sauvegarde séparément.',
-          action: { libelle: 'Créer un volume', href: '#' },
+          action: { libelle: 'Créer un volume', onClick: () => setCreationOuverte(true) },
         }}
       />
 

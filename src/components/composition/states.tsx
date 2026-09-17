@@ -182,10 +182,16 @@ export function DegradedState({
   source = 'supervision',
   hauteur = 'h-40',
   className,
+  integration,
+  dateDonnees,
 }: {
   source?: string
   hauteur?: string
   className?: string
+  /** Intégration amont en cause (`424`) : nommée au lieu du « ne répond pas » générique. */
+  integration?: string
+  /** Date des dernières données connues (`424`), affichée telle quelle. */
+  dateDonnees?: string
 }) {
   return (
     <div
@@ -198,8 +204,15 @@ export function DegradedState({
       <AlertTriangle size={18} className="text-warn" />
       <p className="text-[13px] font-semibold text-g-700">Données de {source} indisponibles</p>
       <p className="max-w-xs text-[12px] leading-relaxed text-g-500">
-        L’intégration ne répond pas actuellement. Le reste de la page reste utilisable ; les
-        données réapparaîtront automatiquement.
+        {integration ? (
+          <>L’intégration « {integration} » ne répond pas actuellement. </>
+        ) : (
+          <>L’intégration ne répond pas actuellement. </>
+        )}
+        {dateDonnees ? (
+          <>Dernières données connues : {dateDonnees}. </>
+        ) : null}
+        Le reste de la page reste utilisable ; les données réapparaîtront automatiquement.
       </p>
     </div>
   )

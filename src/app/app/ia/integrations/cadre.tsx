@@ -53,7 +53,6 @@ export function CadreIntegrations({ children }: { children: React.ReactNode }) {
       titre="Intégrations"
       base="/app/ia/integrations"
       entrees={[...canaux, ...outils]}
-      actionPrincipale={{ libelle: 'Déclarer', href: '/app/ia/integrations' }}
       placeholderRecherche="WhatsApp, SIP, MCP, OpenAPI…"
       compteur={(visibles, total) =>
         visibles === total

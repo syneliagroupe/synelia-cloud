@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { CadreBackup } from './cadre'
 
 export const metadata: Metadata = {
-  title: 'Backup',
+  title: 'Sauvegardes',
   description: 'Un plan par hébergement : périmètre, fréquence, rétention, immuabilité, exécutions et restauration.',
 }
 

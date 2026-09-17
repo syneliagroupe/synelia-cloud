@@ -1,23 +1,55 @@
 'use client'
 
-import { useState } from 'react'
-import { Download, Plus, Terminal, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Download, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
 import { dateCourte, goHumain, num, pct } from '@/lib/format'
 import { SITE_LABEL, ROLE_LABEL, type Role } from '@/lib/types'
-import { K8S_CLUSTERS, espaceById } from '@/lib/mock'
-import type { K8sCluster } from '@/lib/types'
+import { ESPACES, K8S_CLUSTERS } from '@/lib/mock'
+import type { EspaceCloud, K8sCluster } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Input, Select, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { HealthBadge, QuotaBar, StatTile } from '@/components/composition/metrics'
 import { GrilleSparkCharts } from '@/components/business/observabilite'
-import { ConsoleDrawer } from '@/components/business/console'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { estActif, requete, supprimerRessource } from '@/lib/api/client'
+
+/** `GET /kubernetes/{id}/metriques` — même mécanique que `SerieMetriqueVm` côté fiche VM : un
+ * instantané réel (diagnostics Nova/libvirt des VM masters/workers), pas un historique. */
+interface SerieMetriqueK8s {
+  metrique: string
+  unite: string
+  points: { valeur: number }[]
+}
+
+/** Une VM Nova réelle derrière le cluster (master ou worker) — `cpu`/`ram` absents si la VM
+ * n'est pas `ACTIVE` ou si l'hyperviseur n'a pas répondu. */
+interface NoeudMetriqueK8s {
+  id: string
+  statut: string
+  vcpu?: number
+  cpu?: number
+  ram?: number
+}
+
+/** Même distinction qu'en fiche VM (`detailLectureVm`) : « cluster non provisionné, rien à lire »
+ * (fait durable) contre « l'appel n'a pas encore répondu, ou l'amont ne répond pas »
+ * (transitoire). */
+function detailLectureK8s(noeuds: NoeudMetriqueK8s[] | null, statutCluster: string): string {
+  if (noeuds === null) return 'Lecture en cours…'
+  if (noeuds.length === 0) {
+    return statutCluster === 'running'
+      ? 'Aucune VM Nova identifiée pour ce cluster pour le moment'
+      : 'Cluster non actif — rien à lire côté hyperviseur'
+  }
+  return 'Lecture hyperviseur indisponible pour le moment'
+}
 
 /** Versions proposées à la mise à jour — une mineure d'écart au plus. */
 const VERSIONS = ['1.29.6', '1.30.4', '1.31.2']
@@ -56,9 +88,10 @@ const MAPPING_ROLES: Array<{ role: Role; k8s: string; namespaces: string }> = [
 ]
 
 export function VueCluster({ id }: { id: string }) {
-  const { autorise, refus, pousser } = useApp()
+  const { autorise, refus, pousser, api } = useApp()
   const executer = useOperation()
   const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const [onglet, setOnglet] = useState('apercu')
   /** Brouillons d'édition des pools, par nom de pool. */
   const [brouillons, setBrouillons] = useState<
@@ -67,17 +100,55 @@ export function VueCluster({ id }: { id: string }) {
   const [oidcObligatoire, setOidcObligatoire] = useState(true)
   const [auditApi, setAuditApi] = useState(true)
   const [apiPublique, setApiPublique] = useState(false)
-  const [shell, setShell] = useState(false)
-  const [noeudCible, setNoeudCible] = useState<string>()
 
-  const cluster = grappes.items.find((c) => c.id === id)!
-  const espace = espaceById(cluster.espaceId)
+  // `GET /kubernetes/{id}/metriques` : agrège les diagnostics Nova/libvirt réels des VM
+  // masters/workers du cluster (retrouvées côté backend via la stack Heat Magnum), pas une
+  // valeur inventée. `null` tant que l'appel n'a pas répondu, `[]` si le cluster n'a aucune VM
+  // identifiable (juste soumis, ou simulation) — jamais une série fabriquée pour meubler l'écran.
+  const [metriquesK8s, setMetriquesK8s] = useState<SerieMetriqueK8s[] | null>(null)
+  const [noeudsK8s, setNoeudsK8s] = useState<NoeudMetriqueK8s[] | null>(null)
+  useEffect(() => {
+    if (!estActif()) return
+    setMetriquesK8s(null)
+    setNoeudsK8s(null)
+    requete<{ series: SerieMetriqueK8s[]; noeuds: NoeudMetriqueK8s[] }>(
+      `/kubernetes/${encodeURIComponent(id)}/metriques`,
+    )
+      .then((r) => {
+        setMetriquesK8s(r.series ?? [])
+        setNoeudsK8s(r.noeuds ?? [])
+      })
+      .catch(() => {
+        setMetriquesK8s([])
+        setNoeudsK8s([])
+      })
+  }, [id])
+  const lectureK8s = (metrique: string) =>
+    metriquesK8s?.find((s) => s.metrique === metrique)?.points.at(-1)?.valeur
+  const uniteK8s = (metrique: string) => metriquesK8s?.find((s) => s.metrique === metrique)?.unite
 
-  /** Mêmes noms que ceux affichés dans l'onglet Nœuds. */
-  const noms = cluster.pools.flatMap((p) =>
-    Array.from({ length: p.nodes }, (_, i) => `${cluster.nom}-${p.nom}-${String(i + 1).padStart(2, '0')}`),
-  )
-  const noeud = noeudCible ?? noms[0]
+  const cluster = grappes.items.find((c) => c.id === id)
+  const espace = cluster ? espaces.items.find((e) => e.id === cluster.espaceId) : undefined
+
+  if (!cluster) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          fil={[
+            { label: 'Espace client', href: '/app' },
+            { label: 'Kubernetes', href: '/app/kubernetes' },
+            { label: 'Introuvable' },
+          ]}
+          titre="Cluster introuvable"
+        />
+        <EmptyState
+          titre="Ce cluster n’existe pas ou plus"
+          phrase="Il a peut-être été supprimé, ou vous avez suivi un lien vers une autre organisation."
+          action={{ libelle: 'Retour aux clusters', href: '/app/kubernetes' }}
+        />
+      </div>
+    )
+  }
 
   const poserBrouillon = (pool: string, champ: 'nodes' | 'min' | 'max' | 'disk', valeur: number) =>
     setBrouillons((p) => ({ ...p, [pool]: { ...p[pool], [champ]: valeur } }))
@@ -138,13 +209,6 @@ users:
         actions={
           <>
             <Button
-              iconBefore={<Terminal size={14} />}
-              onClick={() => setShell(true)}
-              disabled={cluster.statut !== 'running' || noms.length === 0}
-            >
-              Shell
-            </Button>
-            <Button
               variant="secondary"
               iconBefore={<Download size={14} />}
               onClick={() =>
@@ -179,13 +243,20 @@ users:
               operation={(v) => ({
                 ton: 'info',
                 titre: `Mise à jour vers ${v.version} lancée`,
+                appel: () =>
+                  requete(`/kubernetes/${encodeURIComponent(cluster.id)}/mise-a-jour`, {
+                    methode: 'POST',
+                    corps: { version: String(v.version) },
+                  }),
                 effet: () => grappes.modifier(cluster.id, { statut: 'updating' }),
                 job: { workflow: 'k8s.upgrade', cible: `${cluster.nom} → ${v.version}` },
-                effetFinal: () =>
+                effetFinal: () => {
                   grappes.modifier(cluster.id, {
                     statut: 'running',
                     version: String(v.version),
-                  }),
+                  })
+                  grappes.recharger()
+                },
               })}
             />
           </>
@@ -207,15 +278,65 @@ users:
             <StatTile libelle="Mémoire" valeur={`${num(ramTotal)}`} unite="Go" />
             <StatTile
               libelle="Pods en exécution"
-              valeur={num(noeudsTotal * 14)}
-              serie={seededSeries(`${id}-pods`, 24, noeudsTotal * 11, noeudsTotal * 17)}
+              valeur={api ? '—' : num(noeudsTotal * 14)}
+              detail={api ? 'Démonstration — aucune intégration metrics-server aujourd’hui' : undefined}
+              serie={api ? undefined : seededSeries(`${id}-pods`, 24, noeudsTotal * 11, noeudsTotal * 17)}
             />
             <StatTile
               libelle="Namespaces"
-              valeur={cluster.applicationId ? 4 : 2}
-              detail="Un par environnement"
+              valeur={api ? '—' : cluster.applicationId ? 4 : 2}
+              detail={api ? 'Démonstration — aucune intégration API Kubernetes aujourd’hui' : 'Un par environnement'}
             />
           </div>
+
+          {/*
+            `GET /kubernetes/{id}/metriques` renvoie un instantané réel pour CPU/Mémoire/Réseau
+            (diagnostics Nova/libvirt des VM Nova masters/workers du cluster, agrégées côté
+            backend — `synelia.modules.kubernetes.service.metriques_instantanees`), même
+            mécanique que la fiche VM. Vide (`metriquesK8s === null` tant que l'appel n'a pas
+            répondu, `[]` si le cluster n'a aucune VM Nova identifiable) plutôt qu'une valeur
+            inventée. Pods/Namespaces ci-dessus restent en démonstration : rien ne remonte
+            aujourd'hui l'intérieur du cluster (metrics-server, API Kubernetes).
+          */}
+          {api && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatTile
+                libelle="CPU (VM du cluster)"
+                valeur={lectureK8s('cpu') !== undefined ? Math.round(lectureK8s('cpu')!) : '—'}
+                unite={lectureK8s('cpu') !== undefined ? '%' : undefined}
+                detail={
+                  lectureK8s('cpu') === undefined
+                    ? detailLectureK8s(noeudsK8s, cluster.statut)
+                    : 'Moyenne des VM Nova actives du cluster'
+                }
+              />
+              <StatTile
+                libelle="Mémoire (VM du cluster)"
+                valeur={lectureK8s('ram') !== undefined ? Math.round(lectureK8s('ram')!) : '—'}
+                unite={lectureK8s('ram') !== undefined ? '%' : undefined}
+                detail={
+                  lectureK8s('ram') === undefined
+                    ? detailLectureK8s(noeudsK8s, cluster.statut)
+                    : 'Moyenne des VM Nova actives du cluster'
+                }
+              />
+              <StatTile
+                libelle="Réseau (VM du cluster)"
+                valeur={
+                  lectureK8s('reseau_entrant') !== undefined
+                    ? Number(lectureK8s('reseau_entrant')!.toFixed(2))
+                    : '—'
+                }
+                unite={lectureK8s('reseau_entrant') !== undefined ? uniteK8s('reseau_entrant') : undefined}
+                detail={
+                  lectureK8s('reseau_entrant') === undefined
+                    ? detailLectureK8s(noeudsK8s, cluster.statut)
+                    : 'Somme des VM Nova actives du cluster'
+                }
+                ton="violet"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
@@ -268,127 +389,199 @@ users:
             </Card>
           </div>
 
-          <GrilleSparkCharts
-            seed={`k8s-${id}`}
-            metriques={[
-              { titre: 'CPU du cluster', unite: '%', min: 28, max: 64 },
-              { titre: 'Mémoire du cluster', unite: '%', min: 44, max: 78, seuil: 90 },
-              { titre: 'Pods en exécution', unite: '', min: noeudsTotal * 11, max: noeudsTotal * 17, couleur: 'var(--color-m-600)' },
-              { titre: 'Latence de l’API', unite: 'ms', min: 8, max: 42, seuil: 200 },
-            ]}
-          />
+          {api ? (
+            <Card>
+              <CardHeader titre="Historique des métriques" />
+              <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-4 text-center text-[12.5px] text-g-500">
+                Démonstration — le CPU, la mémoire et le réseau ci-dessus sont une lecture réelle
+                de l’hyperviseur (diagnostics Nova/libvirt des VM du cluster), mais instantanée :
+                rien ne persiste de série dans le temps côté backend, donc pas de courbe 24 h à
+                afficher ici. Pods en exécution et latence de l’API restent indisponibles : aucune
+                intégration metrics-server ni API Kubernetes ne les remonte aujourd’hui.
+              </p>
+            </Card>
+          ) : (
+            <GrilleSparkCharts
+              seed={`k8s-${id}`}
+              metriques={[
+                { titre: 'CPU du cluster', unite: '%', min: 28, max: 64 },
+                { titre: 'Mémoire du cluster', unite: '%', min: 44, max: 78, seuil: 90 },
+                { titre: 'Pods en exécution', unite: '', min: noeudsTotal * 11, max: noeudsTotal * 17, couleur: 'var(--color-m-600)' },
+                { titre: 'Latence de l’API', unite: 'ms', min: 8, max: 42, seuil: 200 },
+              ]}
+            />
+          )}
         </div>
       )}
 
       {/* Nœuds */}
       {onglet === 'noeuds' && (
-        <Card>
-          <CardHeader
-            titre="Nœuds du cluster"
-            sousTitre="Les nœuds sont gérés par leur pool : ne les modifiez pas individuellement, ajustez le pool."
-          />
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-max border-collapse">
-              <thead>
-                <tr className="border-b border-g-300 bg-g-050">
-                  {['Nœud', 'Pool', 'Gabarit', 'CPU', 'Mémoire', 'Pods', 'État', ''].map((h) => (
-                    <th key={h} className="type-micro px-3 py-2 text-left text-g-500">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {cluster.pools.flatMap((p) =>
-                  Array.from({ length: p.nodes }, (_, i) => {
-                    const cpu = seededSeries(`${id}-${p.nom}-${i}-cpu`, 1, 22, 68)[0]
-                    const mem = seededSeries(`${id}-${p.nom}-${i}-mem`, 1, 38, 82)[0]
-                    return (
-                      <tr
-                        key={`${p.nom}-${i}`}
-                        className="border-b border-g-100 last:border-0 hover:bg-p-050/60"
-                      >
-                        <td className="px-3 py-2.5 font-mono text-[12px] text-ink">
-                          {cluster.nom}-{p.nom}-{String(i + 1).padStart(2, '0')}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <Badge
-                            tone={
-                              p.type === 'gpu'
-                                ? 'accent'
-                                : p.type === 'preemptible'
-                                  ? 'warn'
-                                  : p.type === 'memory'
-                                    ? 'violet'
-                                    : 'neutral'
-                            }
-                            size="sm"
-                          >
-                            {p.nom}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{p.flavor}</td>
-                        <td className="px-3 py-2.5">
-                          <span className="block w-24">
-                            <QuotaBar utilise={cpu} total={100} compact formateur={(v) => `${v}%`} />
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <span className="block w-24">
-                            <QuotaBar
-                              utilise={mem}
-                              total={100}
-                              compact
-                              seuil={85}
-                              formateur={(v) => `${v}%`}
-                            />
-                          </span>
-                        </td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
-                          {12 + ((i * 3) % 8)}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <Badge tone="ok" dot size="sm">
-                            Ready
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <BoutonAction
-                            libelle="Drainer"
-                            variant="ghost"
-                            operation={{
-                              action: 'component.restart',
-                              ton: 'info',
-                              titre: 'Drainage du nœud lancé',
-                              detail:
-                                'Les pods sont évacués en respectant les budgets de perturbation. Si un budget bloque, nous ne forçons pas.',
-                              job: {
-                                type: 'k8s.node.drain',
-                                label: `Drainage d’un nœud · ${cluster.nom}`,
-                                etapes: [
-                                  'Marquer le nœud non planifiable',
-                                  'Évacuer les pods',
-                                  'Vérifier les budgets de perturbation',
-                                ],
-                                dureeEtapeMs: 1100,
-                              },
-                            }}
-                          />
-                        </td>
+        <div className="space-y-4">
+          {api && (
+            <Card>
+              <CardHeader
+                titre="VM Nova réelles du cluster"
+                sousTitre="Masters et workers retrouvés via la stack Heat du cluster Magnum — CPU/Mémoire lus en direct sur l’hyperviseur (diagnostics Nova/libvirt), pas de correspondance garantie avec les pools ci-dessous (Kubernetes ne distingue pas les masters des pools de workers dans ce contrat)."
+              />
+              {noeudsK8s === null ? (
+                <p className="text-[12.5px] text-g-500">Lecture en cours…</p>
+              ) : noeudsK8s.length === 0 ? (
+                <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-4 text-center text-[12.5px] text-g-500">
+                  {detailLectureK8s(noeudsK8s, cluster.statut)}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-max border-collapse">
+                    <thead>
+                      <tr className="border-b border-g-300 bg-g-050">
+                        {['VM Nova', 'vCPU', 'CPU', 'Mémoire', 'État'].map((h) => (
+                          <th key={h} className="type-micro px-3 py-2 text-left text-g-500">
+                            {h}
+                          </th>
+                        ))}
                       </tr>
-                    )
-                  }),
-                )}
-              </tbody>
-            </table>
-          </div>
-          <Callout ton="info" className="mt-4" titre="Drainer un nœud">
-            Le drainage évacue proprement les pods vers les autres nœuds en respectant les budgets de
-            perturbation (PodDisruptionBudget) que vous avez déclarés. C’est l’opération à faire
-            avant toute intervention sur un nœud. Si un budget bloque le drainage, nous ne le forçons
-            pas : c’est à vous de décider.
-          </Callout>
-        </Card>
+                    </thead>
+                    <tbody>
+                      {noeudsK8s.map((n) => (
+                        <tr key={n.id} className="border-b border-g-100 last:border-0">
+                          <td className="px-3 py-2.5 font-mono text-[12px] text-ink">{n.id}</td>
+                          <td className="tnum px-3 py-2.5 text-[12px] text-g-700">{n.vcpu ?? '—'}</td>
+                          <td className="px-3 py-2.5">
+                            {n.cpu !== undefined ? (
+                              <span className="block w-24">
+                                <QuotaBar
+                                  utilise={Math.round(n.cpu)}
+                                  total={100}
+                                  compact
+                                  formateur={(v) => `${v}%`}
+                                />
+                              </span>
+                            ) : (
+                              <span className="text-[12px] text-g-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {n.ram !== undefined ? (
+                              <span className="block w-24">
+                                <QuotaBar
+                                  utilise={Math.round(n.ram)}
+                                  total={100}
+                                  compact
+                                  seuil={85}
+                                  formateur={(v) => `${v}%`}
+                                />
+                              </span>
+                            ) : (
+                              <span className="text-[12px] text-g-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Badge tone={n.statut.toUpperCase() === 'ACTIVE' ? 'ok' : 'neutral'} dot size="sm">
+                              {n.statut}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          )}
+          <Card>
+            <CardHeader
+              titre="Pools de workers"
+              sousTitre="Les nœuds sont gérés par leur pool : ne les modifiez pas individuellement, ajustez le pool."
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-max border-collapse">
+                <thead>
+                  <tr className="border-b border-g-300 bg-g-050">
+                    {['Nœud', 'Pool', 'Gabarit', 'Pods', 'État', ''].map((h) => (
+                      <th key={h} className="type-micro px-3 py-2 text-left text-g-500">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cluster.pools.flatMap((p) =>
+                    Array.from({ length: p.nodes }, (_, i) => {
+                      return (
+                        <tr
+                          key={`${p.nom}-${i}`}
+                          className="border-b border-g-100 last:border-0 hover:bg-p-050/60"
+                        >
+                          <td className="px-3 py-2.5 font-mono text-[12px] text-ink">
+                            {cluster.nom}-{p.nom}-{String(i + 1).padStart(2, '0')}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Badge
+                              tone={
+                                p.type === 'gpu'
+                                  ? 'accent'
+                                  : p.type === 'preemptible'
+                                    ? 'warn'
+                                    : p.type === 'memory'
+                                      ? 'violet'
+                                      : 'neutral'
+                              }
+                              size="sm"
+                            >
+                              {p.nom}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2.5 text-[12px] text-g-700">{p.flavor}</td>
+                          <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                            {api ? '—' : 12 + ((i * 3) % 8)}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {api ? (
+                              <span className="text-[12px] text-g-500">Voir « VM Nova réelles »</span>
+                            ) : (
+                              <Badge tone="ok" dot size="sm">
+                                Ready
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <BoutonAction
+                              libelle="Drainer"
+                              variant="ghost"
+                              operation={{
+                                action: 'component.restart',
+                                ton: 'info',
+                                titre: 'Drainage du nœud lancé',
+                                detail:
+                                  'Les pods sont évacués en respectant les budgets de perturbation. Si un budget bloque, nous ne forçons pas.',
+                                job: {
+                                  type: 'k8s.node.drain',
+                                  label: `Drainage d’un nœud · ${cluster.nom}`,
+                                  etapes: [
+                                    'Marquer le nœud non planifiable',
+                                    'Évacuer les pods',
+                                    'Vérifier les budgets de perturbation',
+                                  ],
+                                  dureeEtapeMs: 1100,
+                                },
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    }),
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <Callout ton="info" className="mt-4" titre="Drainer un nœud">
+              Le drainage évacue proprement les pods vers les autres nœuds en respectant les budgets de
+              perturbation (PodDisruptionBudget) que vous avez déclarés. C’est l’opération à faire
+              avant toute intervention sur un nœud. Si un budget bloque le drainage, nous ne le forçons
+              pas : c’est à vous de décider.
+            </Callout>
+          </Card>
+        </div>
       )}
 
       {/* Pools */}
@@ -508,28 +701,28 @@ users:
                     disabled={!brouillons[p.nom]}
                     onClick={() => {
                       const b = brouillons[p.nom] ?? {}
+                      const pool = {
+                        ...p,
+                        nodes: b.nodes ?? p.nodes,
+                        diskGo: b.disk ?? p.diskGo,
+                        autoscale: p.autoscale
+                          ? { min: b.min ?? p.autoscale.min, max: b.max ?? p.autoscale.max }
+                          : undefined,
+                      }
                       executer({
                         action: 'espace.quota.update',
                         titre: `Pool ${p.nom} redimensionné`,
                         detail: `${b.nodes ?? p.nodes} nœuds · ${b.disk ?? p.diskGo ?? 100} Go par nœud`,
+                        appel: () =>
+                          requete(
+                            `/kubernetes/${encodeURIComponent(cluster.id)}/pools/${encodeURIComponent(p.nom)}`,
+                            { methode: 'PATCH', corps: pool },
+                          ),
                         effet: () =>
                           grappes.modifier(cluster.id, (c) => ({
-                            pools: c.pools.map((x) =>
-                              x.nom === p.nom
-                                ? {
-                                    ...x,
-                                    nodes: b.nodes ?? x.nodes,
-                                    diskGo: b.disk ?? x.diskGo,
-                                    autoscale: x.autoscale
-                                      ? {
-                                          min: b.min ?? x.autoscale.min,
-                                          max: b.max ?? x.autoscale.max,
-                                        }
-                                      : undefined,
-                                  }
-                                : x,
-                            ),
+                            pools: c.pools.map((x) => (x.nom === p.nom ? pool : x)),
                           })),
+                        effetFinal: () => grappes.recharger(),
                       })
                       setBrouillons((prev) => {
                         const suite = { ...prev }
@@ -547,7 +740,13 @@ users:
                     action: 'espace.quota.update',
                     ton: 'info',
                     titre: `Mise à jour progressive du pool ${p.nom}`,
+                    appel: () =>
+                      requete(
+                        `/kubernetes/${encodeURIComponent(cluster.id)}/pools/${encodeURIComponent(p.nom)}`,
+                        { methode: 'PATCH', corps: p },
+                      ),
                     job: { workflow: 'k8s.pool.roll', cible: `${cluster.nom} · ${p.nom}` },
+                    effetFinal: () => grappes.recharger(),
                   }}
                 />
                 <IconButton
@@ -560,10 +759,17 @@ users:
                       ton: 'warn',
                       titre: `Pool ${p.nom} supprimé`,
                       detail: 'Ses nœuds sont drainés puis détruits ; les pods se replacent ailleurs.',
+                      appel: () =>
+                        supprimerRessource(
+                          `/kubernetes/${encodeURIComponent(cluster.id)}/pools`,
+                          p.nom,
+                          p.nom,
+                        ),
                       effet: () =>
                         grappes.modifier(cluster.id, (c) => ({
                           pools: c.pools.filter((x) => x.nom !== p.nom),
                         })),
+                      effetFinal: () => grappes.recharger(),
                     })
                   }
                 >
@@ -622,6 +828,16 @@ users:
             operation={(v) => ({
               titre: `Pool ${v.nom} créé`,
               detail: `${v.nodes} nœuds · ${v.flavor}`,
+              appel: () =>
+                requete(`/kubernetes/${encodeURIComponent(cluster.id)}/pools`, {
+                  methode: 'POST',
+                  corps: {
+                    nom: String(v.nom),
+                    nodes: Number(v.nodes),
+                    flavor: String(v.flavor),
+                    diskGo: Number(v.disque),
+                  },
+                }),
               job: {
                 type: 'k8s.pool.create',
                 label: `Création du pool ${v.nom} · ${cluster.nom}`,
@@ -645,6 +861,7 @@ users:
                     },
                   ],
                 })),
+              effetFinal: () => grappes.recharger(),
             })}
           />
         </div>
@@ -676,16 +893,23 @@ users:
                 libelleValider="Installer"
                 operation={(v) => ({
                   titre: `Module ${String(v.module).split(' ')[0]} installé`,
+                  appel: () =>
+                    requete(`/kubernetes/${encodeURIComponent(cluster.id)}/modules`, {
+                      methode: 'PUT',
+                      corps: { modules: [...cluster.modules, String(v.module)] },
+                    }),
                   job: {
                     type: 'k8s.module.install',
                     label: `Installation ${v.module} · ${cluster.nom}`,
                     etapes: ['Déployer le chart Helm', 'Attendre les pods Ready'],
                     dureeEtapeMs: 1100,
                   },
-                  effetFinal: () =>
+                  effetFinal: () => {
                     grappes.modifier(cluster.id, (c) => ({
                       modules: [...c.modules, String(v.module)],
-                    })),
+                    }))
+                    grappes.recharger()
+                  },
                 })}
               />
             }
@@ -699,7 +923,7 @@ users:
                   className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                 >
                   <span className="min-w-0">
-                    <span className="block font-mono text-[13px] font-semibold text-ink">
+                    <span className="block font-mono text-[12.5px] font-semibold text-ink">
                       {nom}
                     </span>
                     <span className="block text-[11px] text-g-500">
@@ -736,10 +960,16 @@ users:
                         action: 'espace.quota.update',
                         ton: 'warn',
                         titre: `${nom} retiré du cluster`,
+                        appel: () =>
+                          requete(`/kubernetes/${encodeURIComponent(cluster.id)}/modules`, {
+                            methode: 'PUT',
+                            corps: { modules: cluster.modules.filter((x) => x !== m) },
+                          }),
                         effet: () =>
                           grappes.modifier(cluster.id, (c) => ({
                             modules: c.modules.filter((x) => x !== m),
                           })),
+                        effetFinal: () => grappes.recharger(),
                       }}
                       confirmation={{
                         ressource: nom,
@@ -806,9 +1036,9 @@ users:
                 <tbody>
                   {IMAGES_REGISTRE.map((i) => (
                     <tr key={i.depot} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2.5 font-mono text-[13px] text-ink">{i.depot}</td>
-                      <td className="tnum px-3 py-2.5 text-[13px] text-g-700">{i.etiquettes}</td>
-                      <td className="tnum px-3 py-2.5 text-[13px] text-g-700">
+                      <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{i.depot}</td>
+                      <td className="tnum px-3 py-2.5 text-[12.5px] text-g-700">{i.etiquettes}</td>
+                      <td className="tnum px-3 py-2.5 text-[12.5px] text-g-700">
                         {goHumain(i.taille)}
                       </td>
                       <td className="px-3 py-2.5">
@@ -885,7 +1115,7 @@ users:
                         </Badge>
                       </td>
                       <td className="px-3 py-2.5 font-mono text-[12px] text-ink">{m.k8s}</td>
-                      <td className="px-3 py-2.5 text-[13px] text-g-700">{m.namespaces}</td>
+                      <td className="px-3 py-2.5 text-[12.5px] text-g-700">{m.namespaces}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -908,7 +1138,7 @@ users:
                   className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                 >
                   <span className="min-w-0">
-                    <span className="block font-mono text-[13px] font-semibold text-ink">
+                    <span className="block font-mono text-[12.5px] font-semibold text-ink">
                       {ns}
                     </span>
                     <span className="block text-[11px] text-g-500">
@@ -1011,48 +1241,6 @@ users:
           </Card>
         </div>
       )}
-
-      {/* Shell en panneau plein écran */}
-      <ConsoleDrawer
-        open={shell}
-        onClose={() => setShell(false)}
-        titre={`Shell · ${cluster.nom}`}
-        description="Le portail encapsule kubectl debug node/ — il ne réimplémente pas le protocole d’exec de Kubernetes."
-        statut={
-          <>
-            Connecté · {noeud} · Kubernetes {cluster.version}
-          </>
-        }
-        barre={
-          noms.length > 1 ? (
-            <div className="border-b border-white/10 px-3 py-2">
-              <Select
-                value={noeud}
-                onChange={(e) => setNoeudCible(e.target.value)}
-                className="h-7 bg-p-800 text-p-100"
-              >
-                {noms.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          ) : undefined
-        }
-        contenu={`$ kubectl debug node/${noeud} -it --image=busybox:1.36 -- chroot /host sh
-
-Creating debugging pod node-debugger-${noeud}-a1b2c3 with container debugger on node ${noeud}.
-If you don't see a command prompt, try pressing enter.
-
-/ # uname -a
-Linux ${noeud} 6.8.0-45-generic #1 SMP x86_64 GNU/Linux
-
-/ # kubectl get pods -A --field-selector spec.nodeName=${noeud} --no-headers | wc -l
-${12 + (noms.indexOf(noeud) * 3) % 8}
-
-/ # _`}
-      />
     </div>
   )
 }

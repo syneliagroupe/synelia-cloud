@@ -1,125 +1,112 @@
 'use client'
 
-import { useState } from 'react'
-import { cn } from '@/lib/utils'
-import { dateCourte, jetons, money, num, pct } from '@/lib/format'
-import {
-  ALERTES_IA,
-  BUDGET_IA,
-  CLES_IA,
-  COMPARAISON_SOUVERAIN,
-  CONSOMMATION_IA_JOURS,
-  CONSOMMATION_PAR_CLE,
-  CONSOMMATION_PAR_MODELE,
-  QUOTAS_DEPARTEMENT,
-  modeleParSlug,
-} from '@/lib/mock'
+import { dateCourte, jetons, money, pct, relatif } from '@/lib/format'
+import type { CleIA } from '@/lib/types'
+import { CLES_IA } from '@/lib/mock'
+import { estActif } from '@/lib/api/client'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { GatedAction } from '@/components/ui/display'
-import { Slider, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
-import { QuotaBar, StackedBar, StatTile } from '@/components/composition/metrics'
-import { PermissionDenied } from '@/components/composition/states'
-import { useApp } from '@/components/app/contexte'
+import { QuotaBar, StatTile } from '@/components/composition/metrics'
+import { useEspace, useMaintenant } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
-interface LigneJour {
-  id: string
-  date: string
-  jetonsEntree: number
-  jetonsSortie: number
-  jetonsExternes: number
-  requetes: number
-  montant: number
-}
-
-const JOURS: LigneJour[] = CONSOMMATION_IA_JOURS.map((j) => ({ id: j.date, ...j }))
+const TON_STATUT = { active: 'ok', suspendue: 'warn', revoquee: 'neutral' } as const
+const LIBELLE_STATUT = { active: 'Active', suspendue: 'Suspendue', revoquee: 'Révoquée' } as const
 
 export default function ConsommationIA() {
-  const { autorise, refus, pousser } = useApp()
-  const [plafond, setPlafond] = useState(BUDGET_IA.plafondMensuel)
-  const [bloquer, setBloquer] = useState(BUDGET_IA.bloquerAuPlafond)
+  const refMaintenant = useMaintenant()
+  const espace = useEspace()
+  const clesCol = useCollection<CleIA>('cles-ia', CLES_IA)
+  const cles = clesCol.items.filter((c) => c.espaceId === espace.id)
+  const actives = cles.filter((c) => c.statut === 'active')
 
-  const peutBudgeter = autorise('ia.budget.update')
-  const jetonsTotal = CONSOMMATION_PAR_MODELE.reduce((a, c) => a + c.jetons, 0)
-  const requetes = JOURS.reduce((a, j) => a + j.requetes, 0)
-  const externes = CONSOMMATION_PAR_MODELE.filter(
-    (c) => modeleParSlug(c.slug)?.hebergement === 'externe',
-  )
-  const partExterneMontant = externes.reduce((a, c) => a + c.montant, 0)
+  const jetonsTotal = actives.reduce((a, c) => a + c.jetonsConsommes, 0)
+  const depense = actives.reduce((a, c) => a + c.budgetConsomme, 0)
+  const plafondCumule = actives.reduce((a, c) => a + c.budgetMensuel, 0)
 
-  const controlesBudget = (
-    <>
-      <QuotaBar
-        libelle="Dépense du mois"
-        utilise={BUDGET_IA.consomme}
-        total={plafond}
-        seuil={BUDGET_IA.seuilAlertePct}
-        formateur={(v) => money(v)}
-      />
-      <Slider
-        label="Plafond mensuel"
-        value={plafond}
-        onChange={setPlafond}
-        min={100_000}
-        max={1_500_000}
-        step={50_000}
-        unite="FCFA"
-      />
-      <Switch
-        checked={bloquer}
-        onChange={setBloquer}
-        label="Couper les appels au plafond"
-        description="Au plafond, la passerelle répond 402 sur toutes les clés. Sans cette coupure, la dépense continue et la facture arrive à la fin du mois."
-      />
-    </>
-  )
+  // Projection fin de mois : une règle de trois sur la dépense déjà comptée,
+  // pas une moyenne historique — la passerelle LiteLLM ne journalise pas
+  // encore la dépense par jour (`/spend/logs` → aucune base connectée), donc
+  // il n'existe pas de série quotidienne réelle à extrapoler autrement.
+  // `refMaintenant` (pas `new Date()`) : le rendu doit rester déterministe
+  // entre serveur et client (§ CLAUDE.md « Déterminisme du rendu »).
+  const maintenant = new Date(refMaintenant)
+  const joursEcoules = maintenant.getUTCDate()
+  const joursDuMois = new Date(
+    Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth() + 1, 0),
+  ).getUTCDate()
+  const prevision =
+    joursEcoules > 0 ? Math.round((depense / joursEcoules) * joursDuMois) : depense
 
-  const colonnes: Array<Colonne<LigneJour>> = [
+  const parDepense = [...cles].sort((a, b) => b.budgetConsomme - a.budgetConsomme)
+  const depenseMax = Math.max(...parDepense.map((c) => c.budgetConsomme), 1)
+
+  const colonnes: Array<Colonne<CleIA>> = [
     {
-      id: 'date',
-      entete: 'Jour',
-      cle: (j) => j.date,
-      rendu: (j) => <span className="text-[13px] text-ink">{dateCourte(j.date)}</span>,
+      id: 'nom',
+      entete: 'Clé',
+      cle: (c) => c.nom,
+      rendu: (c) => (
+        <span className="block">
+          <span className="block text-[12.5px] font-semibold text-ink">{c.nom}</span>
+          <span className="block text-[11px] text-g-500">{c.usage || '—'}</span>
+        </span>
+      ),
     },
     {
-      id: 'requetes',
-      entete: 'Requêtes',
-      aligne: 'right',
-      cle: (j) => j.requetes,
-      rendu: (j) => num(j.requetes),
-    },
-    {
-      id: 'entree',
-      entete: 'Jetons entrants',
-      aligne: 'right',
-      cle: (j) => j.jetonsEntree,
-      rendu: (j) => jetons(j.jetonsEntree),
-    },
-    {
-      id: 'sortie',
-      entete: 'Jetons sortants',
-      aligne: 'right',
-      cle: (j) => j.jetonsSortie,
-      rendu: (j) => jetons(j.jetonsSortie),
-    },
-    {
-      id: 'externes',
-      entete: 'Dont hors territoire',
-      aligne: 'right',
-      masquable: true,
-      cle: (j) => j.jetonsExternes,
-      rendu: (j) => (
-        <span className="tnum text-warn">{jetons(j.jetonsExternes)}</span>
+      id: 'jetons',
+      entete: 'Jetons consommés',
+      largeur: 'w-52',
+      cle: (c) => c.jetonsConsommes / Math.max(c.quotaJetonsMois, 1),
+      rendu: (c) => (
+        <QuotaBar
+          utilise={c.jetonsConsommes}
+          total={c.quotaJetonsMois}
+          compact
+          seuil={90}
+          formateur={(v) => jetons(v)}
+        />
       ),
     },
     {
       id: 'montant',
-      entete: 'Montant',
+      entete: 'Dépense du mois',
       aligne: 'right',
-      cle: (j) => j.montant,
-      rendu: (j) => <span className="font-semibold">{money(j.montant)}</span>,
+      cle: (c) => c.budgetConsomme,
+      rendu: (c) => (
+        <span className="block">
+          <span className="tnum block text-[12.5px] font-semibold text-ink">
+            {money(c.budgetConsomme)}
+          </span>
+          {c.budgetMensuel > 0 && (
+            <span className="tnum block text-[11px] text-g-500">
+              plafond {money(c.budgetMensuel)}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'derniereUtilisation',
+      entete: 'Dernier appel',
+      masquable: true,
+      cle: (c) => c.derniereUtilisation ?? '',
+      rendu: (c) => (
+        <span className="text-[12px] text-g-500">
+          {c.derniereUtilisation ? relatif(c.derniereUtilisation, refMaintenant) : 'Jamais'}
+        </span>
+      ),
+    },
+    {
+      id: 'statut',
+      entete: 'État',
+      cle: (c) => c.statut,
+      rendu: (c) => (
+        <Badge tone={TON_STATUT[c.statut]} dot size="sm">
+          {LIBELLE_STATUT[c.statut]}
+        </Badge>
+      ),
     },
   ]
 
@@ -132,179 +119,85 @@ export default function ConsommationIA() {
           { label: 'Consommation & coûts' },
         ]}
         titre="Consommation & coûts"
-        sousTitre="L’inférence se facture à l’usage : rien à l’arrêt, tout au jeton. Ce qui suit décompose la dépense du mois par modèle, par clé et par jour, et compare ce que coûterait le même trafic sans modèles souverains."
+        sousTitre="Chaque clé d’accès compte ses propres jetons et sa propre dépense, appliqués en temps réel à chaque appel — c’est ce compteur, pas un journal de la passerelle, qui sert de source de vérité pour les quotas."
       />
 
+      {!estActif() && (
+        <Callout ton="info" titre="Démonstration">
+          Ces chiffres viennent du jeu de données fictif — connectez l’API pour voir la
+          consommation réelle des clés de cet Espace.
+        </Callout>
+      )}
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          libelle="Dépense du mois"
-          valeur={money(BUDGET_IA.consomme)}
-          detail={`Au ${dateCourte('2026-08-19')}, hors taxes`}
-        />
+        <StatTile libelle="Dépense du mois" valeur={money(depense)} detail={`Au ${dateCourte(maintenant.toISOString())}`} />
         <StatTile
           libelle="Prévision fin de mois"
-          valeur={money(BUDGET_IA.prevision)}
-          ton={BUDGET_IA.prevision > plafond ? 'warn' : 'ok'}
-          detail={`Plafond ${money(plafond)}`}
+          valeur={money(prevision)}
+          ton={plafondCumule > 0 && prevision > plafondCumule ? 'warn' : 'ok'}
+          detail={
+            plafondCumule > 0
+              ? `Plafonds cumulés ${money(plafondCumule)}`
+              : 'Estimation linéaire sur les jours écoulés'
+          }
         />
-        <StatTile libelle="Jetons du mois" valeur={jetons(jetonsTotal)} detail={`${num(requetes)} requêtes`} />
+        <StatTile libelle="Jetons du mois" valeur={jetons(jetonsTotal)} detail={`${actives.length} clé(s) active(s)`} />
         <StatTile
-          libelle="Coût pour mille requêtes"
-          valeur={money(Math.round((BUDGET_IA.consomme / requetes) * 1_000))}
-          detail="Toutes clés et tous modèles confondus"
+          libelle="Utilisation des plafonds"
+          valeur={plafondCumule > 0 ? pct((depense / plafondCumule) * 100) : '—'}
+          ton={plafondCumule > 0 && depense / plafondCumule > 0.85 ? 'warn' : undefined}
+          detail="Cumulé sur les clés actives"
         />
       </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader
-            titre="Par modèle"
-            sousTitre="Les modèles externes pèsent peu en jetons et beaucoup en francs."
-          />
-          <StackedBar
-            segments={CONSOMMATION_PAR_MODELE.map((c) => ({
-              label: modeleParSlug(c.slug)?.nom ?? c.slug,
-              valeur: c.montant,
-              couleur:
-                modeleParSlug(c.slug)?.hebergement === 'souverain'
-                  ? 'var(--color-p-600)'
-                  : 'var(--color-warn)',
-            }))}
-          />
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left">
-              <thead>
-                <tr className="border-b border-g-300">
-                  <th className="type-micro py-2 text-g-500">Modèle</th>
-                  <th className="type-micro py-2 text-right text-g-500">Jetons</th>
-                  <th className="type-micro py-2 text-right text-g-500">Montant</th>
-                  <th className="type-micro py-2 text-right text-g-500">Part</th>
-                </tr>
-              </thead>
-              <tbody>
-                {CONSOMMATION_PAR_MODELE.map((c) => {
-                  const m = modeleParSlug(c.slug)
-                  return (
-                    <tr key={c.slug} className="border-b border-g-100 last:border-0">
-                      <td className="py-2.5">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="text-[13px] text-ink">{m?.nom ?? c.slug}</span>
-                          <Badge tone={m?.hebergement === 'souverain' ? 'ok' : 'warn'} size="sm">
-                            {m?.hebergement === 'souverain' ? 'Territoire' : 'Hors territoire'}
-                          </Badge>
-                        </span>
-                      </td>
-                      <td className="tnum py-2.5 text-right text-[13px] text-g-700">
-                        {jetons(c.jetons)}
-                      </td>
-                      <td className="tnum py-2.5 text-right text-[13px] font-semibold text-ink">
-                        {money(c.montant)}
-                      </td>
-                      <td className="tnum py-2.5 text-right text-[13px] text-g-500">
-                        {pct(c.pct, 1)}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader
-            titre="Par clé"
-            sousTitre="Le showback interne se lit ici : chaque clé porte une application."
-          />
-          <div className="space-y-3">
-            {CONSOMMATION_PAR_CLE.map((c) => {
-              const cle = CLES_IA.find((k) => k.id === c.cleId)
-              return (
-                <div key={c.cleId}>
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="min-w-0 truncate text-[13px] text-ink">
-                      {cle?.nom ?? c.cleId}
-                    </span>
-                    <span className="tnum shrink-0 text-[12px] font-semibold text-ink">
-                      {money(c.montant)}
-                    </span>
-                  </div>
-                  <span className="mt-1 block h-2 overflow-hidden rounded-full bg-g-100">
-                    <span
-                      className="block h-full rounded-full bg-p-600"
-                      style={{ width: `${c.pct}%` }}
-                    />
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <Callout ton="info" className="mt-4" titre="Refacturation interne">
-            Ces montants s’exportent au format attendu par votre comptabilité analytique, avec le
-            centre de coût déclaré sur chaque clé. C’est la raison d’être du champ « usage » : sans
-            lui, la facture arrive en un seul bloc que personne ne sait ventiler.
-          </Callout>
-        </Card>
-      </div>
-
 
       <Card>
         <CardHeader
-          titre="Ce que coûterait le même trafic ailleurs"
-          sousTitre="Même volume de jetons, même répartition entrée-sortie, aux tarifs publics de chaque scénario."
+          titre="Par clé"
+          sousTitre="Le showback interne se lit ici : chaque clé porte une application, via son champ « usage »."
         />
-        <div className="space-y-3">
-          {[
-            { label: 'Tout chez des fournisseurs externes', montant: COMPARAISON_SOUVERAIN.toutExterneFcfa, ton: 'warn' as const },
-            { label: 'Répartition actuelle', montant: COMPARAISON_SOUVERAIN.reelFcfa, ton: 'violet' as const },
-            { label: 'Tout sur les modèles souverains', montant: COMPARAISON_SOUVERAIN.toutSouverainFcfa, ton: 'ok' as const },
-          ].map((s) => (
-            <div key={s.label} className="flex flex-wrap items-center gap-3">
-              <span className="w-full min-w-0 text-[13px] text-ink sm:w-64">{s.label}</span>
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="h-3 min-w-0 flex-1 overflow-hidden rounded-full bg-g-100">
+        {parDepense.length === 0 ? (
+          <p className="text-[12.5px] text-g-500">Aucune clé sur cet Espace.</p>
+        ) : (
+          <div className="space-y-3">
+            {parDepense.map((c) => (
+              <div key={c.id}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="min-w-0 truncate text-[12.5px] text-ink">{c.nom}</span>
+                  <span className="tnum shrink-0 text-[12px] font-semibold text-ink">
+                    {money(c.budgetConsomme)}
+                  </span>
+                </div>
+                <span className="mt-1 block h-2 overflow-hidden rounded-full bg-g-100">
                   <span
-                    className={cn(
-                      'block h-full rounded-full',
-                      s.ton === 'warn' ? 'bg-warn' : s.ton === 'ok' ? 'bg-ok' : 'bg-p-600',
-                    )}
-                    style={{
-                      width: `${(s.montant / COMPARAISON_SOUVERAIN.toutExterneFcfa) * 100}%`,
-                    }}
+                    className="block h-full rounded-full bg-p-600"
+                    style={{ width: `${(c.budgetConsomme / depenseMax) * 100}%` }}
                   />
                 </span>
-                <span className="tnum w-28 shrink-0 text-right text-[13px] font-semibold text-ink">
-                  {money(s.montant)}
-                </span>
-              </span>
-            </div>
-          ))}
-        </div>
-        <Callout ton="ok" className="mt-4" titre={`${money(COMPARAISON_SOUVERAIN.economieMoisFcfa)} d’écart mensuel`}>
-          L’écart entre le scénario tout externe et votre répartition actuelle paie plusieurs fois les
-          GPU réservés. Il ne dit pas que les modèles externes sont inutiles : les{' '}
-          {money(partExterneMontant)} dépensés chez eux couvrent {pct((externes.reduce((a, c) => a + c.jetons, 0) / jetonsTotal) * 100, 1)}{' '}
-          des jetons, sur les tâches où l’écart de qualité se voit encore.
+              </div>
+            ))}
+          </div>
+        )}
+        <Callout ton="info" className="mt-4" titre="Ce qui manque encore à ce détail">
+          La passerelle LiteLLM ne journalise pas la dépense par modèle ni par jour (base de spend
+          non connectée) : impossible aujourd’hui de dire honnêtement quelle part revient à quel
+          modèle sur une clé qui en autorise plusieurs. Le compteur par clé, lui, est réel — il vient
+          du même mécanisme qui applique les quotas et coupe les appels au dépassement.
         </Callout>
       </Card>
 
       <Card padding={false}>
         <div className="border-b border-g-100 px-4 py-3">
-          <CardHeader
-            titre="Détail par jour"
-            sousTitre="Dix-neuf jours écoulés sur le mois d’août 2026."
-            className="mb-0"
-          />
+          <CardHeader titre="Détail par clé" sousTitre={`Espace ${espace.code}`} className="mb-0" />
         </div>
         <DataTable
-          lignes={JOURS}
+          lignes={cles}
           colonnes={colonnes}
           parPage={10}
-          exportable
           densiteInitiale="compacte"
           vide={{
-            titre: 'Aucune consommation ce mois-ci',
-            phrase: 'Aucun appel n’a encore été facturé sur la période en cours.',
+            titre: 'Aucune clé sur cet Espace',
+            phrase: 'Une clé porte le quota et le plafond de dépense qui alimentent ce tableau.',
+            action: { libelle: 'Créer une clé', href: '/app/ia/parametres/passerelle' },
           }}
         />
       </Card>

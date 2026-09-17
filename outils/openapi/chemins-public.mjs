@@ -255,7 +255,7 @@ const demandes = {
       portee: P,
       id: 'verifierDisponibiliteDomainePublique',
       resume: 'Vérifier la disponibilité d’un domaine avant inscription',
-      params: [filtre('nom', chaine(), 'Nom complet avec son extension.')],
+      params: [filtre('nom', chaine(), 'Nom complet avec son extension.', true)],
       ok: ref('DisponibiliteDomaine'),
       erreurs: [424],
     }),

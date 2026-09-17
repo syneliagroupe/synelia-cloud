@@ -4,9 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { GitCommitHorizontal, RotateCcw, ShieldCheck } from 'lucide-react'
 import { dateHeure, duree, relatif } from '@/lib/format'
-import { APPLICATIONS, DEPLOIEMENTS, ENVIRONNEMENTS, appById, envById,
-  hrefDuService,
-} from '@/lib/mock'
+import { DEPLOIEMENTS, appById, hrefDuService } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -14,9 +12,10 @@ import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/
 import { StatTile } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
 import { DeploymentPipeline, SecurityFindings } from '@/components/business/paas'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction } from '@/components/app/actions'
+import { estActif, requete } from '@/lib/api/client'
 import type { Deployment } from '@/lib/types'
 
 const LIBELLE_STATUT: Record<Deployment['statut'], string> = {
@@ -42,6 +41,7 @@ const TON_STATUT: Record<Deployment['statut'], 'ok' | 'err' | 'warn' | 'info'> =
 }
 
 export default function Deploiements() {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const lesDeploiements = useCollection<Deployment>('deploiements', DEPLOIEMENTS)
   const [ouvert, setOuvert] = useState<string | null>(
@@ -65,6 +65,12 @@ export default function Deploiements() {
 
   const selection = ouvert ? lesDeploiements.items.find((d) => d.id === ouvert) : undefined
 
+  // Comptés depuis les déploiements réellement chargés (réels en mode API, de
+  // la graine sinon) — pas depuis l'ancien modèle PaaS figé (§ « Partie 11 »),
+  // qui n'a plus aucun lien avec ce qui est effectivement suivi.
+  const appsSuivies = [...new Set(lesDeploiements.items.map((d) => d.appId))]
+  const envsSuivis = new Set(lesDeploiements.items.map((d) => d.envId)).size
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -74,10 +80,11 @@ export default function Deploiements() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {APPLICATIONS.length} applications suivies
+              {appsSuivies.length} application{appsSuivies.length > 1 ? 's' : ''} suivie
+              {appsSuivies.length > 1 ? 's' : ''}
             </Badge>
             <Badge tone="neutral" size="sm">
-              {ENVIRONNEMENTS.length} environnements
+              {envsSuivis} environnement{envsSuivis > 1 ? 's' : ''}
             </Badge>
           </>
         }
@@ -146,7 +153,7 @@ export default function Deploiements() {
                 libelle: 'Application',
                 options: [
                   { value: 'tous', label: 'Toutes les applications' },
-                  ...APPLICATIONS.map((a) => ({ value: a.id, label: a.nom })),
+                  ...appsSuivies.map((id) => ({ value: id, label: appById(id)?.nom ?? id })),
                 ],
               },
             ]}
@@ -163,18 +170,19 @@ export default function Deploiements() {
               {
                 id: 'app',
                 entete: 'Application / environnement',
-                cle: (d) => `${appById(d.appId)?.nom ?? ''} ${envById(d.envId)?.nom ?? ''}`,
+                cle: (d) => `${appById(d.appId)?.nom ?? ''} ${d.envNom}`,
                 rendu: (d) => (
                   <span className="block min-w-0">
                     <Link
                       href={hrefDuService(d.appId)}
-                      className="block truncate font-mono text-[13px] font-semibold text-ink hover:text-p-700"
+                      className="block truncate font-mono text-[12.5px] font-semibold text-ink hover:text-p-700"
                     >
                       {appById(d.appId)?.nom ?? d.appId}
                     </Link>
-                    <span className="block text-[11px] text-g-500">
-                      {envById(d.envId)?.nom ?? d.envId}
-                    </span>
+                    {/* d.envNom vient du déploiement lui-même (le contrat le porte) — envById()
+                        ne résout que les environnements de la graine, jamais ceux créés par
+                        l'API réelle. */}
+                    <span className="block text-[11px] text-g-500">{d.envNom}</span>
                   </span>
                 ),
               },
@@ -212,7 +220,7 @@ export default function Deploiements() {
                 cle: (d) => d.findings.length,
                 rendu: (d) => {
                   if (d.findings.length === 0)
-                    return <span className="text-[12px] text-g-500">—</span>
+                    return <span className="text-[11.5px] text-g-500">—</span>
                   const crit = d.findings.filter((f) => f.severite === 'eleve').length
                   return (
                     <span className="flex items-center justify-center gap-1">
@@ -252,8 +260,8 @@ export default function Deploiements() {
                 cle: (d) => d.startedAt,
                 rendu: (d) => (
                   <span className="block text-right">
-                    <span className="block text-[12px] text-ink">{relatif(d.startedAt)}</span>
-                    <span className="block text-[11px] text-g-500">{dateHeure(d.startedAt)}</span>
+                    <span className="block text-[12px] text-ink">{relatif(d.startedAt, maintenant)}</span>
+                    <span className="block text-[10.5px] text-g-500">{dateHeure(d.startedAt)}</span>
                   </span>
                 ),
               },
@@ -286,8 +294,17 @@ export default function Deploiements() {
                           action: 'app.rollback',
                           titre: 'Retour arrière déclenché',
                           detail: `L’artefact précédent de ${appById(d.appId)?.nom} est repromu. Aucun rebuild : la bascule prend quelques secondes.`,
+                          appel: () =>
+                            requete(
+                              `/deploiements/${encodeURIComponent(d.id)}/rollback`,
+                              { methode: 'POST', corps: {} },
+                            ),
                           job: { workflow: 'app.rollback', cible: `${appById(d.appId)?.nom ?? d.appId} ${d.version}` },
                           effetFinal: () => {
+                            if (estActif()) {
+                              lesDeploiements.recharger()
+                              return
+                            }
                             lesDeploiements.modifier(d.id, { statut: 'rolled_back' })
                             const precedent = lesDeploiements.items.find(
                               (x) => x.appId === d.appId && x.id !== d.id && x.statut !== 'failed',
@@ -306,7 +323,7 @@ export default function Deploiements() {
             vide={{
               titre: 'Aucun déploiement',
               phrase: 'L’historique se remplit dès votre premier déploiement.',
-              action: { libelle: 'Déployer une application', href: '/app/applications/nouveau' },
+              action: { libelle: 'Ouvrir un projet', href: '/app/applications/projets' },
             }}
           />
         </div>
@@ -320,7 +337,7 @@ export default function Deploiements() {
                 <span className="flex flex-wrap items-baseline gap-2">
                   <span>{appById(selection.appId)?.nom ?? selection.appId}</span>
                   <span className="font-mono text-[12px] font-normal text-g-500">
-                    {selection.version} · {envById(selection.envId)?.nom}
+                    {selection.version} · {selection.envNom}
                   </span>
                 </span>
               }
@@ -354,8 +371,9 @@ export default function Deploiements() {
           d’heure.
         </Callout>
         <Callout ton="info" titre="L’historique ne se réécrit pas">
-          Un déploiement annulé reste dans l’historique, avec son motif et son auteur. Chaque
-          révision garde le condensat de l’image déployée.
+          Un déploiement annulé reste dans l’historique, avec son motif et son auteur. C’est ce qui
+          permet, six mois plus tard, de répondre à la question « qu’est-ce qui tournait le 12 mars à
+          14 h ? » sans reconstituer les faits de mémoire.
         </Callout>
       </div>
     </div>

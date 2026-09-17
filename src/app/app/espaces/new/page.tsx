@@ -1,20 +1,24 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Network, Server, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { money, num } from '@/lib/format'
+import { money, num, ventilationTva } from '@/lib/format'
 import { MAINTENANT } from '@/lib/format'
 import { SITE_LABEL, type EspaceCloud, type Site } from '@/lib/types'
+import type { BackupPlan, Offer } from '@/lib/types'
 import { BACKUP_PLANS, ESPACES, OFFRES } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Field, Input, Select, Switch } from '@/components/ui/field'
-import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
+import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { CostPreview, WizardShell } from '@/components/composition/flow'
+import { BoutonPrepaiementPaystack } from '@/components/composition/paystack'
 import { useApp } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
+import { useOperation } from '@/components/app/actions'
+import { creerRessource, estActif } from '@/lib/api/client'
 
 const ETAPES = [
   { numero: 1, titre: 'Offre' },
@@ -23,8 +27,6 @@ const ETAPES = [
   { numero: 4, titre: 'Options' },
   { numero: 5, titre: 'Récapitulatif' },
 ]
-
-const OFFRES_ESPACE = OFFRES.filter((o) => o.categorie === 'espace_cloud' && o.statut === 'publiee')
 
 const LATENCE: Record<Site, string> = {
   ABJ: '2 à 4 ms depuis Abidjan · 6 à 9 ms depuis Grand-Bassam',
@@ -45,10 +47,36 @@ export default function NouvelEspace() {
   const router = useRouter()
   const { pousser } = useApp()
   const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
+  // Même correctif que `offerId` un peu plus bas : la validation d'unicité du
+  // code, la liste de peering et la plage CIDR affichée lisaient `ESPACES` (la
+  // graine figée) au lieu du vrai parc — un code déjà pris côté API aurait pu
+  // passer la validation locale et échouer seulement à l'appel.
+  const espacesReels = espaces.items
+  const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
   const { lancerJob } = useAtelier()
+  // En mode API, les prix viennent du catalogue réel (`/admin/catalogue`) au
+  // lieu de la graine figée : un tarif changé côté admin doit se refléter ici.
+  const offresCollection = useCollection<Offer>('offres', OFFRES)
+  const OFFRES_ESPACE = useMemo(
+    () =>
+      offresCollection.items.filter((o) => o.categorie === 'espace_cloud' && o.statut === 'publiee'),
+    [offresCollection.items],
+  )
+  const executer = useOperation()
 
   const [etape, setEtape] = useState(1)
-  const [offerId, setOfferId] = useState('off-pro')
+  const [offerId, setOfferId] = useState('')
+  // `OFFRES_ESPACE` arrive après le premier rendu en mode API (`useCollection`
+  // charge dans un effet) : un `offerId` par défaut figé sur un id de maquette
+  // survivait jusqu'à la création si l'utilisateur ne cliquait pas une carte —
+  // `offerId: "off-flex"` inconnu du vrai catalogue, la facture créée n'avait
+  // alors aucun `offreNom` à afficher. On resynchronise dès que la vraie liste
+  // arrive, tant que l'utilisateur n'a pas déjà choisi une offre qui y figure.
+  useEffect(() => {
+    if (OFFRES_ESPACE.length === 0) return
+    if (!OFFRES_ESPACE.some((o) => o.id === offerId)) setOfferId(OFFRES_ESPACE[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [OFFRES_ESPACE])
   const [site, setSite] = useState<Site>('ABJ')
   const [code, setCode] = useState('EC-DBA-04')
   const [cidr, setCidr] = useState('10.6.0.0/22')
@@ -60,7 +88,10 @@ export default function NouvelEspace() {
   const [periodicite, setPeriodicite] = useState<'mensuelle' | 'annuelle'>('mensuelle')
   const [conditions, setConditions] = useState(false)
 
-  const offre = OFFRES_ESPACE.find((o) => o.id === offerId)!
+  // `offerId` reste vide le temps que l'effet ci-dessus synchronise sur la
+  // liste réelle (un seul rendu, en mode API) : retomber sur la première
+  // offre plutôt que planter sur un `find` vide.
+  const offre = OFFRES_ESPACE.find((o) => o.id === offerId) ?? OFFRES_ESPACE[0]
 
   const lignes = useMemo(() => {
     const l = [
@@ -73,7 +104,7 @@ export default function NouvelEspace() {
     if (planSauvegarde !== 'aucun') {
       l.push({
         libelle: 'Sauvegarde incluse dans l’offre',
-        detail: BACKUP_PLANS.find((p) => p.id === planSauvegarde)?.nom ?? '',
+        detail: plansSauvegarde.items.find((p) => p.id === planSauvegarde)?.nom ?? '',
         montant: 0,
       })
     }
@@ -85,13 +116,37 @@ export default function NouvelEspace() {
       })
     }
     return l
-  }, [offre, site, cidr, planSauvegarde, pra])
+  }, [offre, site, cidr, planSauvegarde, pra, plansSauvegarde.items])
 
-  const codeValide = /^EC-[A-Z0-9]{2,6}-\d{2}$/.test(code) && !ESPACES.some((e) => e.code === code)
+  const montantTtc = useMemo(() => {
+    const mensuelHt = lignes.reduce((a, l) => a + l.montant, 0)
+    const remise = periodicite === 'annuelle' ? Math.round((mensuelHt * 15) / 100) : 0
+    const { total } = ventilationTva(mensuelHt - remise)
+    return total
+  }, [lignes, periodicite])
+  const [paye, setPaye] = useState(false)
+
+  const codeValide = /^EC-[A-Z0-9]{2,6}-\d{2}$/.test(code) && !espacesReels.some((e) => e.code === code)
   const cidrValide = /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}\/(2[0-4]|1[6-9])$/.test(cidr)
 
   const peutContinuer =
     etape === 3 ? codeValide && cidrValide : etape === 5 ? conditions : true
+
+  // Catalogue réel pas encore chargé (mode API, premier rendu) : un état
+  // d'attente plutôt qu'un plantage sur `offre.specs`/`offre.prix` undefined.
+  if (!offre) {
+    return (
+      <div className="space-y-4">
+        <PageHeader
+          fil={[{ label: 'Espace client', href: '/app' }, { label: 'Espaces Cloud', href: '/app/espaces' }, { label: 'Nouvel Espace Cloud' }]}
+          titre="Nouvel Espace Cloud"
+        />
+        <Card>
+          <p className="text-[12.5px] text-g-500">Chargement du catalogue…</p>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <WizardShell
@@ -127,10 +182,44 @@ export default function NouvelEspace() {
             <Button disabled={!peutContinuer} onClick={() => setEtape(etape + 1)}>
               Continuer
             </Button>
+          ) : estActif() && !paye ? (
+            conditions ? (
+              <BoutonPrepaiementPaystack
+                montant={montantTtc}
+                libelle={`Espace Cloud ${code}`}
+                onSuccess={() => setPaye(true)}
+              />
+            ) : (
+              <Button disabled>Payer maintenant (carte / mobile money)</Button>
+            )
           ) : (
             <Button
               disabled={!conditions}
               onClick={() => {
+                // En mode API la création part au backend (`202` + travail
+                // suivi dans le centre de tâches) ; sinon la maquette simule.
+                if (estActif()) {
+                  executer({
+                    action: 'espace.create',
+                    titre: `Création de ${code} lancée`,
+                    detail:
+                      'Le quota est réservé, la plage réseau allouée. Suivi dans le centre de tâches.',
+                    appel: () =>
+                      creerRessource('/espaces', {
+                        code,
+                        offerId,
+                        site,
+                        cidr,
+                        quota: quotaDepuisSpecs(offre.specs),
+                        dnsInterne: dnsInterne
+                          ? `${code.toLowerCase()}.interne.synelia.cloud`
+                          : undefined,
+                      }),
+                    effetFinal: () => espaces.recharger(),
+                  })
+                  router.push('/app/espaces')
+                  return
+                }
                 const nouvel: EspaceCloud = {
                   id: espaces.identifiant('ec'),
                   orgId: 'org-dba',
@@ -297,7 +386,7 @@ export default function NouvelEspace() {
                 required
                 error={
                   code && !codeValide
-                    ? ESPACES.some((e) => e.code === code)
+                    ? espacesReels.some((e) => e.code === code)
                       ? 'Ce code est déjà utilisé.'
                       : 'Format attendu : EC-DBA-04'
                     : undefined
@@ -324,7 +413,7 @@ export default function NouvelEspace() {
             </div>
             <p className="mt-2.5 text-[12px] leading-relaxed text-g-500">
               La plage proposée ne chevauche aucune de vos plages existantes (
-              {ESPACES.map((e) => e.cidr).join(', ')}), ce qui rend le peering possible sans
+              {espacesReels.map((e) => e.cidr).join(', ')}), ce qui rend le peering possible sans
               renumérotation. Un /22 offre 1 024 adresses, soit environ quatre réseaux privés de 254
               hôtes.
             </p>
@@ -345,7 +434,7 @@ export default function NouvelEspace() {
               >
                 <Select value={peering} onChange={(e) => setPeering(e.target.value)}>
                   <option value="">Aucun peering</option>
-                  {ESPACES.map((e) => (
+                  {espacesReels.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.code} · {e.cidr} · {e.site}
                     </option>
@@ -378,7 +467,7 @@ export default function NouvelEspace() {
             />
             <Field label="Plan de sauvegarde par défaut">
               <Select value={planSauvegarde} onChange={(e) => setPlanSauvegarde(e.target.value)}>
-                {BACKUP_PLANS.map((p) => (
+                {plansSauvegarde.items.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.nom} · rétention {p.retentionJours} j{p.immutable ? ' · immuable' : ''}
                   </option>
@@ -447,12 +536,12 @@ export default function NouvelEspace() {
                 {
                   cle: 'Peering',
                   valeur: peering
-                    ? ESPACES.find((e) => e.id === peering)?.code ?? '—'
+                    ? espacesReels.find((e) => e.id === peering)?.code ?? '—'
                     : 'Aucun',
                 },
                 {
                   cle: 'Plan de sauvegarde',
-                  valeur: BACKUP_PLANS.find((p) => p.id === planSauvegarde)?.nom ?? 'Aucun',
+                  valeur: plansSauvegarde.items.find((p) => p.id === planSauvegarde)?.nom ?? 'Aucun',
                 },
                 { cle: 'Supervision', valeur: supervision ? 'Incluse' : 'Désactivée' },
                 { cle: 'PRA inter-site', valeur: pra ? 'Activé' : 'Non souscrit' },
@@ -472,7 +561,7 @@ export default function NouvelEspace() {
               checked={conditions}
               onChange={(e) => setConditions(e.target.checked)}
               label="J’accepte les conditions générales de vente et l’annexe SLA"
-              description={`Montants hors taxes en FCFA, TVA 18 % appliquée à la facturation. Prorata du mois en cours ajouté à la prochaine facture. ${periodicite === 'annuelle' ? 'Engagement de douze mois, résiliable à l’échéance avec trente jours de préavis.' : 'Sans engagement, résiliable en fin de mois.'}`}
+              description={`Montants hors taxes en FCFA, TVA 18 % appliquée à la facturation. ${periodicite === 'annuelle' ? 'Engagement de douze mois, résiliable à l’échéance avec trente jours de préavis.' : 'Sans engagement, résiliable en fin de mois.'} ${estActif() ? 'Le paiement (Paystack, environnement de test) est exigé avant la création de l’espace — aucune carte réelle n’est débitée sur ce lab.' : 'Paiement simulé sur cet environnement de démonstration : aucun prélèvement réel n’est effectué.'}`}
             />
           </Card>
 

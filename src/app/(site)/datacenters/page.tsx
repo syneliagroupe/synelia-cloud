@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import { Cpu, Database, Network, Snowflake, Zap } from 'lucide-react'
 import { num, pct } from '@/lib/format'
 import { BACKENDS, DATACENTERS, ESPACES } from '@/lib/mock'
+import { lirePublicServeur } from '@/lib/api/public-serveur'
+import { fusionnerDatacenters, type DatacenterPublic } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
@@ -19,7 +21,14 @@ export const metadata: Metadata = {
     'Fiche par site : localisation, alimentation, refroidissement, connectivité, sécurité physique, certifications. Latence inter-site mesurée de 4 à 6 ms.',
 }
 
-export default function Datacenters() {
+export default async function Datacenters() {
+  // En mode API, nom, ville, certifications, puissance et alimentation
+  // suivent `GET /public/datacenters` (rapproché par site) ; le reste de la
+  // fiche — que le backend ne publie pas — reste local.
+  const datacenters = fusionnerDatacenters(
+    await lirePublicServeur<DatacenterPublic[]>('/public/datacenters'),
+    DATACENTERS,
+  )
   return (
     <>
       <HeroCourt
@@ -219,7 +228,7 @@ export default function Datacenters() {
         </Container>
       </SiteSection>
 
-      {DATACENTERS.map((d, idx) => {
+      {datacenters.map((d, idx) => {
         const backendsSite = BACKENDS.filter((b) => b.site === d.code)
         const vcpu = backendsSite.reduce((a, b) => a + b.capacite.vcpu, 0)
         const ram = backendsSite.reduce((a, b) => a + b.capacite.ramGo, 0)

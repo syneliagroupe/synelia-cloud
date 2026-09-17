@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
  * n'existe que pour nommer l'onglet du navigateur — il n'ajoute aucun rendu.
  */
 export const metadata: Metadata = {
-  title: 'Membres et rôles',
+  title: 'Membres & rôles',
   description: 'Qui accède à quoi, sur quelle portée, avec quel rôle.',
 }
 

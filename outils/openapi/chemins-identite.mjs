@@ -87,7 +87,7 @@ const auth = {
       detail:
         "Appelé dès la saisie de l'adresse : si le domaine est fédéré, l'écran de connexion " +
         'remplace le champ mot de passe par le bouton du fournisseur d’identité.',
-      params: [filtre('email', chaine(undefined, { format: 'email' }), 'Adresse saisie.')],
+      params: [filtre('email', chaine(undefined, { format: 'email' }), 'Adresse saisie.', true)],
       ok: ref('DecouverteSso'),
     }),
   },
@@ -416,7 +416,7 @@ const membres = fusion(
         ok: ref('Membre'),
         code: 201,
         rbac: 'member.invite',
-        erreurs: [409],
+        erreurs: [409, 404],
       }),
     },
     '/membres/{membreId}': {
@@ -663,6 +663,30 @@ const audit = {
       ],
       ok: page(ref('EvenementAudit')),
       rbac: 'audit.view',
+    }),
+  },
+  '/audit/integrite': {
+    get: op({
+      tag: T_AUDIT,
+      id: 'verifierIntegriteAudit',
+      resume: 'Vérifier l’intégrité de la chaîne d’audit',
+      detail:
+        'Rejoue la chaîne de hachage de l’organisation active et recalcule chaque empreinte à ' +
+        'partir des champs enregistrés : signale `intacte: false` et la première ligne en rupture ' +
+        'dès qu’une entrée a été insérée, modifiée ou supprimée hors séquence.',
+      ok: objet(
+        {
+          intacte: booleen(),
+          entreesVerifiees: entier(),
+          totalEntrees: entier(),
+          ruptureId: chaine('Identifiant de la première entrée en rupture. Absent si la chaîne est intacte.'),
+          ruptureDate: horodatage('Absente si la chaîne est intacte.'),
+          raison: chaine('Absente si la chaîne est intacte.'),
+          empreinteFinale: chaine('Empreinte de la dernière entrée. Présente seulement si la chaîne est intacte.'),
+        },
+        ['intacte', 'entreesVerifiees', 'totalEntrees'],
+      ),
+      rbac: 'compliance.export',
     }),
   },
   '/audit/export': {

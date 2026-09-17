@@ -2,6 +2,8 @@
 
 import { Plus } from 'lucide-react'
 import { money, num, pct } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
+import type { AgentIA } from '@/lib/types'
 import { AGENTS_IA } from '@/lib/mock'
 import { ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -9,15 +11,26 @@ import { Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { useApp, useEspace } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
 export default function Agents() {
   const espace = useEspace()
   const { autorise, refus } = useApp()
-  const agents = AGENTS_IA.filter((a) => a.espaceId === espace.id)
+  const agentsCol = useCollection<AgentIA>('agents-ia', AGENTS_IA)
+  // Le backend ne rattache pas encore un agent à un Espace Cloud (MVP LiteLLM,
+  // organisation seule) — même repli que l'accueil IA : en mode API, la liste
+  // n'est filtrée que par statut.
+  const agents = estActif()
+    ? agentsCol.items
+    : agentsCol.items.filter((a) => a.espaceId === espace.id)
   const publies = agents.filter((a) => a.statut === 'publie')
-  const conversations = agents.reduce((a, x) => a + x.metriques.conversations7j, 0)
-  const coutJour = agents.reduce((a, x) => a + x.metriques.coutJour, 0)
-  const sousLeSeuil = agents.filter((a) => a.epreuves.reussis / a.epreuves.cas < 0.8)
+  // Conversations, coût quotidien et jeu d'épreuves n'existent que côté
+  // maquette (`AgentIA` réel n'a que dix champs) : ces tuiles ne s'affichent
+  // que tant que la démonstration fournit ces données.
+  const demo = agents.some((a) => a.metriques)
+  const conversations = agents.reduce((a, x) => a + (x.metriques?.conversations7j ?? 0), 0)
+  const coutJour = agents.reduce((a, x) => a + (x.metriques?.coutJour ?? 0), 0)
+  const sousLeSeuil = agents.filter((a) => a.epreuves && a.epreuves.reussis / a.epreuves.cas < 0.8)
 
   return (
     <div className="space-y-5">
@@ -55,21 +68,31 @@ export default function Agents() {
               detail={`${agents.length - publies.length} en brouillon`}
               ton="ok"
             />
-            <StatTile libelle="Échanges 7 jours" valeur={num(conversations)} />
-            <StatTile
-              libelle="Coût quotidien"
-              valeur={money(coutJour)}
-              detail={`${money(coutJour * 30)} projetés sur 30 jours`}
-            />
-            <StatTile
-              libelle="Résolution sans humain"
-              valeur={pct(
-                publies.reduce((a, x) => a + x.metriques.tauxResolutionPct, 0) /
-                  Math.max(publies.length, 1),
-              )}
-              detail="Moyenne des agents publiés"
-              ton="ok"
-            />
+            {demo ? (
+              <>
+                <StatTile libelle="Échanges 7 jours" valeur={num(conversations)} />
+                <StatTile
+                  libelle="Coût quotidien"
+                  valeur={money(coutJour)}
+                  detail={`${money(coutJour * 30)} projetés sur 30 jours`}
+                />
+                <StatTile
+                  libelle="Résolution sans humain"
+                  valeur={pct(
+                    publies.reduce((a, x) => a + (x.metriques?.tauxResolutionPct ?? 0), 0) /
+                      Math.max(publies.length, 1),
+                  )}
+                  detail="Moyenne des agents publiés"
+                  ton="ok"
+                />
+              </>
+            ) : (
+              <StatTile
+                libelle="Modèles utilisés"
+                valeur={new Set(agents.map((a) => a.modele)).size}
+                detail="Distincts, tous statuts confondus"
+              />
+            )}
           </div>
 
           <EmptyState

@@ -1,10 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, Minus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, TVA_PCT } from '@/lib/format'
 import { FAMILLES_TARIFS } from '@/lib/mock'
+import { usePublic } from '@/lib/api/public'
+import { famillesDepuisTarifs, type TarifsPublics } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/field'
@@ -48,8 +50,17 @@ const FAQ_TARIFS = [
 
 export default function Tarifs() {
   const [periode, setPeriode] = useState<'mensuel' | 'annuel'>('mensuel')
+  // En mode API, la grille vient de `GET /public/tarifs` (une colonne par
+  // offre publiée) ; sans API ou en cas d’échec, la grille locale reste.
+  const distant = usePublic<TarifsPublics>('/public/tarifs')
+  const familles = useMemo(
+    () => famillesDepuisTarifs(distant.donnees) ?? FAMILLES_TARIFS,
+    [distant.donnees],
+  )
   const [famille, setFamille] = useState(FAMILLES_TARIFS[0].id)
-  const active = FAMILLES_TARIFS.find((f) => f.id === famille)!
+  // La famille choisie peut ne pas exister dans la grille distante : on
+  // retombe sur la première plutôt que d’afficher un tableau vide.
+  const active = familles.find((f) => f.id === famille) ?? familles[0]
   const remise = periode === 'annuel' ? 0.85 : 1
 
   return (
@@ -103,8 +114,8 @@ export default function Tarifs() {
 
           <Tabs
             className="mt-6"
-            tabs={FAMILLES_TARIFS.map((f) => ({ id: f.id, label: f.nom }))}
-            active={famille}
+            tabs={familles.map((f) => ({ id: f.id, label: f.nom }))}
+            active={active.id}
             onChange={setFamille}
           />
 

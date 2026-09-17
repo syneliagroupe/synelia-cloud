@@ -1,23 +1,22 @@
 'use client'
 
-import { DOMAINES, HEBERGEMENTS, entreesWebCloud } from '@/lib/mock'
-import type { Domaine, WebHosting } from '@/lib/types'
+import { DOMAINES, HEBERGEMENTS, ZONES_DNS, assemblerEntrees, entreesWebCloud } from '@/lib/mock'
+import type { DnsZone, Domaine, WebHosting } from '@/lib/types'
 import { CadreSection } from '@/components/app/cadre-section'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 
-/**
- * Panneau de la section — liste les domaines de l'organisation, composés depuis
- * l'atelier : un domaine commandé pendant la session doit apparaître ici, sinon
- * on ne peut pas ouvrir sa fiche.
- */
+/** Panneau de la section — liste les domaines de l'organisation. */
 export function CadreDomaines({ children }: { children: React.ReactNode }) {
   const domaines = useCollection<Domaine>('domaines', DOMAINES)
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
-
-  const entrees = entreesWebCloud(undefined, {
-    domaines: domaines.items,
-    hebergements: hebergements.items,
-  }).map((e) => ({
+  const zones = useCollection<DnsZone>('zones-dns', ZONES_DNS)
+  // Avec l’API, les entrées sont assemblées depuis les collections distantes
+  // (mêmes champs, mêmes URL par nom servi) ; en maquette, depuis les graines.
+  const entrees = estActif()
+    ? assemblerEntrees(domaines.items, hebergements.items, zones.items)
+    : entreesWebCloud()
+  const liste = entrees.map((e) => ({
     id: e.id,
     nom: e.nom,
     sousTitre: e.sousTitre,
@@ -31,8 +30,7 @@ export function CadreDomaines({ children }: { children: React.ReactNode }) {
     <CadreSection
       titre="Domaines"
       base="/app/web/domaines"
-      entrees={entrees}
-      actionPrincipale={{ libelle: 'Commander', href: '/app/web/domaines' }}
+      entrees={liste}
       placeholderRecherche="Rechercher un domaine…"
       compteur={(visibles, total) =>
         visibles === total ? `${total} domaine${total > 1 ? 's' : ''}` : `${visibles} sur ${total}`

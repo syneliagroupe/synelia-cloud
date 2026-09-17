@@ -32,7 +32,6 @@ export function CadreHebergement({ children }: { children: React.ReactNode }) {
       titre="Hébergements"
       base="/app/web/hebergement"
       entrees={entrees}
-      actionPrincipale={{ libelle: 'Commander', href: '/app/web/hebergement' }}
       placeholderRecherche="Rechercher un hébergement…"
       compteur={(visibles, total) =>
         visibles === total ? `${total} hébergement${total > 1 ? 's' : ''}` : `${visibles} sur ${total}`

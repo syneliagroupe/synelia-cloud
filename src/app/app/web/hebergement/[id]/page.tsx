@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
 import { hebergementById, nomServi } from '@/lib/mock'
 import { VueHebergement } from './vue'
 
@@ -13,8 +12,12 @@ export async function generateMetadata({
   return { title: h ? `${nomServi(h)} · Hébergement` : 'Hébergement introuvable' }
 }
 
+/**
+ * Pas de `notFound()` : une ressource créée pendant la session n'existe pas
+ * dans le jeu figé, et un 404 du serveur ferait croire à une panne. C'est la
+ * vue cliente qui sait ce qu'elle trouve, et qui le dit.
+ */
 export default async function PageHebergement({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!hebergementById(id)) notFound()
   return <VueHebergement id={id} />
 }

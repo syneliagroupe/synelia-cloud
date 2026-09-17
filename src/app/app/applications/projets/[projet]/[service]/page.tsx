@@ -19,9 +19,9 @@ export default async function PageService({
 }: {
   params: Promise<{ projet: string; service: string }>
 }) {
-  const { service } = await params
+  const { projet, service } = await params
   // Pas de 404 côté serveur : un service créé pendant la session n'existe pas
   // dans le jeu figé, et une page d'erreur ferait croire à une panne. La vue
   // cliente vérifie l'appartenance au projet et le dit elle-même.
-  return <VueService id={service} />
+  return <VueService id={service} projetId={projet} />
 }

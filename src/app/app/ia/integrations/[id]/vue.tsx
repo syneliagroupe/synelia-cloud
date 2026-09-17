@@ -12,12 +12,11 @@ import {
 import { AGENTS_IA, CANAUX_AGENT, OUTILS_AGENT, ROUTEUR_OMNICANAL } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CodeBlock, GatedAction } from '@/components/ui/display'
+import { CodeBlock } from '@/components/ui/display'
 import { Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
-import { useApp } from '@/components/app/contexte'
 
 const TON_ETAT = {
   connecte: 'ok',
@@ -182,7 +181,6 @@ function VueCanal({ canal }: { canal: CanalAgent }) {
 }
 
 function VueOutil({ outil }: { outil: OutilAgent }) {
-  const { autorise, refus } = useApp()
   const agents = AGENTS_IA.filter((a) => a.outils.includes(outil.id))
 
   return (
@@ -219,11 +217,9 @@ function VueOutil({ outil }: { outil: OutilAgent }) {
           </span>
         }
         actions={
-          <GatedAction autorise={autorise('ia.tool.register')} message={refus('ia.tool.register')}>
-            <Button size="sm" variant="secondary">
-              Modifier la déclaration
-            </Button>
-          </GatedAction>
+          <Button size="sm" variant="secondary" disabled title="La modification d’une déclaration d’outil n’a pas encore de contrepartie côté backend — seule la déclaration à la création (« Déclarer un outil ») existe.">
+            Modifier la déclaration — bientôt
+          </Button>
         }
       />
 

@@ -561,6 +561,8 @@ export const ARTICLES_KB = [
 ]
 
 export const offreById = (id: string) => OFFRES.find((o) => o.id === id)
+/** Résout le code d'une offre en son nom affichable — jamais le slug brut à l'écran. */
+export const libellePlan = (plan?: string) => OFFRES.find((o) => o.code === plan)?.nom ?? plan ?? '—'
 export const factureById = (id: string) => FACTURES.find((f) => f.id === id)
 export const ticketById = (id: string) =>
   TICKETS_PLATEFORME.find((t) => t.id === id || t.numero.toLowerCase() === id.toLowerCase())

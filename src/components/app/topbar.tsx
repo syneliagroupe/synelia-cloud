@@ -8,6 +8,7 @@ import {
   ChevronDown,
   CircleUser,
   CloudCog,
+  Fingerprint,
   ListChecks,
   LogOut,
   RotateCcw,
@@ -16,9 +17,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { relatif } from '@/lib/format'
-import { ROLE_LABEL, type ProvisioningJob, type Role } from '@/lib/types'
+import { ROLE_LABEL, type EspaceCloud, type ProvisioningJob, type Role } from '@/lib/types'
 import { ROLES_CLIENT, ROLES_SUPER_ADMIN } from '@/lib/rbac'
-import { MES_ORGANISATIONS, ORG_COURANTE, UTILISATEUR_COURANT } from '@/lib/mock/orgs'
 import { ESPACES } from '@/lib/mock/iaas'
 import { JOBS, JOBS_PLATEFORME } from '@/lib/mock/ops'
 import {
@@ -36,7 +36,7 @@ import { Badge } from '@/components/ui/badge'
 import { Popover } from '@/components/ui/overlay'
 import { Logo, BadgeSuperAdmin } from '@/components/brand/logo'
 import { RechercheGlobale } from './recherche'
-import { useApp } from './contexte'
+import { useApp, useEspace, useMaintenant } from './contexte'
 import { useAtelier, useCollection } from './atelier'
 
 const NOTIFICATIONS = [
@@ -148,7 +148,7 @@ function BarreUnivers({
           width="w-64"
           label="Changer d’univers"
           trigger={() => (
-            <span className="flex max-w-full items-center gap-1.5 rounded-[6px] bg-white/10 px-2.5 py-1.5 text-[13px] font-semibold text-white">
+            <span className="flex max-w-full items-center gap-1.5 rounded-[6px] bg-white/10 px-2.5 py-1.5 text-[12.5px] font-semibold text-white">
               <span className="truncate">{courant.nom}</span>
               <ChevronDown size={13} className="shrink-0 text-p-300" />
             </span>
@@ -251,7 +251,7 @@ function BarreSections({
             <Link
               href={hrefSection(s, pathname, lesProjets.items)}
               className={cn(
-                'relative flex items-center whitespace-nowrap px-3 py-2.5 text-[13px] font-semibold transition-colors',
+                'relative flex items-center whitespace-nowrap px-3 py-2.5 text-[12.5px] font-semibold transition-colors',
                 s.href === active?.href
                   ? 'text-p-700 after:absolute after:inset-x-2 after:bottom-0 after:h-[2px] after:bg-p-700'
                   : 'text-g-500 hover:text-g-700',
@@ -278,8 +278,11 @@ function BarreSections({
  * panneau est alors le seul endroit où l'on choisit son Espace Cloud.
  */
 function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
-  const { espaceId, setEspaceId } = useApp()
-  const espace = ESPACES.find((e) => e.id === espaceId) ?? ESPACES[0]
+  const { setEspaceId, organisations, organisationId, changerOrganisation } = useApp()
+  // Lus depuis l’atelier pour suivre le backend quand l’API est active.
+  const espace = useEspace()
+  const listeEspaces = useCollection<EspaceCloud>('espaces', ESPACES)
+  const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
 
   return (
     <Popover
@@ -287,8 +290,8 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
       label={avecEspace ? 'Changer d’organisation ou d’Espace Cloud' : 'Changer d’organisation'}
       trigger={() => (
         <span
-          className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-white/15 bg-white/10 px-2 py-1.5 text-[12px] font-semibold text-p-300 transition-colors hover:bg-white/15"
-          title={avecEspace ? `${ORG_COURANTE.nom} · ${espace.code}` : ORG_COURANTE.nom}
+          className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-white/15 bg-white/10 px-2 py-1.5 text-[11.5px] font-semibold text-p-300 transition-colors hover:bg-white/15"
+          title={avecEspace ? `${orgActive?.nom} · ${espace.code}` : (orgActive?.nom ?? '')}
         >
           <Building2 size={12} className="shrink-0" />
           {/* Le nom de l'organisation n'apparaît qu'au-delà de 1536 px quand le
@@ -301,7 +304,7 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
               avecEspace ? 'hidden 2xl:inline' : 'hidden sm:inline',
             )}
           >
-            {ORG_COURANTE.nom}
+            {orgActive?.nom}
           </span>
           {avecEspace && (
             <>
@@ -316,23 +319,28 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
       {(close) => (
         <div className="p-2">
           <p className="type-micro px-2 py-1.5 text-g-500">Organisation</p>
-          {MES_ORGANISATIONS.map((m) => (
+          {organisations.map((m) => (
             <Link
-              key={m.org.id}
+              key={m.id}
               href="/app"
-              onClick={close}
+              onClick={() => {
+                changerOrganisation(m.id)
+                close()
+              }}
               className={cn(
                 'flex items-center justify-between gap-2 rounded-[6px] px-2 py-2 transition-colors hover:bg-p-050',
-                m.org.id === ORG_COURANTE.id && 'bg-p-050',
+                m.id === organisationId && 'bg-p-050',
               )}
             >
               <span className="min-w-0">
                 <span className="block truncate text-[13px] font-semibold text-ink">
-                  {m.org.nom}
+                  {m.nom}
                 </span>
-                <span className="block text-[12px] text-g-500">{ROLE_LABEL[m.role]}</span>
+                <span className="block text-[11.5px] text-g-500">
+                  {ROLE_LABEL[m.role as Role] ?? m.role}
+                </span>
               </span>
-              {m.org.id === ORG_COURANTE.id && (
+              {m.id === organisationId && (
                 <Badge tone="violet" size="sm">
                   Actuelle
                 </Badge>
@@ -345,7 +353,7 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
               <p className="type-micro mt-2 border-t border-g-100 px-2 pb-1 pt-2 text-g-500">
                 Espace Cloud
               </p>
-              {ESPACES.map((e) => (
+              {listeEspaces.items.map((e) => (
                 <button
                   key={e.id}
                   type="button"
@@ -358,8 +366,8 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
                     e.id === espace.id && 'bg-p-050',
                   )}
                 >
-                  <span className="font-mono text-[13px] font-semibold text-ink">{e.code}</span>
-                  <span className="text-[12px] text-g-500">{e.site}</span>
+                  <span className="font-mono text-[12.5px] font-semibold text-ink">{e.code}</span>
+                  <span className="text-[11.5px] text-g-500">{e.site}</span>
                 </button>
               ))}
             </>
@@ -368,7 +376,7 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
           <Link
             href="/select-organisation"
             onClick={close}
-            className="mt-1 block border-t border-g-100 px-2 pt-2 text-[12px] font-semibold text-p-700 hover:underline"
+            className="mt-1 block border-t border-g-100 px-2 pt-2 text-[12px] font-semibold text-p-700 hover:text-m-600"
           >
             Voir toutes les organisations →
           </Link>
@@ -380,12 +388,28 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
 
 // ─── Contrôles de droite ───────────────────────────────────────────────
 
+/**
+ * `jobs-plateforme` (`/admin/travaux`) est réservé à `exige_admin` côté backend : un client
+ * ordinaire y reçoit un `403` à chaque fois que ce composant montait, avant même d'ouvrir le
+ * popover — `useCollection` charge dans un effet au montage, sans lien avec `superAdmin`.
+ * Deux composants distincts, chacun un seul `useCollection`, plutôt qu'un appel conditionnel
+ * (interdit par les règles des hooks) : le client ne déclenche plus jamais cette requête.
+ */
 function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
-  // Lu depuis l'atelier : une création lancée dans la session doit apparaître
-  // ici, et sa barre d'avancement bouger, sans recharger la page.
+  return superAdmin ? <CentreDeTachesAdmin /> : <CentreDeTachesClient />
+}
+
+function CentreDeTachesClient() {
   const client = useCollection<ProvisioningJob>('jobs', JOBS)
+  return <CentreDeTachesCorps jobs={client.items} superAdmin={false} />
+}
+
+function CentreDeTachesAdmin() {
   const plateforme = useCollection<ProvisioningJob>('jobs-plateforme', JOBS_PLATEFORME)
-  const jobs = superAdmin ? plateforme.items : client.items
+  return <CentreDeTachesCorps jobs={plateforme.items} superAdmin />
+}
+
+function CentreDeTachesCorps({ jobs, superAdmin }: { jobs: ProvisioningJob[]; superAdmin: boolean }) {
   const enCours = jobs.filter((j) => j.statut === 'running' || j.statut === 'queued')
   const echecs = jobs.filter((j) => j.statut === 'failed')
 
@@ -400,7 +424,7 @@ function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
         >
           <ListChecks size={16} />
           {enCours.length > 0 && (
-            <span className="tnum absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-m-600 px-1 text-[11px] font-bold text-white">
+            <span className="tnum absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-m-600 px-1 text-[9.5px] font-bold text-white">
               {enCours.length}
             </span>
           )}
@@ -411,7 +435,7 @@ function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
         <div>
           <div className="flex items-center justify-between border-b border-g-100 px-3 py-2.5">
             <p className="text-[13px] font-bold text-ink">Centre de tâches</p>
-            <span className="tnum text-[12px] text-g-500">
+            <span className="tnum text-[11.5px] text-g-500">
               {enCours.length} en cours · {echecs.length} en échec
             </span>
           </div>
@@ -421,17 +445,12 @@ function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
               return (
                 <Link
                   key={j.id}
-                  // L'espace fournisseur suit ses provisionnements depuis
-                  // l'onglet du même nom de la santé plateforme : il n'a pas de
-                  // page par job, mais l'écran qui les porte tous vaut mieux que
-                  // le tableau de bord, où l'on ne retrouve pas celui qu'on
-                  // vient de cliquer.
-                  href={superAdmin ? '/admin/sante' : `/app/taches/${j.id}`}
+                  href={superAdmin ? '/admin' : `/app/taches/${j.id}`}
                   onClick={close}
                   className="block px-3 py-2 transition-colors hover:bg-p-050"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                    <p className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
                       {j.label}
                     </p>
                     <Badge
@@ -467,7 +486,7 @@ function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
                         style={{ width: `${Math.round((faites / j.taches.length) * 100)}%` }}
                       />
                     </div>
-                    <span className="tnum shrink-0 text-[11px] text-g-500">
+                    <span className="tnum shrink-0 text-[10.5px] text-g-500">
                       {faites}/{j.taches.length}
                     </span>
                   </div>
@@ -479,7 +498,7 @@ function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
             <Link
               href="/app/taches"
               onClick={close}
-              className="block border-t border-g-100 px-3 py-2 text-[12px] font-semibold text-p-700 hover:underline"
+              className="block border-t border-g-100 px-3 py-2 text-[12px] font-semibold text-p-700 hover:text-m-600"
             >
               Ouvrir le centre de tâches →
             </Link>
@@ -491,6 +510,7 @@ function CentreDeTaches({ superAdmin }: { superAdmin: boolean }) {
 }
 
 function NotificationsPopover() {
+  const maintenant = useMaintenant()
   return (
     <Popover
       width="w-80"
@@ -520,9 +540,9 @@ function NotificationsPopover() {
                   )}
                 />
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium leading-snug text-ink">{n.titre}</p>
-                  <p className="mt-0.5 text-[12px] text-g-500">{n.detail}</p>
-                  <p className="mt-0.5 text-[11px] text-g-500">{relatif(n.ts)}</p>
+                  <p className="text-[12.5px] font-medium leading-snug text-ink">{n.titre}</p>
+                  <p className="mt-0.5 text-[11.5px] text-g-500">{n.detail}</p>
+                  <p className="mt-0.5 text-[10.5px] text-g-500">{relatif(n.ts, maintenant)}</p>
                 </div>
               </div>
             </div>
@@ -539,7 +559,7 @@ function NotificationsPopover() {
  * place d'un troisième contrôle de contexte.
  */
 function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
-  const { role, setRole, pousser } = useApp()
+  const { role, setRole, pousser, api, utilisateur, deconnecter } = useApp()
   const { collectionsModifiees, reinitialiser } = useAtelier()
   const roles = superAdmin ? ROLES_SUPER_ADMIN : ROLES_CLIENT
 
@@ -549,7 +569,7 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
       label="Mon compte et rôle simulé"
       trigger={() => (
         <span className="flex items-center gap-1.5">
-          <Avatar nom={UTILISATEUR_COURANT.nom} size="sm" />
+          <Avatar nom={utilisateur.nom} size="sm" />
           <ChevronDown size={12} className="hidden text-p-300 sm:block" />
         </span>
       )}
@@ -557,15 +577,17 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
       {(close) => (
         <div className="p-2">
           <div className="flex items-center gap-2.5 border-b border-g-100 px-2 pb-2.5">
-            <Avatar nom={UTILISATEUR_COURANT.nom} size="md" />
+            <Avatar nom={utilisateur.nom} size="md" />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-semibold text-ink">
-                {UTILISATEUR_COURANT.nom}
+                {utilisateur.nom}
               </p>
-              <p className="truncate text-[12px] text-g-500">{UTILISATEUR_COURANT.email}</p>
+              <p className="truncate text-[11.5px] text-g-500">{utilisateur.email}</p>
             </div>
           </div>
 
+          {/* En mode API le rôle vient de la session : rien à simuler. */}
+          {!api && (
           <div className="border-b border-g-100 py-2">
             <p className="type-micro px-2 pb-1 text-g-500">Rôle simulé</p>
             <p className="px-2 pb-1.5 text-[11px] leading-snug text-g-500">
@@ -579,7 +601,7 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
                   type="button"
                   onClick={() => setRole(r as Role)}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-p-050',
+                    'flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-p-050',
                     r === role ? 'bg-p-050 font-semibold text-p-700' : 'text-ink',
                   )}
                 >
@@ -592,6 +614,7 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
               ))}
             </div>
           </div>
+          )}
 
           <div className="pt-1.5">
             {superAdmin ? (
@@ -609,6 +632,13 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
               </MenuLien>
             ) : (
               <>
+                {/* Auto-gestion du deuxième facteur : n'a de sens qu'un vrai
+                    compte backend à modifier, donc masqué en mode maquette. */}
+                {api && (
+                  <MenuLien href="/app/compte" onClick={close} icone={<Fingerprint size={13} />}>
+                    Mon compte
+                  </MenuLien>
+                )}
                 <MenuLien href="/app/parametres" onClick={close} icone={<Settings size={13} />}>
                   Préférences
                 </MenuLien>
@@ -629,7 +659,7 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
                     detail: 'Les ressources créées ou supprimées pendant la session sont revenues à leur état d’origine.',
                   })
                 }}
-                className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[13px] text-ink transition-colors hover:bg-p-050"
+                className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors hover:bg-p-050"
               >
                 <span className="text-g-500">
                   <RotateCcw size={13} />
@@ -637,9 +667,25 @@ function MenuCompte({ superAdmin }: { superAdmin: boolean }) {
                 Réinitialiser la démonstration
               </button>
             )}
-            <MenuLien href="/login" onClick={close} icone={<LogOut size={13} />}>
-              Se déconnecter
-            </MenuLien>
+            {api ? (
+              <button
+                type="button"
+                onClick={() => {
+                  close()
+                  deconnecter()
+                }}
+                className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors hover:bg-p-050"
+              >
+                <span className="text-g-500">
+                  <LogOut size={13} />
+                </span>
+                Se déconnecter
+              </button>
+            ) : (
+              <MenuLien href="/login" onClick={close} icone={<LogOut size={13} />}>
+                Se déconnecter
+              </MenuLien>
+            )}
           </div>
         </div>
       )}
@@ -662,7 +708,7 @@ function MenuLien({
     <Link
       href={href}
       onClick={onClick}
-      className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-[13px] text-ink transition-colors hover:bg-p-050"
+      className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-[12.5px] text-ink transition-colors hover:bg-p-050"
     >
       <span className="text-g-500">{icone}</span>
       {children}

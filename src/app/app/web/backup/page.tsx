@@ -5,14 +5,19 @@ import { HardDrive, Lock, RotateCcw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateHeure, relatif } from '@/lib/format'
 import { SITE_LABEL } from '@/lib/types'
-import { sauvegardesWebDeLOrg } from '@/lib/mock'
+import { SAUVEGARDES_WEB, sauvegardesWebDeLOrg, type SauvegardeWeb } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
+import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
+import { useMaintenant } from '@/components/app/contexte'
 
 export default function ListeSauvegardes() {
-  const plans = sauvegardesWebDeLOrg()
+  const maintenant = useMaintenant()
+  const collection = useCollection<SauvegardeWeb>('sauvegardes-web', SAUVEGARDES_WEB)
+  const plans = estActif() ? collection.items : sauvegardesWebDeLOrg()
   const echecs = plans.flatMap((p) => p.executions).filter((e) => e.statut !== 'ok')
 
   return (
@@ -21,7 +26,7 @@ export default function ListeSauvegardes() {
         fil={[
           { label: 'Espace client', href: '/app' },
           { label: 'Web Cloud', href: '/app/web' },
-          { label: 'Backup' },
+          { label: 'Sauvegardes' },
         ]}
         titre="Sauvegardes"
         sousTitre="Un plan par hébergement, qui prend les fichiers, les bases, la configuration et la messagerie dans la même exécution. Les copies sont immuables et vivent sur l’autre site."
@@ -41,7 +46,7 @@ export default function ListeSauvegardes() {
         />
         <StatTile
           libelle="Dernière exécution"
-          valeur={plans[0]?.executions[0] ? relatif(plans[0].executions[0].ts) : '—'}
+          valeur={plans[0]?.executions[0] ? relatif(plans[0].executions[0].ts, maintenant) : '—'}
           ton="ok"
         />
         <StatTile

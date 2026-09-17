@@ -2,7 +2,10 @@ import type { Metadata } from 'next'
 import { CadreFlux } from './cadre'
 
 export const metadata: Metadata = {
-  title: 'Orchestration',
+  title: {
+    absolute: 'Orchestration · Espace client Synelia Cloud',
+    template: '%s · Espace client Synelia Cloud',
+  },
   description:
     'Flux multi-agents : enchaînement, branches conditionnelles, boucles, reprise sur erreur et validation humaine.',
 }

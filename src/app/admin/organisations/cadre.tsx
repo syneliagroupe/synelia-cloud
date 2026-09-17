@@ -1,6 +1,7 @@
 'use client'
 
 import { ORGANISATIONS } from '@/lib/mock/orgs'
+import { libellePlan } from '@/lib/mock/commerce'
 import type { Organisation } from '@/lib/types'
 import { CadreSection } from '@/components/app/cadre-section'
 import { useCollection } from '@/components/app/atelier'
@@ -17,13 +18,9 @@ import { money } from '@/lib/format'
  *
  * Toutes les organisations sont clientes en direct : il n'y a pas de niveau
  * revendeur à distinguer dans la liste, seulement l'état du compte.
- *
- * La liste vient de l'atelier : une organisation créée depuis l'écran de droite
- * doit apparaître ici, faute de quoi on ne peut pas ouvrir sa fiche.
  */
 export function CadreOrganisations({ children }: { children: React.ReactNode }) {
   const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
-
   const entrees = orgs.items.map((o) => ({
     id: o.id,
     nom: o.nom,
@@ -31,7 +28,11 @@ export function CadreOrganisations({ children }: { children: React.ReactNode }) 
     // tronquer le secteur, qui est l'information de repérage la plus utile.
     sousTitre: `${o.secteur ?? o.pays} · ${money(o.caMensuel ?? 0)}`,
     etat:
-      o.statut === 'active' ? o.tenantPlan : o.statut === 'suspendue' ? 'Suspendue' : 'Fermée',
+      o.statut === 'active'
+        ? libellePlan(o.tenantPlan)
+        : o.statut === 'suspendue'
+          ? 'Suspendue'
+          : 'Fermée',
     ton:
       o.statut === 'active'
         ? ('neutral' as const)

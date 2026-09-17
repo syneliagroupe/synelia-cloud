@@ -16,6 +16,7 @@ import { DataTable } from '@/components/composition/data-table'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
+import { creerRessource, modifierRessource, requete } from '@/lib/api/client'
 import type { Offer } from '@/lib/types'
 
 const ONGLETS = [
@@ -129,6 +130,35 @@ export default function Catalogue() {
       detail: edition
         ? 'Les souscriptions en cours conservent leur prix. La modification ne concerne que les nouvelles.'
         : 'Elle n’apparaîtra sur la vitrine qu’après publication explicite.',
+      appel: () =>
+        edition
+          ? modifierRessource('/admin/catalogue/offres', edition.id, {
+              // `OffreCreation` sert aussi de corps de PATCH côté backend :
+              // `code` et `categorie` y sont obligatoires, les omettre fait
+              // échouer la modification en 422 (« Field required ») alors que
+              // l'écran semble avoir enregistré.
+              code: champs.code,
+              categorie: champs.categorie,
+              nom: champs.nom,
+              specs: champs.specs,
+              caracteristiques: champs.caracteristiques,
+              prix: champs.prix,
+              sla: champs.sla,
+              populaire: champs.populaire,
+              surDevis: champs.surDevis,
+            })
+          : creerRessource('/admin/catalogue/offres', {
+              code: champs.code,
+              nom: champs.nom,
+              categorie: champs.categorie,
+              specs: champs.specs,
+              caracteristiques: champs.caracteristiques,
+              prix: champs.prix,
+              statut: 'brouillon',
+              sla: champs.sla,
+              populaire: champs.populaire,
+              surDevis: champs.surDevis,
+            }),
       effet: () =>
         edition
           ? offres.modifier(edition.id, champs)
@@ -138,6 +168,7 @@ export default function Catalogue() {
               statut: 'brouillon',
               souscriptionsActives: 0,
             }),
+      effetFinal: () => offres.recharger(),
     })
     setEditionId(null)
     setCreation(false)
@@ -151,6 +182,7 @@ export default function Catalogue() {
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Catalogue d’offres' }]}
         titre="Catalogue d’offres"
         sousTitre="Ce que nous vendons et à quel prix. Une offre publiée engage un prix : la modifier à la hausse ne s’applique jamais à une souscription en cours, seulement aux nouvelles."
         actions={
@@ -195,9 +227,9 @@ export default function Catalogue() {
         <StatTile
           libelle="Revenu récurrent"
           valeur={moneyPerMonth(
-            OFFRES.reduce((a, o) => a + o.prix * o.souscriptionsActives, 0),
+            offres.items.reduce((a, o) => a + o.prix * o.souscriptionsActives, 0),
           )}
-          ton="accent"
+          ton="violet"
           detail="Prix publics × souscriptions actives"
         />
       </div>
@@ -407,7 +439,13 @@ export default function Catalogue() {
                                 titre: `${o.nom} publiée`,
                                 detail:
                                   'L’offre apparaît immédiatement sur la vitrine publique et dans le simulateur de coût. Son prix est désormais garanti à chaque souscripteur.',
+                                appel: () =>
+                                  requete(`/admin/catalogue/offres/${encodeURIComponent(o.id)}/publication`, {
+                                    methode: 'POST',
+                                    corps: { statut: 'publiee' },
+                                  }),
                                 effet: () => offres.modifier(o.id, { statut: 'publiee' }),
+                                effetFinal: () => offres.recharger(),
                               })
                             }
                           >
@@ -549,7 +587,7 @@ export default function Catalogue() {
                           <span
                             className={cn(
                               'block h-full rounded-full',
-                              o.populaire ? 'bg-m-600' : 'bg-p-600',
+                              o.populaire ? 'bg-p-800' : 'bg-p-600',
                             )}
                             style={{ width: `${(o.souscriptionsActives / max) * 100}%` }}
                           />
@@ -791,7 +829,13 @@ export default function Catalogue() {
             titre: `${depreciation.nom} dépréciée`,
             detail:
               'Elle n’est plus souscriptible. Les clients existants continuent d’être servis au prix garanti.',
+            appel: () =>
+              requete(`/admin/catalogue/offres/${encodeURIComponent(depreciation.id)}/publication`, {
+                methode: 'POST',
+                corps: { statut: 'depreciee' },
+              }),
             effet: () => offres.modifier(depreciation.id, { statut: 'depreciee' }),
+            effetFinal: () => offres.recharger(),
           })
           setDepreciationId(null)
         }}

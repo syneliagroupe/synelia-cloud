@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, money, num } from '@/lib/format'
-import { SITE_LABEL, type K8sCluster, type Site } from '@/lib/types'
+import { SITE_LABEL, type EspaceCloud, type K8sCluster, type Site } from '@/lib/types'
 import { ESPACES, K8S_CLUSTERS } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
@@ -14,6 +14,8 @@ import { Card, CardHeader, Callout, KeyValueList } from '@/components/compositio
 import { CostPreview, WizardShell } from '@/components/composition/flow'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
+import { useOperation } from '@/components/app/actions'
+import { creerRessource, estActif } from '@/lib/api/client'
 
 const ETAPES = [
   { numero: 1, titre: 'Version et site' },
@@ -112,7 +114,9 @@ export default function NouveauCluster() {
   const { pousser } = useApp()
   const espaceCourant = useEspace()
   const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
   const { lancerJob } = useAtelier()
+  const executer = useOperation()
 
   const [etape, setEtape] = useState(1)
   const [nom, setNom] = useState('k8s-prod-02')
@@ -125,7 +129,7 @@ export default function NouveauCluster() {
   const [modules, setModules] = useState<string[]>(MODULES.filter((m) => m.conseille).map((m) => m.id))
   const [conditions, setConditions] = useState(false)
 
-  const espace = ESPACES.find((e) => e.id === espaceId) ?? espaceCourant
+  const espace = espacesCol.items.find((e) => e.id === espaceId) ?? espaceCourant
 
   const noeuds = pools.reduce((a, p) => a + p.nodes, 0)
   const vcpu = pools.reduce((a, p) => {
@@ -189,6 +193,33 @@ export default function NouveauCluster() {
     setPools((p) => p.map((x) => (x.id === id ? { ...x, ...patch } : x)))
 
   const creerLeCluster = () => {
+    // En mode API la création part au backend (`202` + travail suivi) ; sinon
+    // la maquette simule, comme avant.
+    if (estActif()) {
+      executer({
+        action: 'vm.create_delete',
+        titre: `Création de ${nom} lancée`,
+        detail: 'Le control plane est provisionné avant les pools. Suivi dans le centre de tâches.',
+        appel: () =>
+          creerRessource('/kubernetes', {
+            espaceId: espace.id,
+            nom,
+            version,
+            site,
+            controlPlane: { mode: modeCp, nodes: modeCp === 'ha' ? 3 : 1 },
+            pools: pools.map((p) => ({
+              nom: p.nom,
+              nodes: p.nodes,
+              flavor: p.flavor,
+              diskGo: p.diskGo,
+              type: p.type,
+              autoscale: p.autoscale ? { min: p.min, max: p.max } : undefined,
+            })),
+          }),
+        effetFinal: () => grappes.recharger(),
+      })
+      return
+    }
     const cluster: K8sCluster = {
       id: grappes.identifiant('k8s'),
       espaceId: espace.id,
@@ -301,12 +332,12 @@ export default function NouveauCluster() {
             <Select
               value={espaceId}
               onChange={(e) => {
-                const cible = ESPACES.find((x) => x.id === e.target.value)
+                const cible = espacesCol.items.find((x) => x.id === e.target.value)
                 setEspaceId(e.target.value)
                 if (cible) setSite(cible.site)
               }}
             >
-              {ESPACES.map((e) => (
+              {espacesCol.items.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.code} · {SITE_LABEL[e.site]} · {e.quota.vcpu - e.usage.vcpu} vCPU disponibles
                 </option>

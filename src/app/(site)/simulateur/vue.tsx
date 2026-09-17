@@ -12,8 +12,10 @@ import {
 } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
-import { Field, Input, SegmentedControl, Select, Slider, Switch } from '@/components/ui/field'
+import { Field, Input, SegmentedControl, Select, Slider, Switch, Textarea } from '@/components/ui/field'
 import { Tabs } from '@/components/ui/display'
+import { Modal } from '@/components/ui/overlay'
+import { estActif, requete } from '@/lib/api/client'
 import { Callout, Card, CardHeader } from '@/components/composition/card'
 import { Container, HeroCourt, SiteSection, AppelFinal } from '@/components/site/blocs'
 
@@ -411,8 +413,9 @@ function Configurateur() {
             une demande de devis ou la comparer à une offre concurrente, ligne par ligne.
           </p>
           <ButtonLink href="/entreprises#contact" variant="secondary" fullWidth>
-            Demander un devis
+            Contacter un architecte
           </ButtonLink>
+          <DemandeDevis total={total} lignes={toutes} annuel={annuel} />
           <ButtonLink href="/signup" fullWidth size="lg">
             Créer mon compte
           </ButtonLink>
@@ -427,8 +430,134 @@ function Configurateur() {
   )
 }
 
-function TotalLigne({
-  libelle,
+// ─── Demande de devis ───────────────────────────────────────────────
+
+/**
+ * Envoie la configuration chiffrée en demande de devis (`POST /public/devis`,
+ * `{ contact: { nom, email, sujet, message }, besoin }` requis). Le besoin
+ * reprend les lignes du configurateur : le commercial chiffre ce qui est
+ * affiché, pas une reformulation. Sans API, accusé local — aucun courriel ne
+ * part d’une maquette.
+ */
+function DemandeDevis({ total, lignes, annuel }: { total: number; lignes: Ligne[]; annuel: boolean }) {
+  const [ouvert, setOuvert] = useState(false)
+  const [nom, setNom] = useState('')
+  const [email, setEmail] = useState('')
+  const [organisation, setOrganisation] = useState('')
+  const [telephone, setTelephone] = useState('')
+  const [envoi, setEnvoi] = useState(false)
+  const [erreur, setErreur] = useState<string | null>(null)
+  const [reference, setReference] = useState<string | null>(null)
+
+  const besoin = useMemo(
+    () =>
+      [
+        `Configuration du simulateur — ${money(total)}/mois TTC${annuel ? ', engagement annuel −15 %' : ''} :`,
+        ...lignes.map((l) => `· ${l.libelle}${l.detail ? ` (${l.detail})` : ''} : ${money(l.montant)}/mois`),
+      ].join('\n'),
+    [total, lignes, annuel],
+  )
+
+  const valide = nom.trim().length > 1 && /.+@.+\..+/.test(email.trim())
+
+  const envoyer = async () => {
+    if (!valide || envoi) return
+    if (!estActif()) {
+      setReference('maquette — aucun courriel ne part')
+      return
+    }
+    setEnvoi(true)
+    setErreur(null)
+    try {
+      const accuse = await requete<{ reference: string }>('/public/devis', {
+        methode: 'POST',
+        corps: {
+          contact: {
+            nom: nom.trim(),
+            email: email.trim(),
+            ...(telephone.trim() ? { telephone: telephone.trim() } : {}),
+            ...(organisation.trim() ? { organisation: organisation.trim() } : {}),
+            sujet: 'commercial',
+            message: `Demande de devis depuis le simulateur (${organisation.trim() || 'organisation non renseignée'}).`,
+          },
+          besoin,
+        },
+      })
+      setReference(accuse.reference)
+    } catch {
+      setErreur('La demande n’est pas partie. Réessayez, ou écrivez-nous depuis la page entreprises.')
+    } finally {
+      setEnvoi(false)
+    }
+  }
+
+  const fermer = () => {
+    setOuvert(false)
+    setErreur(null)
+  }
+
+  return (
+    <>
+      <Button variant="secondary" fullWidth disabled={lignes.length === 0} onClick={() => { setReference(null); setOuvert(true) }}>
+        Demander un devis
+      </Button>
+      <Modal
+        open={ouvert}
+        onClose={fermer}
+        title="Demander un devis"
+        description="Un commercial reprend votre configuration et vous engage un prix. Le simulateur donne un ordre de grandeur ; le devis engage."
+        footer={
+          reference ? (
+            <Button onClick={fermer}>Fermer</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={fermer}>
+                Annuler
+              </Button>
+              <Button disabled={!valide || envoi} onClick={envoyer}>
+                {envoi ? 'Envoi…' : 'Envoyer la demande'}
+              </Button>
+            </>
+          )
+        }
+      >
+        {reference ? (
+          <Callout ton="ok" titre={`Demande enregistrée — ${reference}`}>
+            Un architecte basé à Abidjan vous rappelle sous un jour ouvré, avec votre configuration
+            sous les yeux. Référence à citer en cas de relance.
+          </Callout>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Nom complet" required>
+                <Input value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Awa Diallo" />
+              </Field>
+              <Field label="Courriel professionnel" required>
+                <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="awa@entreprise.ci" />
+              </Field>
+              <Field label="Organisation">
+                <Input value={organisation} onChange={(e) => setOrganisation(e.target.value)} placeholder="Entreprise CI" />
+              </Field>
+              <Field label="Téléphone">
+                <Input value={telephone} onChange={(e) => setTelephone(e.target.value)} placeholder="+225 …" />
+              </Field>
+            </div>
+            <Field label="Votre configuration, jointe à la demande">
+              <Textarea value={besoin} rows={6} readOnly />
+            </Field>
+            {erreur && (
+              <Callout ton="err" titre="Envoi impossible">
+                {erreur}
+              </Callout>
+            )}
+          </div>
+        )}
+      </Modal>
+    </>
+  )
+}
+
+function TotalLigne({  libelle,
   valeur,
   ton,
 }: {

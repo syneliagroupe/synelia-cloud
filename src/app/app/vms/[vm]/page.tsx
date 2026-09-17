@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
 import { VMS } from '@/lib/mock'
 import { VueVm } from './vue'
 
@@ -13,8 +12,12 @@ export async function generateMetadata({
   return { title: m ? `${m.nom} · Machine virtuelle` : 'Machine introuvable' }
 }
 
+/**
+ * Pas de `notFound()` : une machine créée pendant la session n'existe pas
+ * dans le jeu figé, et un 404 du serveur ferait croire à une panne. C'est la
+ * vue cliente qui sait ce qu'elle trouve, et qui le dit.
+ */
 export default async function PageVm({ params }: { params: Promise<{ vm: string }> }) {
   const { vm } = await params
-  if (!VMS.some((m) => m.id === vm)) notFound()
   return <VueVm id={vm} />
 }

@@ -93,9 +93,7 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
     portee: 'client',
     libelle: 'Démarrage de {cible}',
     lancement: 'L’ordre est passé à l’hyperviseur.',
-    // Formulations sans nombre : l'action groupée porte sur une machine nommée
-    // comme sur un lot, et le même texte sert les deux.
-    fin: 'Le démarrage est terminé : les sondes répondent.',
+    fin: 'Les machines sont en ligne.',
     href: '/app/vms',
     etapes: [
       { nom: 'Passer l’ordre à l’hyperviseur', dureeS: 4 },
@@ -108,7 +106,7 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
     portee: 'client',
     libelle: 'Arrêt de {cible}',
     lancement: 'Extinction propre demandée au système invité.',
-    fin: 'L’extinction est terminée. Le stockage reste facturé.',
+    fin: 'Les machines sont arrêtées. Le stockage reste facturé.',
     href: '/app/vms',
     etapes: [
       { nom: 'Demander l’extinction au système invité', dureeS: 24 },
@@ -119,8 +117,8 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
     id: 'vm.power.reboot',
     portee: 'client',
     libelle: 'Redémarrage de {cible}',
-    lancement: 'Le service sera de nouveau disponible dans environ 40 secondes.',
-    fin: 'Le redémarrage est terminé : les sondes répondent.',
+    lancement: 'La machine sera de nouveau disponible dans environ 40 secondes.',
+    fin: 'La machine a redémarré et répond aux sondes.',
     href: '/app/vms',
     etapes: [
       { nom: 'Demander l’arrêt au système invité', dureeS: 14 },
@@ -235,18 +233,20 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
 
   // ─── Projets applicatifs (§6) ────────────────────────────────────────
   {
+    // Un projet ne consomme rien par lui-même (§ nouvel assistant « Nouveau
+    // projet ») : cette étape rattache le cluster et publie la porte d'entrée,
+    // elle ne construit ni ne déploie aucun service — il n'y en a pas encore.
     id: 'projet.create',
     portee: 'client',
     libelle: 'Création du projet {cible}',
-    lancement: 'Le cluster est provisionné avant l’ouverture de l’environnement Production.',
-    fin: 'Le projet est prêt : vous pouvez y déployer votre première application.',
+    lancement: 'Le cluster est rattaché, puis le load balancer et la zone applicative sont provisionnés.',
+    fin: 'Le projet est prêt à recevoir son premier service.',
     href: '/app/applications/projets',
     etapes: [
-      { nom: 'Réserver le quota sur l’Espace Cloud', dureeS: 8 },
-      { nom: 'Créer le namespace de l’environnement Production', dureeS: 22 },
-      { nom: 'Appliquer les quotas et la NetworkPolicy', dureeS: 18 },
-      { nom: 'Provisionner l’adresse offerte et le certificat', dureeS: 42 },
-      { nom: 'Enregistrer le projet dans la facturation', dureeS: 6 },
+      { nom: 'Réserver le projet et ses métadonnées', dureeS: 6 },
+      { nom: 'Rattacher le cluster Kubernetes', dureeS: 14 },
+      { nom: 'Provisionner le load balancer L7 dédié', dureeS: 34 },
+      { nom: 'Émettre le certificat et publier la zone applicative', dureeS: 28 },
     ],
   },
   {
@@ -314,33 +314,6 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
       { nom: 'Snapshot pré-mise à jour', dureeS: 96 },
       { nom: 'Appliquer la nouvelle version', dureeS: 168 },
       { nom: 'Vérifier les services', dureeS: 42 },
-    ],
-  },
-  {
-    id: 'variable.create',
-    portee: 'client',
-    libelle: 'Ajout de la variable {cible}',
-    lancement: 'La valeur est enregistrée dans la configuration du projet.',
-    fin: 'La variable est prête ; redéployez les services concernés pour qu’ils la reçoivent.',
-    href: '/app/applications/variables',
-    etapes: [
-      { nom: 'Valider le format de la clé', dureeS: 2 },
-      { nom: 'Enregistrer la variable dans le projet', dureeS: 4 },
-      { nom: 'Programmer l’injection au prochain déploiement', dureeS: 3 },
-    ],
-  },
-  {
-    id: 'secret.create',
-    portee: 'client',
-    libelle: 'Ajout du secret {cible}',
-    lancement: 'La valeur part directement au coffre : le portail ne la garde pas en clair.',
-    fin: 'Le secret est au coffre ; redéployez les services concernés pour qu’ils le reçoivent.',
-    href: '/app/applications/variables',
-    etapes: [
-      { nom: 'Chiffrer la valeur', dureeS: 3 },
-      { nom: 'Envoyer au coffre de secrets', dureeS: 6 },
-      { nom: 'Enregistrer la référence dans le projet', dureeS: 3 },
-      { nom: 'Programmer l’injection au prochain déploiement', dureeS: 3 },
     ],
   },
   {
@@ -577,33 +550,20 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
     ],
   },
   {
-    id: 'export.conformite',
-    portee: 'client',
-    libelle: 'Export · {cible}',
-    lancement: 'Le lien de téléchargement arrivera par courriel, valable 24 heures.',
-    fin: 'L’export est prêt : le lien vient d’être envoyé.',
-    href: '/app/sauvegarde',
-    etapes: [
-      { nom: 'Rassembler l’état de protection par ressource', dureeS: 42 },
-      { nom: 'Relever le RPO constaté et le dernier test', dureeS: 68 },
-      { nom: 'Composer et signer le document', dureeS: 18 },
-    ],
-  },
-
-  // ─── Espace fournisseur (§8) ─────────────────────────────────────────
-  {
     id: 'compte.cloture',
-    portee: 'fournisseur',
+    portee: 'client',
     libelle: 'Demande de clôture · {cible}',
-    lancement: 'Rien n’est supprimé aujourd’hui : le client garde 30 jours pour récupérer ses données, autant pour annuler.',
+    lancement: 'Rien n’est supprimé aujourd’hui : 30 jours pour récupérer vos données, autant pour annuler.',
     fin: 'La demande est enregistrée. La suppression effective est planifiée dans 30 jours.',
-    href: '/admin/organisations',
+    href: '/app/parametres',
     etapes: [
-      { nom: 'Enregistrer la demande et notifier le client', dureeS: 4 },
+      { nom: 'Enregistrer la demande', dureeS: 4 },
       { nom: 'Préparer l’export complet des données', dureeS: 186 },
       { nom: 'Planifier la suppression à 30 jours', dureeS: 6 },
     ],
   },
+
+  // ─── Espace fournisseur (§8) ─────────────────────────────────────────
   {
     id: 'capacite.rebalance',
     portee: 'fournisseur',
@@ -656,49 +616,16 @@ export const WORKFLOWS: DefinitionWorkflow[] = [
     ],
   },
   {
-    id: 'espace.migrate',
+    id: 'export.plateforme',
     portee: 'fournisseur',
-    libelle: 'Migration inter-backend · {cible}',
-    lancement: 'Les machines sont migrées lot par lot, avec bascule réseau en fin de lot.',
-    fin: 'L’espace tourne entièrement sur le backend cible.',
-    href: '/admin/migration',
+    libelle: 'Export · {cible}',
+    lancement: 'Le lien de téléchargement arrivera par courriel, valable 24 heures.',
+    fin: 'L’export est prêt : le lien vient d’être envoyé.',
+    href: '/admin/audit',
     etapes: [
-      { nom: 'Inventaire des ressources', dureeS: 24 },
-      { nom: 'Migrer le lot 1', dureeS: 986 },
-      { nom: 'Migrer le lot 2', dureeS: 832 },
-      { nom: 'Basculer le réseau', dureeS: 46 },
-      { nom: 'Retirer les ressources source', dureeS: 62 },
-    ],
-  },
-
-  // ─── Souscriptions du marketplace (§6.4) ─────────────────────────────
-  //
-  // L'univers Marketplace a été retiré du portail, mais ses souscriptions
-  // restent dans le jeu de données — dont celle en échec sur laquelle porte
-  // le bouton « Reprendre » du centre de tâches. Sans ces deux entrées,
-  // `workflowById` ne trouvait rien et la reprise ne faisait rien du tout :
-  // le bouton notifiait une reprise qui n'avait pas lieu.
-  {
-    id: 'marketplace.provision',
-    portee: 'client',
-    libelle: 'Souscription · {cible}',
-    lancement: 'La capacité est réservée le temps du provisionnement.',
-    fin: 'Le service est opérationnel. Son bouton Ouvrir vous y conduit en SSO.',
-    href: '/app',
-    etapes: ETAPES_MARKETPLACE,
-  },
-  {
-    id: 'marketplace.update',
-    portee: 'fournisseur',
-    libelle: 'Campagne de mise à jour · {cible}',
-    lancement: 'Un instantané est pris avant chaque instance : la campagne est réversible.',
-    fin: 'Toutes les instances de la vague tournent sur la nouvelle version.',
-    href: '/admin/marketplace',
-    etapes: [
-      { nom: 'Snapshot pré-mise à jour', dureeS: 142 },
-      { nom: 'Appliquer la mise à jour', dureeS: 386 },
-      { nom: 'Vérifier les services', dureeS: 64 },
-      { nom: 'Purger le snapshot', dureeS: 18 },
+      { nom: 'Rassembler les enregistrements', dureeS: 86 },
+      { nom: 'Calculer l’empreinte de chaînage', dureeS: 42 },
+      { nom: 'Chiffrer et publier le lien', dureeS: 18 },
     ],
   },
 ]

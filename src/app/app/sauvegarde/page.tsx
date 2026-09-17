@@ -1,19 +1,20 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
-import { Download, FileDown, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Download, FileDown, Plus, RotateCcw, Shield, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, dateHeure, dureeMin, goHumain, num, pct } from '@/lib/format'
 import { SITE_COURT } from '@/lib/types'
-import type { BackupPlan, ConformiteLigne, RestorePoint } from '@/lib/types'
-import { BACKUP_PLANS, BUCKETS, CONFORMITE, DR_PLANS, RESTORE_POINTS, VMS } from '@/lib/mock'
+import type { BackupPlan, ConformiteLigne, DRPlan, RestorePoint, VM, Volume } from '@/lib/types'
+import { BACKUP_PLANS, BUCKETS, CONFORMITE, DR_PLANS, RESTORE_POINTS, VMS, VOLUMES } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink, IconButton } from '@/components/ui/button'
 import { Checkbox, Field, Input, Radio, Select, Switch } from '@/components/ui/field'
 import { GatedAction, Tabs } from '@/components/ui/display'
 import { Drawer } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { RpoRtoGauge } from '@/components/business/infra'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
@@ -22,6 +23,7 @@ import { Regle321 } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif } from '@/lib/api/client'
 
 /** Valeurs du formulaire de plan — le tiroir doit être contrôlé pour
  *  qu'« Enregistrer » ait quelque chose à enregistrer. */
@@ -80,11 +82,18 @@ const ONGLETS = [
   { id: 'reprise', label: 'Plans de reprise' },
 ]
 
+/** `useCollection` exige un champ `id` ; la conformité s'identifie par ressource. */
+type ConformiteAvecId = ConformiteLigne & { id: string }
+const CONFORMITE_AVEC_ID: ConformiteAvecId[] = CONFORMITE.map((c) => ({ ...c, id: c.ressourceId }))
+
 export default function Sauvegarde() {
   const [onglet, setOnglet] = useState('plans')
-  const protegees = CONFORMITE.filter((c) => c.protection === 'protegee').length
-  const echecs = CONFORMITE.filter((c) => c.protection === 'echec').length
-  const nonProtegees = CONFORMITE.filter((c) => c.protection === 'non_protegee').length
+  const conformite = useCollection<ConformiteAvecId>('conformite-sauvegarde', CONFORMITE_AVEC_ID).items
+  const plans = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS).items
+  const points = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS).items
+  const protegees = conformite.filter((c) => c.protection === 'protegee').length
+  const echecs = conformite.filter((c) => c.protection === 'echec').length
+  const nonProtegees = conformite.filter((c) => c.protection === 'non_protegee').length
 
   return (
     <div className="space-y-5">
@@ -102,16 +111,16 @@ export default function Sauvegarde() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-        <StatTile libelle="Plans actifs" valeur={BACKUP_PLANS.length} />
-        <StatTile libelle="Ressources protégées" valeur={protegees} ton="ok" detail={`sur ${CONFORMITE.length}`} />
+        <StatTile libelle="Plans actifs" valeur={plans.length} />
+        <StatTile libelle="Ressources protégées" valeur={protegees} ton="ok" detail={`sur ${conformite.length}`} />
         <StatTile
           libelle="Points de restauration"
-          valeur={RESTORE_POINTS.length}
-          detail={`${RESTORE_POINTS.filter((p) => p.immuableJusquau).length} immuables`}
+          valeur={points.length}
+          detail={`${points.filter((p) => p.immuableJusquau).length} immuables`}
         />
         <StatTile
           libelle="Volume protégé"
-          valeur={goHumain(Math.round(RESTORE_POINTS.reduce((a, p) => a + p.tailleGo, 0)))}
+          valeur={goHumain(Math.round(points.reduce((a, p) => a + p.tailleGo, 0)))}
         />
         <StatTile
           libelle="Ressources en échec"
@@ -138,8 +147,19 @@ function OngletPlans() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const plans = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
+  const vms = useCollection<VM>('vms', VMS).items
+  const volumes = useCollection<Volume>('volumes', VOLUMES).items
   const [drawer, setDrawer] = useState<BackupPlan | 'nouveau' | null>(null)
   const [f, setF] = useState<FormulairePlan>(PLAN_VIDE)
+
+  // Une portée « par ressource » qui désigne une VM sans volume Cinder attaché ne peut
+  // pas être protégée aujourd'hui : Karbor (snapshot applicatif du disque racine) n'est
+  // pas déployé dans le lab, seul le chemin snapshot Cinder d'un volume séparé marche
+  // réellement (`sauvegarde/service.py::_volumes_du_scope`). Averti ici plutôt que
+  // découvert à l'échec du job.
+  const vmCiblee = f.scopeType === 'ressource' ? vms.find((v) => v.id === f.scopeValeur) : undefined
+  const vmSansVolume =
+    vmCiblee !== undefined && !volumes.some((v) => v.attachedTo === vmCiblee.id)
 
   const ouvrir = (cible: BackupPlan | 'nouveau') => {
     setF(cible === 'nouveau' ? PLAN_VIDE : formulaireDepuis(cible))
@@ -325,16 +345,17 @@ function OngletPlans() {
               titre: 'Aucun plan de sauvegarde',
               phrase:
                 'Sans plan, aucune restauration n’est possible. Commencez par un plan quotidien immuable sur l’étiquette production, avec copie sur le second site.',
-              action: { libelle: 'Créer un plan', href: '#' },
+              action: { libelle: 'Créer un plan', onClick: () => ouvrir('nouveau') },
             }}
           />
         </div>
       </Card>
 
-      <Callout ton="violet" titre="Ce que la rétention WORM interdit">
-        Un point de restauration sous rétention ne peut être supprimé ni raccourci — ni par un
-        attaquant ayant obtenu des droits d’administration, ni par nos propres équipes. C’est la seule
-        protection qui résiste à la compromission d’un compte privilégié.
+      <Callout ton="violet" titre="Pourquoi l’immuabilité change tout">
+        Un point de restauration sous rétention WORM ne peut être supprimé ni raccourci par personne
+        — ni par un attaquant ayant obtenu des droits d’administration, ni par nos propres équipes.
+        C’est la seule protection qui résiste à une compromission de compte privilégié, et c’est ce
+        qui distingue une sauvegarde d’une simple copie.
       </Callout>
 
       <Drawer
@@ -393,6 +414,24 @@ function OngletPlans() {
                 />
               </Field>
             </div>
+            {vmSansVolume && vmCiblee && (
+              <Callout
+                ton="warn"
+                titre="Cette machine ne pourra pas être réellement protégée"
+                className="mt-3"
+                action={
+                  <ButtonLink href="/app/stockage" size="sm" variant="ghost">
+                    Créer et attacher un volume
+                  </ButtonLink>
+                }
+              >
+                {vmCiblee.nom} démarre sur le disque éphémère de l’hyperviseur, sans volume de
+                données Cinder attaché. Le plan sera créé, mais son exécution échouera à l’étape
+                « Créer le snapshot » : la sauvegarde d’un disque racine seul passe par Karbor, non
+                déployé sur cette plateforme. Seule une machine avec un volume séparé attaché est
+                aujourd’hui protégée pour de vrai.
+              </Callout>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -539,7 +578,7 @@ function OngletPoints() {
       id: 'destination',
       entete: 'Destination',
       cle: (p) => p.destination,
-      rendu: (p) => <span className="font-mono text-[12px]">{p.destination}</span>,
+      rendu: (p) => <span className="font-mono text-[11.5px]">{p.destination}</span>,
       masquable: true,
     },
     {
@@ -589,6 +628,17 @@ function OngletPoints() {
               ton: 'info',
               titre: `Restauration de ${p.resourceNom}`,
               detail: `Point du ${dateHeure(p.date)} · ${goHumain(p.tailleGo)}`,
+              appel: () =>
+                // `granularite` est obligatoire côté contrat (`DemandeRestauration`) : sans
+                // elle, le backend refusait déjà l'appel avec un 422 « Field required »,
+                // vérifié en direct sur dev01 — ce bouton « réel » échouait donc à chaque
+                // clic. `complete` est le bon défaut pour une restauration en un clic, sans
+                // passer par l'assistant qui, lui, laisse choisir la granularité.
+                creerRessource('/sauvegarde/restaurations', {
+                  pointId: p.id,
+                  cible: 'origine',
+                  granularite: 'complete',
+                }),
               job: { workflow: 'backup.restore', cible: `${p.resourceNom} · ${dateCourte(p.date)}` },
             }}
           />
@@ -621,6 +671,7 @@ function OngletPoints() {
                 titre: `Point du ${dateCourte(p.date)} supprimé`,
                 detail: `${goHumain(p.tailleGo)} libérés sur ${p.destination}`,
                 effet: () => points.supprimer(p.id),
+                effetFinal: () => points.recharger(),
               })
             }
           >
@@ -695,32 +746,80 @@ const ETAPES_RESTAURATION = [
   { numero: 4, titre: 'Récapitulatif' },
 ]
 
+/** `contrat` est la valeur exacte attendue par `DemandeRestauration.granularite`
+ *  (`packages/contract/synelia_contract/modeles.py`, backend) — un littéral à
+ *  cinq valeurs, plus étroit que les six niveaux affichés à l’écran. « Volume »
+ *  n’a pas d’équivalent séparé côté contrat : une restauration de volume est une
+ *  restauration complète de la ressource qui le porte. */
 const GRANULARITES = [
-  { id: 'machine', titre: 'Machine entière', detail: 'Restaure la machine complète, système et données, telle qu’elle était.' },
-  { id: 'volume', titre: 'Volume', detail: 'Un disque de données seul, sans toucher au système.' },
-  { id: 'fichiers', titre: 'Système de fichiers', detail: 'Arborescence parcourable — descendez jusqu’au fichier unique.' },
-  { id: 'base', titre: 'Base de données', detail: 'Base managée, avec restauration à un instant précis (PITR).' },
-  { id: 'boite', titre: 'Boîte aux lettres', detail: 'Une boîte, un dossier ou un message unique d’Email Pro.' },
-  { id: 'dossier', titre: 'Dossier d’un service managé', detail: 'Un dossier ou un document de Drive Pro, de la GED, ou d’un autre service.' },
+  { id: 'machine', titre: 'Machine entière', detail: 'Restaure la machine complète, système et données, telle qu’elle était.', contrat: 'complete' as const },
+  { id: 'volume', titre: 'Volume', detail: 'Un disque de données seul, sans toucher au système.', contrat: 'complete' as const },
+  { id: 'fichiers', titre: 'Système de fichiers', detail: 'Arborescence parcourable — descendez jusqu’au fichier unique.', contrat: 'fichiers' as const },
+  { id: 'base', titre: 'Base de données', detail: 'Base managée, avec restauration à un instant précis (PITR).', contrat: 'base' as const },
+  { id: 'boite', titre: 'Boîte aux lettres', detail: 'Une boîte, un dossier ou un message unique d’Email Pro.', contrat: 'boite_mail' as const },
+  { id: 'dossier', titre: 'Dossier d’un service managé', detail: 'Un dossier ou un document de Drive Pro, de la GED, ou d’un autre service.', contrat: 'objet' as const },
 ]
+
+/** `DemandeRestauration.cible` (contrat) n’a que trois valeurs — aucune ne
+ *  correspond à « Téléchargement local ». Cette destination reste affichée
+ *  (utile côté maquette) mais désactivée en mode API : mieux vaut le dire que
+ *  faire semblant avec une valeur de repli inventée. */
+const CIBLE_PAR_DESTINATION = {
+  meme: 'origine',
+  autre_espace: 'nouvelle_ressource',
+  autre_site: 'autre_site',
+} as const
 
 function AssistantRestauration() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
+  const pointsCol = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
+  const points = pointsCol.items
   const [etape, setEtape] = useState(1)
   const [granularite, setGranularite] = useState('fichiers')
-  const [ressource, setRessource] = useState('vm-web-01')
+  const [ressource, setRessource] = useState(points[0]?.resourceId ?? '')
   const [chemin, setChemin] = useState('/srv/uploads/comptabilite/2026')
-  const [pointId, setPointId] = useState(RESTORE_POINTS[0].id)
+  const [pointId, setPointId] = useState(points[0]?.id ?? '')
   const [pitr, setPitr] = useState('2026-08-19T14:00')
   const [destination, setDestination] = useState<'meme' | 'autre_espace' | 'autre_site' | 'local'>(
     'meme',
   )
   const [confirme, setConfirme] = useState(false)
 
-  const point = RESTORE_POINTS.find((p) => p.id === pointId)!
+  // Le premier rendu montre la graine (`RESTORE_POINTS`) le temps que
+  // `useCollection` charge la vraie liste — mêmes règles de resynchronisation
+  // que le correctif « Gabarit » du même jour sur `/app/vms/new` : sans ça, une
+  // ressource/un point choisi sur la graine reste figé une fois la vraie liste
+  // arrivée (vide, ou avec d’autres identifiants).
+  useEffect(() => {
+    if (points.length === 0) return
+    if (!points.some((p) => p.resourceId === ressource)) {
+      setRessource(points[0].resourceId)
+    }
+  }, [points, ressource])
+
+  useEffect(() => {
+    const pourRessource = points.filter((p) => p.resourceId === ressource)
+    if (pourRessource.length === 0) return
+    if (!pourRessource.some((p) => p.id === pointId)) {
+      setPointId(pourRessource[0].id)
+    }
+  }, [points, ressource, pointId])
+
+  const point = points.find((p) => p.id === pointId)
   const gran = GRANULARITES.find((g) => g.id === granularite)!
-  const dureeEstimee = Math.max(4, Math.round(point.tailleGo / 8))
+  const dureeEstimee = point ? Math.max(4, Math.round(point.tailleGo / 8)) : 0
+
+  if (points.length === 0) {
+    return (
+      <EmptyState
+        titre="Aucun point de restauration"
+        phrase="Les points apparaissent après la première exécution réussie d’un plan de sauvegarde — rien à restaurer tant qu’aucun plan n’a tourné."
+      />
+    )
+  }
+
+  if (!point) return null
 
   return (
     <div className="space-y-4">
@@ -764,8 +863,8 @@ function AssistantRestauration() {
               </div>
               <Field label="Ressource à restaurer">
                 <Select value={ressource} onChange={(e) => setRessource(e.target.value)}>
-                  {Array.from(new Set(RESTORE_POINTS.map((p) => p.resourceId))).map((rid) => {
-                    const p = RESTORE_POINTS.find((x) => x.resourceId === rid)!
+                  {Array.from(new Set(points.map((p) => p.resourceId))).map((rid) => {
+                    const p = points.find((x) => x.resourceId === rid)!
                     return (
                       <option key={rid} value={rid}>
                         {p.resourceNom} · {p.resourceType}
@@ -805,10 +904,10 @@ function AssistantRestauration() {
               <Card>
                 <CardHeader
                   titre="Point de restauration"
-                  sousTitre={`${RESTORE_POINTS.filter((p) => p.resourceId === ressource).length} point(s) disponible(s) pour cette ressource.`}
+                  sousTitre={`${points.filter((p) => p.resourceId === ressource).length} point(s) disponible(s) pour cette ressource.`}
                 />
                 <div className="space-y-2">
-                  {RESTORE_POINTS.filter((p) => p.resourceId === ressource).map((p) => (
+                  {points.filter((p) => p.resourceId === ressource).map((p) => (
                     <button
                       key={p.id}
                       type="button"
@@ -821,7 +920,7 @@ function AssistantRestauration() {
                       )}
                     >
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold text-ink">
+                        <span className="block text-[12.5px] font-semibold text-ink">
                           {dateHeure(p.date)}
                         </span>
                         <span className="block text-[11px] text-g-500">
@@ -856,7 +955,7 @@ function AssistantRestauration() {
                       onChange={(e) => setPitr(e.target.value)}
                     />
                   </Field>
-                  <p className="mt-2 text-[12px] text-g-500">
+                  <p className="mt-2 text-[11.5px] text-g-500">
                     Fenêtre disponible : du {dateCourte('2026-08-05')} au {dateCourte('2026-08-19')}.
                     Utile pour revenir juste avant une suppression accidentelle sans perdre les
                     écritures qui l’ont précédée.
@@ -875,20 +974,31 @@ function AssistantRestauration() {
                   ['autre_site', 'Autre site', 'Restaure sur le second site. Utile pour un test de reprise ou une migration.'],
                   ['local', 'Téléchargement local', 'Génère une archive téléchargeable, valable sept jours. Adapté à une extraction ponctuelle de fichiers.'],
                 ] as const
-              ).map(([v, l, d]) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setDestination(v)}
-                  className={cn(
-                    'w-full rounded-[8px] border-2 bg-white p-3.5 text-left transition-colors',
-                    destination === v ? 'border-p-700 bg-p-050' : 'border-g-300 hover:border-p-400',
-                  )}
-                >
-                  <span className="block text-[13px] font-semibold text-ink">{l}</span>
-                  <span className="mt-1 block text-[12px] leading-snug text-g-700">{d}</span>
-                </button>
-              ))}
+              ).map(([v, l, d]) => {
+                // Le contrat (`DemandeRestauration.cible`) n’a que trois valeurs — pas de
+                // téléchargement local. Désactivé plutôt que simulé en mode API.
+                const indisponible = v === 'local' && estActif()
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    disabled={indisponible}
+                    onClick={() => setDestination(v)}
+                    className={cn(
+                      'w-full rounded-[8px] border-2 bg-white p-3.5 text-left transition-colors',
+                      indisponible && 'cursor-not-allowed opacity-50',
+                      destination === v ? 'border-p-700 bg-p-050' : 'border-g-300 hover:border-p-400',
+                    )}
+                  >
+                    <span className="block text-[13px] font-semibold text-ink">{l}</span>
+                    <span className="mt-1 block text-[12px] leading-snug text-g-700">
+                      {indisponible
+                        ? 'Non pris en charge par l’API aujourd’hui — le contrat de restauration ne prévoit pas de destination locale.'
+                        : d}
+                    </span>
+                  </button>
+                )
+              })}
               {destination === 'meme' && (
                 <Callout ton="warn" titre="Les données actuelles seront écrasées">
                   Une restauration sur le même emplacement remplace définitivement l’état courant.
@@ -956,13 +1066,25 @@ function AssistantRestauration() {
             ) : (
               <GatedAction autorise={autorise('backup.restore')} message={refus('backup.restore')}>
                 <Button
-                  disabled={!confirme}
+                  disabled={!confirme || (destination === 'local' && estActif())}
                   onClick={() => {
                     executer({
                       action: 'backup.restore',
                       ton: 'info',
                       titre: 'Restauration lancée',
                       detail: `Durée estimée ${dureeMin(dureeEstimee)}. Suivi dans le centre de tâches.`,
+                      // Même contrat que les boutons « Restaurer » déjà réels de l’onglet
+                      // Points de restauration (`POST /sauvegarde/restaurations`,
+                      // `granularite` obligatoire) — `destination === 'local'` est exclu
+                      // en amont (bouton désactivé en mode API, pas de valeur `cible`
+                      // correspondante).
+                      appel: () =>
+                        creerRessource('/sauvegarde/restaurations', {
+                          pointId: point.id,
+                          cible: CIBLE_PAR_DESTINATION[destination === 'local' ? 'meme' : destination],
+                          granularite: gran.contrat,
+                          ...(granularite === 'fichiers' ? { chemins: [chemin] } : {}),
+                        }),
                       job: {
                         type: 'backup.restore',
                         label: `Restauration ${point.resourceNom} · ${gran.titre.toLowerCase()}`,
@@ -1015,6 +1137,7 @@ function AssistantRestauration() {
 
 function OngletConformite() {
   const { autorise, refus } = useApp()
+  const CONFORMITE_ITEMS = useCollection<ConformiteAvecId>('conformite-sauvegarde', CONFORMITE_AVEC_ID).items
 
   const colonnes: Array<Colonne<ConformiteLigne & { id: string }>> = [
     {
@@ -1104,34 +1227,36 @@ function OngletConformite() {
     },
   ]
 
-  const lignes = CONFORMITE.map((c) => ({ ...c, id: c.ressourceId }))
-  const conformes = CONFORMITE.filter(
+  const lignes = CONFORMITE_ITEMS
+  const conformes = CONFORMITE_ITEMS.filter(
     (c) => c.regle321.copies && c.regle321.supports && c.regle321.horsSite,
   ).length
-  const testees = CONFORMITE.filter((c) => c.dernierTestRestauration?.succes).length
+  const testees = CONFORMITE_ITEMS.filter((c) => c.dernierTestRestauration?.succes).length
+  const rpos = CONFORMITE_ITEMS.map((c) => c.rpoConstateMin).filter((v): v is number => v !== undefined).sort((a, b) => a - b)
+  const rpoMedian = rpos.length ? rpos[Math.floor((rpos.length - 1) / 2)] : undefined
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile
           libelle="Conformes 3-2-1"
-          valeur={`${conformes}/${CONFORMITE.length}`}
-          ton={conformes === CONFORMITE.length ? 'ok' : 'warn'}
-          detail={pct(Math.round((conformes / CONFORMITE.length) * 100))}
+          valeur={`${conformes}/${CONFORMITE_ITEMS.length}`}
+          ton={conformes === CONFORMITE_ITEMS.length ? 'ok' : 'warn'}
+          detail={CONFORMITE_ITEMS.length ? pct(Math.round((conformes / CONFORMITE_ITEMS.length) * 100)) : undefined}
         />
         <StatTile
           libelle="Restauration testée avec succès"
-          valeur={`${testees}/${CONFORMITE.length}`}
+          valeur={`${testees}/${CONFORMITE_ITEMS.length}`}
           ton="ok"
         />
         <StatTile
           libelle="RPO médian constaté"
-          valeur={dureeMin(14)}
+          valeur={rpoMedian !== undefined ? dureeMin(rpoMedian) : '—'}
           detail="Toutes ressources protégées confondues"
         />
         <StatTile
           libelle="Ressources hors conformité"
-          valeur={CONFORMITE.length - conformes}
+          valeur={CONFORMITE_ITEMS.length - conformes}
           ton="warn"
         />
       </div>
@@ -1151,7 +1276,7 @@ function OngletConformite() {
                   titre: 'Rapport de conformité exporté',
                   detail:
                     'PDF horodaté : état de protection, RPO constaté, règle 3-2-1 et dernier test de restauration par ressource.',
-                  job: { workflow: 'export.conformite', cible: 'conformité des sauvegardes' },
+                  job: { workflow: 'export.plateforme', cible: 'conformité des sauvegardes' },
                 }}
               />
             }
@@ -1213,8 +1338,8 @@ function OngletConformite() {
 function Petit({ cle, valeur }: { cle: string; valeur: string }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <dt className="shrink-0 text-[12px] text-g-500">{cle}</dt>
-      <dd className="truncate text-right text-[12px] font-semibold text-ink">{valeur}</dd>
+      <dt className="shrink-0 text-[11.5px] text-g-500">{cle}</dt>
+      <dd className="truncate text-right text-[11.5px] font-semibold text-ink">{valeur}</dd>
     </div>
   )
 }
@@ -1225,6 +1350,7 @@ function Petit({ cle, valeur }: { cle: string; valeur: string }) {
  * échelles, le fichier et le site.
  */
 function OngletReprise() {
+  const DR_PLANS_ITEMS = useCollection<DRPlan>('plans-pra', DR_PLANS).items
   return (
     <div className="space-y-4">
       <Callout ton="info" titre="Sauvegarde et reprise ne se remplacent pas">
@@ -1234,7 +1360,7 @@ function OngletReprise() {
       </Callout>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {DR_PLANS.map((p) => {
+        {DR_PLANS_ITEMS.map((p) => {
           const dernier = p.exercices[0]
           return (
             <Card key={p.id}>
@@ -1286,7 +1412,7 @@ function OngletReprise() {
                 />
               </div>
               {dernier && (
-                <p className="mt-3 border-t border-g-100 pt-2.5 text-[12px] text-g-500">
+                <p className="mt-3 border-t border-g-100 pt-2.5 text-[11.5px] text-g-500">
                   Dernier exercice {dernier.type === 'test' ? 'de test' : 'réel'} le {dernier.date} —{' '}
                   {dernier.succes ? 'réussi' : 'échoué'}, RTO constaté {dernier.rtoConstateMin} min.
                 </p>

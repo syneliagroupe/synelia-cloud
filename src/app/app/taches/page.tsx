@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { RotateCw, Trash2, XCircle } from 'lucide-react'
 import { relatif } from '@/lib/format'
 import type { ProvisioningJob } from '@/lib/types'
+import { requete } from '@/lib/api/client'
 import { JOBS } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
@@ -12,8 +13,10 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { LIBELLE_STATUT_JOB, TON_STATUT_JOB, workflowById } from '@/lib/workflows'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction } from '@/components/app/actions'
+import { useMaintenant } from '@/components/app/contexte'
 
 export default function CentreDeTaches() {
+  const maintenant = useMaintenant()
   const jobs = useCollection<ProvisioningJob>('jobs', JOBS)
   const { reprendreJob } = useAtelier()
 
@@ -88,7 +91,7 @@ export default function CentreDeTaches() {
       id: 'debut',
       entete: 'Démarrée',
       cle: (j) => j.startedAt,
-      rendu: (j) => <span className="text-[12px] text-g-700">{relatif(j.startedAt)}</span>,
+      rendu: (j) => <span className="text-[12px] text-g-700">{relatif(j.startedAt, maintenant)}</span>,
     },
     {
       id: 'actions',
@@ -104,6 +107,7 @@ export default function CentreDeTaches() {
                 titre: `Reprise de « ${j.label} »`,
                 detail:
                   'Le job repart de l’étape échouée. Les étapes déjà réussies ne sont pas rejouées.',
+                appel: () => requete(`/travaux/${encodeURIComponent(j.id)}/relance`, { methode: 'POST' }),
                 effet: () => reprendreJob(j.id),
               }}
             />
@@ -117,6 +121,8 @@ export default function CentreDeTaches() {
                 ton: 'warn',
                 titre: `« ${j.label} » annulée`,
                 detail: 'Les ressources déjà réservées ont été libérées.',
+                appel: () =>
+                  requete(`/travaux/${encodeURIComponent(j.id)}/annulation`, { methode: 'POST' }),
                 effet: () =>
                   jobs.modifier(j.id, (job) => ({
                     statut: 'rolled_back',
@@ -126,6 +132,7 @@ export default function CentreDeTaches() {
                         : t,
                     ),
                   })),
+                effetFinal: () => jobs.recharger(),
               }}
             />
           )}

@@ -297,7 +297,7 @@ const deploiements = fusion(
         ok: ref('Deploiement'),
         code: 202,
         rbac: 'app.deploy',
-        erreurs: [409, 402],
+        erreurs: [409, 402, 404],
       }),
     },
     '/deploiements/{deploiementId}': {
@@ -396,6 +396,7 @@ const projets = fusion(
     rbacLecture: 'org.dashboard.view',
     rbacEcriture: 'app.deploy',
     filtres: [filtre('espaceId', chaine())],
+    erreursCreation: [404],
   }),
   {
     '/projets/synthese': {
@@ -622,7 +623,7 @@ const domainesApplicatifs = fusion(
         ok: ref('DomaineApplicatif'),
         code: 201,
         rbac: 'app.deploy',
-        erreurs: [409],
+        erreurs: [409, 404],
       }),
     },
     '/domaines-applicatifs/{domaineId}': {

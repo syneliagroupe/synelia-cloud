@@ -4,7 +4,6 @@ import {
   Bot,
   Boxes,
   BrainCircuit,
-  Cpu,
   KeyRound,
   Plug,
   Wallet,
@@ -12,7 +11,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { seededSeries } from '@/lib/utils'
-import { TYPE_AGENT_LABEL } from '@/lib/types'
+import { estActif } from '@/lib/api/client'
+import { TYPE_AGENT_LABEL, type AgentIA, type CleIA, type ModeleIA } from '@/lib/types'
 import { jetons, money, num, pct } from '@/lib/format'
 import {
   AGENTS_IA,
@@ -22,7 +22,6 @@ import {
   EVENEMENTS_IA,
   MODELES_IA,
   PASSERELLE_IA,
-  POINTS_INFERENCE,
   modeleParSlug,
 } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +31,7 @@ import { Card, CardHeader, Callout, NavCard, PageHeader } from '@/components/com
 import { StackedBar, StatTile } from '@/components/composition/metrics'
 import { EventList, GrilleSparkCharts, LiensSortie } from '@/components/business/observabilite'
 import { useEspace } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
 const SECTIONS = [
   {
@@ -70,13 +70,6 @@ const SECTIONS = [
       'Ce qui est disponible, où le calcul a lieu, combien coûte un million de jetons et quelle latence attendre.',
   },
   {
-    href: '/app/ia/inference',
-    titre: 'Inférence dédiée',
-    icone: <Cpu size={17} />,
-    description:
-      'Des GPU réservés pour vous seul quand la file mutualisée ne suffit plus. Facturé à l’heure, pas au jeton.',
-  },
-  {
     href: '/app/ia/consommation',
     titre: 'Consommation',
     icone: <Wallet size={17} />,
@@ -94,12 +87,26 @@ const SECTIONS = [
 
 export default function AccueilIA() {
   const espace = useEspace()
-  const cles = CLES_IA.filter((c) => c.espaceId === espace.id && c.statut === 'active')
-  const souverains = MODELES_IA.filter(
+  // Agents, modèles, bases de connaissances, flux et clés d'accès ont tous un
+  // vrai backend (`/ia/agents`, `/ia/modeles`, `/ia/connaissances`, `/ia/flux`,
+  // `/ia/cles`, via LiteLLM/OpenRouter, Docling/Infinity/Qdrant selon l'amont) :
+  // `useCollection` en sert les données réelles quand l'API est active. Le
+  // reste de la plomberie (passerelle, budget, consommation agrégée,
+  // intégrations) n'a pas de contrepartie réelle et reste sur la graine. Il
+  // n'y a pas de GPU dédié sur cette plateforme — voir la décision « Inférence
+  // dédiée » dans CLAUDE.md.
+  const agentsCol = useCollection<AgentIA>('agents-ia', AGENTS_IA)
+  const modelesCol = useCollection<ModeleIA>('modeles-ia', MODELES_IA)
+  const clesCol = useCollection<CleIA>('cles-ia', CLES_IA)
+  const cles = clesCol.items.filter((c) => c.espaceId === espace.id && c.statut === 'active')
+  const souverains = modelesCol.items.filter(
     (m) => m.hebergement === 'souverain' && m.statut !== 'retire',
   )
-  const points = POINTS_INFERENCE.filter((p) => p.espaceId === espace.id)
-  const agentsPublies = AGENTS_IA.filter((a) => a.espaceId === espace.id && a.statut === 'publie')
+  // Le backend ne rattache pas encore un agent à un Espace Cloud (MVP LiteLLM,
+  // organisation seule) : en mode API, on ne filtre que par statut publié.
+  const agentsPublies = estActif()
+    ? agentsCol.items.filter((a) => a.statut === 'publie')
+    : agentsCol.items.filter((a) => a.espaceId === espace.id && a.statut === 'publie')
 
   const partExterne = 100 - PASSERELLE_IA.partTerritoirePct
 
@@ -107,7 +114,7 @@ export default function AccueilIA() {
     <div className="space-y-5">
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'IA & Agents' }]}
-        titre="Intelligence artificielle"
+        titre="IA & Agents"
         sousTitre="Une passerelle unique devant deux mondes : les modèles que nous hébergeons à Abidjan et à Grand-Bassam, et ceux des fournisseurs étrangers. Vous décidez, usage par usage, ce qui reste sur le territoire — et le portail compte ce qui en sort."
         meta={
           <span className="flex flex-wrap items-center gap-2">
@@ -181,35 +188,46 @@ export default function AccueilIA() {
           }
         />
         {agentsPublies.length === 0 ? (
-          <p className="text-[13px] leading-relaxed text-g-500">
+          <p className="text-[12.5px] leading-relaxed text-g-500">
             Aucun agent publié sur cet espace. La passerelle est utilisable telle quelle depuis vos
             applications, mais rien ne tourne pour vous.
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {agentsPublies.map((a) => (
-              <Link
-                key={a.id}
-                href={`/app/ia/agents/${a.id}`}
-                className="rounded-[8px] border border-g-300 px-3 py-2.5 transition-colors hover:border-p-400"
-              >
-                <span className="flex items-center gap-2.5">
-                  <SolutionLogo initiales={a.initiales} teinte={a.teinte} size="sm" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-semibold text-ink">
-                      {a.nom}
+            {agentsPublies.map((a) => {
+              // Le backend LiteLLM (MVP) ne porte encore ni type, ni initiales/teinte,
+              // ni métriques par agent : ces champs n'existent que côté maquette. On
+              // n'y accède donc jamais sans repli, sous peine de casser l'accueil dès
+              // qu'un agent réel passe en « publié ».
+              const initiales = a.initiales ?? a.nom.slice(0, 2).toUpperCase()
+              const teinte = a.teinte ?? 'violet'
+              const sousTitre = a.type
+                ? `${TYPE_AGENT_LABEL[a.type]} · ${num(a.metriques?.conversations7j ?? 0)} échanges / 7 j`
+                : a.modele
+              return (
+                <Link
+                  key={a.id}
+                  href={`/app/ia/agents/${a.id}`}
+                  className="rounded-[8px] border border-g-300 px-3 py-2.5 transition-colors hover:border-p-400"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <SolutionLogo initiales={initiales} teinte={teinte} size="sm" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-semibold text-ink">
+                        {a.nom}
+                      </span>
+                      <span className="block truncate text-[11px] text-g-500">{sousTitre}</span>
                     </span>
-                    <span className="block truncate text-[11px] text-g-500">
-                      {TYPE_AGENT_LABEL[a.type]} · {num(a.metriques.conversations7j)} échanges / 7 j
-                    </span>
+                    {a.metriques && (
+                      <span className="tnum shrink-0 text-right text-[11px] text-g-500">
+                        {money(a.metriques.coutJour)}
+                        <span className="block">par jour</span>
+                      </span>
+                    )}
                   </span>
-                  <span className="tnum shrink-0 text-right text-[11px] text-g-500">
-                    {money(a.metriques.coutJour)}
-                    <span className="block">par jour</span>
-                  </span>
-                </span>
-              </Link>
-            ))}
+                </Link>
+              )
+            })}
           </div>
         )}
       </Card>
@@ -239,7 +257,7 @@ export default function AccueilIA() {
                   className="flex flex-wrap items-center justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-[13px] text-ink">{m?.nom ?? c.slug}</span>
+                    <span className="truncate text-[12.5px] text-ink">{m?.nom ?? c.slug}</span>
                     <Badge tone={m?.hebergement === 'souverain' ? 'ok' : 'warn'} size="sm">
                       {m?.hebergement === 'souverain' ? 'Territoire' : 'Hors territoire'}
                     </Badge>
@@ -257,55 +275,13 @@ export default function AccueilIA() {
           </Callout>
         </Card>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader
-              titre="Événements de la passerelle"
-              sousTitre="Huit dernières entrées — quotas, replis, garde-fous, incidents fournisseurs."
-            />
-            <EventList evenements={EVENEMENTS_IA} max={8} />
-          </Card>
-          <Card>
-            <CardHeader titre="Points d’inférence dédiés" sousTitre={`Espace ${espace.code}`} />
-            {points.length === 0 ? (
-              <p className="text-[13px] leading-relaxed text-g-500">
-                Aucun GPU réservé sur cet espace : tout passe par la file mutualisée, ce qui suffit
-                tant que la latence p95 reste sous la seconde.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {points.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-g-300 px-3 py-2"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-mono text-[13px] font-semibold text-ink">
-                        {p.nom}
-                      </span>
-                      <span className="block text-[11px] text-g-500">
-                        {p.gpu} ×{p.gpuParReplica * p.replicas} · {p.site === 'ABJ' ? 'Abidjan' : 'Grand-Bassam'}
-                      </span>
-                    </span>
-                    <Badge
-                      tone={p.statut === 'en_ligne' ? 'ok' : p.statut === 'erreur' ? 'err' : 'neutral'}
-                      dot
-                      size="sm"
-                    >
-                      {p.statut === 'en_ligne'
-                        ? 'En ligne'
-                        : p.statut === 'en_veille'
-                          ? 'En veille'
-                          : p.statut === 'demarrage'
-                            ? 'Démarrage'
-                            : 'Erreur'}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
+        <Card>
+          <CardHeader
+            titre="Événements de la passerelle"
+            sousTitre="Huit dernières entrées — quotas, replis, garde-fous, incidents fournisseurs."
+          />
+          <EventList evenements={EVENEMENTS_IA} max={8} />
+        </Card>
       </div>
 
       <Card>

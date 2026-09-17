@@ -11,6 +11,7 @@ import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Card, PageHeader } from '@/components/composition/card'
 import { EmptyState } from '@/components/composition/states'
 import type { Projet } from '@/lib/types'
+import { useMaintenant } from '@/components/app/contexte'
 
 /**
  * En-tête commun aux sections d'un projet.
@@ -140,18 +141,13 @@ export function couleurStatut(statut: ServiceProjet['statut']): string {
  * sa dernière sauvegarde, une tâche planifiée sa prochaine exécution.
  */
 export function CarteService({ service }: { service: ServiceProjet }) {
+  const maintenant = useMaintenant()
   const domaines = domainesDuService(service.id)
   const href = `/app/applications/projets/${service.projetId}/${service.id}`
 
   return (
-    <Card hover className="group relative flex flex-col">
-      <Link
-        href={href}
-        className="absolute inset-0 z-0 rounded-[10px]"
-        aria-label={`Ouvrir ${service.nom}`}
-      />
-
-      <div className="pointer-events-none relative z-[1] flex items-start justify-between gap-2">
+    <Card hover className="flex flex-col">
+      <div className="flex items-start justify-between gap-2">
         <span className="flex min-w-0 items-center gap-2.5">
           <span
             className={cn(
@@ -162,9 +158,12 @@ export function CarteService({ service }: { service: ServiceProjet }) {
             {ICONE_TYPE[service.type]}
           </span>
           <span className="min-w-0">
-            <span className="block truncate font-mono text-[13px] font-bold text-ink group-hover:text-p-700">
+            <Link
+              href={href}
+              className="block truncate font-mono text-[13px] font-bold text-ink hover:text-p-700"
+            >
               {service.nom}
-            </span>
+            </Link>
             <span className="block text-[11px] text-g-500">
               {TYPE_SERVICE_LABEL[service.type]}
               {service.moteur && ` · ${MOTEUR_LABEL[service.moteur]} ${service.version}`}
@@ -174,11 +173,11 @@ export function CarteService({ service }: { service: ServiceProjet }) {
         <StatutServiceBadge statut={service.statut} />
       </div>
 
-      <dl className="pointer-events-none relative z-[1] mt-3.5 space-y-1.5 border-t border-g-100 pt-3">
+      <dl className="mt-3.5 space-y-1.5 border-t border-g-100 pt-3">
         {service.type === 'base' && service.base && (
           <>
             <Ligne cle="Hôte interne">
-              <span className="font-mono text-[12px]">{service.base.hoteInterne}</span>
+              <span className="font-mono text-[11.5px]">{service.base.hoteInterne}</span>
             </Ligne>
             <Ligne cle="Port">
               <span className="tnum font-mono">{service.base.port}</span>
@@ -186,7 +185,7 @@ export function CarteService({ service }: { service: ServiceProjet }) {
             <Ligne cle="Dernière sauvegarde">
               {service.sauvegarde ? (
                 <span>
-                  {relatif(service.sauvegarde.dernier)} · {service.sauvegarde.taille}
+                  {relatif(service.sauvegarde.dernier, maintenant)} · {service.sauvegarde.taille}
                 </span>
               ) : (
                 <span className="text-warn">aucun plan</span>
@@ -198,15 +197,15 @@ export function CarteService({ service }: { service: ServiceProjet }) {
         {service.cron && (
           <>
             <Ligne cle="Planification">
-              <span className="font-mono text-[12px]">{service.cron.expression}</span>
+              <span className="font-mono text-[11.5px]">{service.cron.expression}</span>
             </Ligne>
             <Ligne cle="Dernière exécution">
               <span className={service.cron.statut === 'echec' ? 'text-err' : undefined}>
-                {relatif(service.cron.derniereExecution)} ·{' '}
+                {relatif(service.cron.derniereExecution, maintenant)} ·{' '}
                 {service.cron.statut === 'echec' ? 'échec' : 'succès'}
               </span>
             </Ligne>
-            <Ligne cle="Prochaine">{relatif(service.cron.prochaine)}</Ligne>
+            <Ligne cle="Prochaine">{relatif(service.cron.prochaine, maintenant)}</Ligne>
           </>
         )}
 
@@ -229,10 +228,14 @@ export function CarteService({ service }: { service: ServiceProjet }) {
         {(service.type === 'application' || service.type === 'statique') && (
           <>
             <Ligne cle="Source">
-              <span className="truncate font-mono text-[12px]">
-                {service.source?.ref}
-                {service.source?.branche && ` · ${service.source.branche}`}
-              </span>
+              {service.source ? (
+                <span className="truncate font-mono text-[11.5px]">
+                  {service.source.ref}
+                  {service.source.branche && ` · ${service.source.branche}`}
+                </span>
+              ) : (
+                <span className="text-warn">à configurer</span>
+              )}
             </Ligne>
             <Ligne cle="Domaine">
               {domaines.length > 0 ? (
@@ -240,7 +243,7 @@ export function CarteService({ service }: { service: ServiceProjet }) {
                   href={`https://${domaines[0].hote}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="pointer-events-auto relative z-[2] inline-flex items-center gap-1 font-semibold text-p-700 hover:underline"
+                  className="inline-flex items-center gap-1 font-semibold text-p-700 hover:text-m-600"
                 >
                   {domaines[0].hote}
                   <ExternalLink size={10} />
@@ -249,9 +252,11 @@ export function CarteService({ service }: { service: ServiceProjet }) {
                 <span className="text-g-500">aucun</span>
               )}
             </Ligne>
-            <Ligne cle="Port du conteneur">
-              <span className="tnum font-mono">{service.portConteneur}</span>
-            </Ligne>
+            {service.portConteneur && (
+              <Ligne cle="Port du conteneur">
+                <span className="tnum font-mono">{service.portConteneur}</span>
+              </Ligne>
+            )}
           </>
         )}
       </dl>
@@ -263,7 +268,7 @@ export function CarteService({ service }: { service: ServiceProjet }) {
           </Badge>
           <span className="font-mono text-[11px] text-g-500">{service.emplacement.backend}</span>
         </span>
-        <span className="tnum text-[12px] font-semibold text-ink">
+        <span className="tnum text-[11.5px] font-semibold text-ink">
           {service.coutMensuel === 0 ? 'arrêté · 0 FCFA' : `${money(service.coutMensuel)}/mois`}
         </span>
       </div>
@@ -274,7 +279,7 @@ export function CarteService({ service }: { service: ServiceProjet }) {
 function Ligne({ cle, children }: { cle: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="shrink-0 text-[12px] text-g-500">{cle}</dt>
+      <dt className="shrink-0 text-[11.5px] text-g-500">{cle}</dt>
       <dd className="min-w-0 truncate text-[12px] font-medium text-ink">{children}</dd>
     </div>
   )
@@ -293,18 +298,18 @@ export function EmplacementReel({ service }: { service: ServiceProjet }) {
           {service.emplacement.site} · {SITE_COURT[service.emplacement.site]}
         </Ligne>
         <Ligne cle="Socle technique">
-          <span className="font-mono text-[12px]">{service.emplacement.backend}</span>
+          <span className="font-mono text-[11.5px]">{service.emplacement.backend}</span>
         </Ligne>
         {service.emplacement.vms && (
           <Ligne cle="Machines">
-            <span className="font-mono text-[12px]">
+            <span className="font-mono text-[11.5px]">
               {service.emplacement.vms.join(', ')}
             </span>
           </Ligne>
         )}
         {service.emplacement.namespace && (
           <Ligne cle="Namespace Kubernetes">
-            <span className="font-mono text-[12px]">{service.emplacement.namespace}</span>
+            <span className="font-mono text-[11.5px]">{service.emplacement.namespace}</span>
           </Ligne>
         )}
       </dl>

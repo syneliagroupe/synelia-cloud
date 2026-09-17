@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { KeyRound, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { MAINTENANT, goHumain, money, num } from '@/lib/format'
 import type { Bucket, Site } from '@/lib/types'
@@ -11,21 +12,31 @@ import { CodeBlock, GatedAction } from '@/components/ui/display'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource } from '@/lib/api/client'
 import { CHAMPS_CLE, type CleS3 } from './cles'
 
 const PRIX_GO = { chaud: 1.5, froid: 0.62 }
 
 export default function StockageObjet() {
   const { autorise, refus } = useApp()
+  const espace = useEspace()
   const executer = useOperation()
   const seaux = useCollection<Bucket>('buckets', BUCKETS)
   const cles = useCollection<CleS3>('cles-s3', CLES_S3)
-  const total = seaux.items.reduce((a, b) => a + b.tailleGo, 0)
-  const objets = seaux.items.reduce((a, b) => a + b.objets, 0)
-  const cout = seaux.items.reduce((a, b) => a + Math.round(b.tailleGo * PRIX_GO[b.classe]), 0)
+  const buckets = seaux.items.filter((b) => b.espaceId === espace.id)
+  const [creationOuverte, setCreationOuverte] = useState(false)
+  /** Identifiants renvoyés une seule fois à la création d’une clé S3. */
+  const [secretS3, setSecretS3] = useState<{
+    accessKeyId: string
+    secret: string
+    endpoint: string
+  } | null>(null)
+  const total = buckets.reduce((a, b) => a + b.tailleGo, 0)
+  const objets = buckets.reduce((a, b) => a + b.objets, 0)
+  const cout = buckets.reduce((a, b) => a + Math.round(b.tailleGo * PRIX_GO[b.classe]), 0)
 
   const colonnes: Array<Colonne<Bucket>> = [
     {
@@ -157,6 +168,8 @@ export default function StockageObjet() {
             action="network.manage"
             titre="Créer un bucket"
             description="Le nom d’un bucket est global et définitif : il entre dans l’URL. La région détermine où les objets résident physiquement."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={[
               { id: 'nom', label: 'Nom du bucket', placeholder: 'dba-archives-abj', obligatoire: true },
               {
@@ -191,6 +204,7 @@ export default function StockageObjet() {
                 seaux.creer({
                   id: seaux.identifiant('bkt'),
                   orgId: 'org-dba',
+                  espaceId: espace.id,
                   nom: String(v.nom),
                   region: v.region as Site,
                   classe: v.classe as Bucket['classe'],
@@ -206,12 +220,12 @@ export default function StockageObjet() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatTile libelle="Buckets" valeur={BUCKETS.length} />
+        <StatTile libelle="Buckets" valeur={buckets.length} />
         <StatTile libelle="Volume stocké" valeur={goHumain(total)} />
         <StatTile libelle="Objets" valeur={num(objets)} />
         <StatTile
           libelle="Buckets protégés WORM"
-          valeur={BUCKETS.filter((b) => b.objectLock?.actif).length}
+          valeur={buckets.filter((b) => b.objectLock?.actif).length}
           ton="ok"
           detail="Anti-rançongiciel"
         />
@@ -219,7 +233,7 @@ export default function StockageObjet() {
       </div>
 
       <DataTable
-        lignes={seaux.items}
+        lignes={buckets}
         colonnes={colonnes}
         placeholderRecherche="Rechercher un bucket…"
         filtres={[
@@ -247,7 +261,7 @@ export default function StockageObjet() {
           titre: 'Aucun bucket',
           phrase:
             'Un bucket de stockage objet accueille sauvegardes, médias, exports et archives, avec versioning et verrouillage WORM.',
-          action: { libelle: 'Créer un bucket', href: '#' },
+          action: { libelle: 'Créer un bucket', onClick: () => setCreationOuverte(true) },
         }}
       />
 
@@ -272,7 +286,7 @@ export default function StockageObjet() {
                     type: 'select',
                     options: [
                       { value: 'tous', label: 'Tous les buckets' },
-                      ...seaux.items.map((b) => ({ value: b.nom, label: b.nom })),
+                      ...buckets.map((b) => ({ value: b.nom, label: b.nom })),
                     ],
                   },
                 ]}
@@ -281,6 +295,32 @@ export default function StockageObjet() {
                 operation={(v) => ({
                   titre: `Clé ${v.nom} créée`,
                   detail: 'La valeur secrète est affichée une seule fois : conservez-la maintenant.',
+                  // Le backend exige `droits` dans son vocabulaire ; le
+                  // libellé du formulaire y est traduit ici.
+                  appel: () =>
+                    creerRessource('/cles-s3', {
+                      nom: String(v.nom),
+                      buckets: v.bucket === 'tous' ? [] : [String(v.bucket)],
+                      droits:
+                        v.portee === 'lecture'
+                          ? 'lecture'
+                          : v.portee === 'ecriture'
+                            ? 'lecture_ecriture'
+                            : 'lecture_ecriture',
+                    }).then((reponse) => {
+                      const r = reponse as {
+                        accessKeyId?: unknown
+                        secretAccessKey?: unknown
+                        endpoint?: unknown
+                      } | null
+                      if (r && typeof r.secretAccessKey === 'string')
+                        setSecretS3({
+                          accessKeyId: String(r.accessKeyId ?? ''),
+                          secret: String(r.secretAccessKey),
+                          endpoint: String(r.endpoint ?? ''),
+                        })
+                      return reponse
+                    }),
                   effet: () =>
                     cles.creer({
                       id: cles.identifiant('ak'),
@@ -292,6 +332,7 @@ export default function StockageObjet() {
                       creee: MAINTENANT.slice(0, 10),
                       derniereUtilisation: MAINTENANT,
                     }),
+                  effetFinal: () => cles.recharger(),
                 })}
               />
             }
@@ -353,6 +394,29 @@ export default function StockageObjet() {
             d’écriture sur le bucket de sauvegarde ne doit jamais pouvoir supprimer d’objet — le
             verrouillage WORM l’en empêche de toute façon.
           </p>
+          {secretS3 && (
+            <div className="mt-3 rounded-[8px] border border-err/40 bg-err-bg px-3.5 py-3">
+              <p className="text-[12.5px] font-bold text-ink">
+                Copiez ces identifiants maintenant — le secret ne sera plus jamais affiché
+              </p>
+              <p className="mt-1 font-mono text-[12px] break-all text-ink">
+                {secretS3.accessKeyId} · {secretS3.secret}
+              </p>
+              {secretS3.endpoint && (
+                <p className="mt-0.5 font-mono text-[11.5px] break-all text-g-700">
+                  {secretS3.endpoint}
+                </p>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mt-2"
+                onClick={() => setSecretS3(null)}
+              >
+                Je les ai copiés, masquer
+              </Button>
+            </div>
+          )}
         </Card>
 
         <Card>

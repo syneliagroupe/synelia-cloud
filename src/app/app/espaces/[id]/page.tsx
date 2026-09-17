@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
 import { ESPACES } from '@/lib/mock'
 import { VueEspace } from './vue'
 
@@ -13,8 +12,12 @@ export async function generateMetadata({
   return { title: e ? `${e.code} · Espace Cloud` : 'Espace introuvable' }
 }
 
+/**
+ * Pas de `notFound()` : un espace créé pendant la session n'existe pas dans
+ * le jeu figé, et un 404 du serveur ferait croire à une panne. C'est la vue
+ * cliente qui sait ce qu'elle trouve, et qui le dit.
+ */
 export default async function PageEspace({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!ESPACES.some((e) => e.id === id)) notFound()
   return <VueEspace id={id} />
 }

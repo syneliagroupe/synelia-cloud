@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { GitCommitHorizontal, Rocket, RotateCcw, ShieldCheck } from 'lucide-react'
 import { dateHeure, duree, relatif } from '@/lib/format'
 import type { Deployment, Projet, ServiceProjet } from '@/lib/types'
@@ -20,9 +20,11 @@ import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { DeploymentPipeline, SecurityFindings } from '@/components/business/paas'
 import { EnteteProjet, ProjetIntrouvable } from '@/components/business/projets'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { useServicesProjet } from '@/lib/api/services-projet'
 import { BoutonAction } from '@/components/app/actions'
+import { estActif, requete } from '@/lib/api/client'
 
 const LIBELLE_STATUT: Record<Deployment['statut'], string> = {
   queued: 'En file',
@@ -47,13 +49,20 @@ const TON_STATUT: Record<Deployment['statut'], 'ok' | 'err' | 'warn' | 'info'> =
 }
 
 export function VueDeploiements({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
   const lesDeploiements = useCollection<Deployment>('deploiements', DEPLOIEMENTS)
   const { autorise, refus } = useApp()
 
   const projet = lesProjets.items.find((p) => p.id === id)
-  const services = lesServices.items.filter((x) => x.projetId === id)
+  // Avec l’API, la liste vient de `GET /projets/{id}/services` (route nichée,
+  // hors registre) ; en maquette, du filtre local.
+  const { distants: servicesDistants } = useServicesProjet(id)
+  const services = useMemo(
+    () => servicesDistants ?? lesServices.items.filter((x) => x.projetId === id),
+    [servicesDistants, lesServices.items, id],
+  )
 
   // Un déploiement désigne encore une application par son identifiant
   // historique ; le rattachement au projet passe par les services.
@@ -106,7 +115,7 @@ export function VueDeploiements({ id }: { id: string }) {
           titre="Aucun déploiement dans ce projet"
           phrase="Ce projet ne contient que des ressources qui ne se déploient pas depuis un dépôt — une base managée, une tâche planifiée ou une solution du catalogue. L’historique se remplira dès la première application."
           icone={<Rocket size={22} />}
-          action={{ libelle: 'Déployer une application', href: `/app/applications/nouveau?projet=${id}` }}
+          action={{ libelle: 'Déployer une application', href: `/app/applications/projets/${id}` }}
           actionSecondaire={{
             libelle: 'Voir tous les déploiements',
             href: '/app/applications/deploiements',
@@ -157,11 +166,11 @@ export function VueDeploiements({ id }: { id: string }) {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="font-mono text-[13px] font-semibold text-ink">
+                        <span className="font-mono text-[12.5px] font-semibold text-ink">
                           {appById(d.appId)?.nom ?? d.appId}
                         </span>
                         <span className="font-mono text-[12px] text-g-700">{d.version}</span>
-                        <span className="text-[12px] text-g-500">
+                        <span className="text-[11.5px] text-g-500">
                           {envById(d.envId)?.nom ?? d.envId}
                         </span>
                       </p>
@@ -177,7 +186,7 @@ export function VueDeploiements({ id }: { id: string }) {
                         </p>
                       )}
                       <p className="mt-0.5 text-[11px] text-g-500">
-                        {relatif(d.startedAt)} · {d.auteur}
+                        {relatif(d.startedAt, maintenant)} · {d.auteur}
                         {d.dureeS ? ` · ${duree(d.dureeS)}` : ''}
                       </p>
                     </div>
@@ -214,10 +223,19 @@ export function VueDeploiements({ id }: { id: string }) {
                             action: 'app.rollback',
                             titre: 'Retour arrière déclenché',
                             detail: `L’artefact précédent de ${appById(d.appId)?.nom} est repromu. Aucun rebuild : la bascule prend quelques secondes.`,
+                            appel: () =>
+                              requete(
+                                `/deploiements/${encodeURIComponent(d.id)}/rollback`,
+                                { methode: 'POST', corps: {} },
+                              ),
                             job: { workflow: 'app.rollback', cible: `${appById(d.appId)?.nom ?? d.appId} ${d.version}` },
                             // Le déploiement annulé n'est pas effacé : l'historique
                             // doit dire qu'il a existé, et qu'on est revenu en arrière.
                             effetFinal: () => {
+                              if (estActif()) {
+                                lesDeploiements.recharger()
+                                return
+                              }
                               lesDeploiements.modifier(d.id, { statut: 'rolled_back' })
                               const precedent = deploiements.find(
                                 (x) => x.appId === d.appId && x.id !== d.id && x.statut !== 'failed',
@@ -279,7 +297,7 @@ export function VueDeploiements({ id }: { id: string }) {
         tous les projets est dans{' '}
         <Link
           href="/app/applications/deploiements"
-          className="font-semibold text-p-700 hover:underline"
+          className="font-semibold text-p-700 hover:text-m-600"
         >
           la racine de cette section
         </Link>

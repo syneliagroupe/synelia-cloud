@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Camera,
   Copy,
+  Maximize2,
   MonitorPlay,
   MoveRight,
   Power,
@@ -15,29 +16,38 @@ import {
 } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
 import { MAINTENANT, dateCourte, dateHeure, goHumain, num, pct, relatif } from '@/lib/format'
-import { SITE_LABEL, type VM, type Volume } from '@/lib/types'
+import {
+  SITE_LABEL,
+  type BackupPlan,
+  type EspaceCloud,
+  type PublicIP,
+  type RestorePoint,
+  type VM,
+  type Volume,
+} from '@/lib/types'
 import {
   BACKUP_PLANS,
+  ESPACES,
   EVENEMENTS_SUPERVISION,
+  PUBLIC_IPS,
   RESTORE_POINTS,
   SECURITY_GROUPS,
   VMS,
   VOLUMES,
-  espaceById,
   hrefDuService,
 } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
-import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
+import { CopyField, GatedAction, Skeleton, Tabs } from '@/components/ui/display'
 import { Field, Input, SegmentedControl, Select, Switch } from '@/components/ui/field'
-import { ConfirmDialog, Popover } from '@/components/ui/overlay'
+import { ConfirmDialog, Drawer, Popover } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { HealthBadge, QuotaBar, StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { EventList, GrilleSparkCharts } from '@/components/business/observabilite'
-import { ConsoleDrawer } from '@/components/business/console'
 import { useApp } from '@/components/app/contexte'
-import { useCollection } from '@/components/app/atelier'
+import { useCollection, useEntite } from '@/components/app/atelier'
+import { ApiError, creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
 import {
   BoutonAction,
   BoutonFormulaire,
@@ -48,9 +58,28 @@ import {
 interface Snapshot {
   id: string
   nom: string
-  date: string
-  taille: number
-  type: string
+  /** Maquette. Le backend renvoie `cree` — les deux sont lus. */
+  date?: string
+  cree?: string
+  /** Maquette. Le backend renvoie `tailleGo`. */
+  taille?: number
+  tailleGo?: number
+  type?: string
+}
+
+/** `GET /vms/{id}/metriques` — une série par métrique (`cpu`, `ram`, `disque`,
+ * `reseau_entrant`), au plus un point : c'est un instantané réel, pas un historique. */
+interface SerieMetriqueVm {
+  metrique: string
+  unite: string
+  points: { valeur: number }[]
+}
+
+/** `POST /vms/{id}/console` — URL de console à usage unique (~2 h de validité). */
+interface ConsoleVm {
+  url: string
+  protocole: 'vnc' | 'spice' | 'serie'
+  expire: string
 }
 
 /** Les snapshots ne sont pas dans le jeu de données : graine locale. */
@@ -59,6 +88,16 @@ const SNAPSHOTS_GRAINE: Snapshot[] = [
   { id: 'snap-2', nom: 'pre-deploiement-v2.7.1', date: '2026-08-19T15:04:00Z', taille: 44, type: 'à chaud' },
   { id: 'snap-3', nom: 'reference-installation', date: '2026-03-11T09:12:00Z', taille: 28, type: 'à froid' },
 ]
+
+/** Pourquoi une tuile CPU/Mémoire/Réseau n'a pas de lecture réelle — distingue « la machine
+ * est arrêtée, rien à lire côté hyperviseur » (fait durable) de « l'appel n'a pas encore
+ * répondu ou l'hyperviseur ne répond pas » (transitoire), plutôt que la même mention
+ * « Démonstration » dans les deux cas, qui ne serait vraie ni dans l'un ni dans l'autre. */
+function detailLectureVm(series: SerieMetriqueVm[] | null, statut: VM['statut']): string {
+  if (series === null) return 'Lecture en cours…'
+  if (statut !== 'running') return 'Machine arrêtée — rien à lire côté hyperviseur'
+  return 'Lecture hyperviseur indisponible pour le moment'
+}
 
 const ONGLETS = [
   { id: 'apercu', label: 'Aperçu' },
@@ -71,17 +110,121 @@ const ONGLETS = [
 
 export function VueVm({ id }: { id: string }) {
   const router = useRouter()
-  const { autorise, refus } = useApp()
+  const { autorise, refus, api } = useApp()
   const executer = useOperation()
   const parc = useCollection<VM>('vms', VMS)
   const disques = useCollection<Volume>('volumes', VOLUMES)
+  // Lecture unitaire quand la liste ne contient pas (encore) la machine :
+  // lien direct vers une ressource créée pendant la session ou ailleurs.
+  const { entite: isolee } = useEntite<VM>('vms', VMS, id)
   const snapshots = useCollection<Snapshot>(`snapshots-${id}`, SNAPSHOTS_GRAINE)
   const [onglet, setOnglet] = useState('apercu')
   const [console_, setConsole] = useState(false)
   const [suppression, setSuppression] = useState(false)
   const [redimensionnement, setRedimensionnement] = useState(false)
 
-  const vm = parc.items.find((v) => v.id === id)
+  const [consoleUrl, setConsoleUrl] = useState<string | null>(null)
+  const [consoleChargement, setConsoleChargement] = useState(false)
+  const [consoleErreur, setConsoleErreur] = useState<{ message: string; correlationId?: string } | null>(
+    null,
+  )
+
+  const ouvrirConsole = useCallback(() => {
+    setConsoleChargement(true)
+    setConsoleErreur(null)
+    setConsoleUrl(null)
+    requete<ConsoleVm>(`/vms/${encodeURIComponent(id)}/console`, { methode: 'POST', corps: {} })
+      .then(
+        (c) => setConsoleUrl(c.url),
+        (e: unknown) =>
+          setConsoleErreur(
+            e instanceof ApiError
+              ? { message: e.message, correlationId: e.correlationId }
+              : { message: 'Le backend ne répond pas.' },
+          ),
+      )
+      .finally(() => setConsoleChargement(false))
+  }, [id])
+
+  // Une URL de console est à usage unique et expire ~2 h : on en redemande
+  // une à chaque ouverture du tiroir plutôt que de la garder en cache.
+  useEffect(() => {
+    if (console_ && estActif()) ouvrirConsole()
+  }, [console_, ouvrirConsole])
+
+  const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
+  const lesIps = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  // Même collections que la section transverse `/app/sauvegarde` (`OngletPoints`,
+  // `OngletPlans`) : avant ce correctif, l'onglet Sauvegardes de la fiche lisait
+  // `RESTORE_POINTS`/`BACKUP_PLANS` (les graines) sans jamais passer par l'atelier,
+  // donc en mode API il affichait des points de restauration fabriqués au lieu des
+  // vrais `/sauvegarde/points` — un point de restauration inventé est pire qu'un
+  // écran vide.
+  const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
+  const pointsRestauration = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
+
+  // `/catalogue/images` et `/catalogue/gabarits` résolvent les identifiants
+  // bruts (Glance, gabarit) que le backend pose sur `vm.os`/`vm.flavor` — le
+  // même contrat que consulte l'assistant de création (`vms/new/page.tsx`).
+  // Sans cette résolution, la fiche affiche des UUID au lieu de noms lisibles.
+  const [catalogueImages, setCatalogueImages] = useState<Record<string, string>>({})
+  const [catalogueGabarits, setCatalogueGabarits] = useState<Record<string, string>>({})
+  // Le redimensionnement en garde la liste complète : Nova ne sait redimensionner
+  // que vers un gabarit existant du catalogue (vcpu/ramGo/diskGo exacts, jamais une
+  // valeur arbitraire) — voir `_gabarit_pour_specs` côté backend. Sans cette liste,
+  // la modale ne pouvait proposer que des vCPU/Go libres qui échouaient en 422 dès
+  // que le disque ne suivait pas (constaté en direct : tout redimensionnement autre
+  // qu'un no-op échouait).
+  const [gabaritsReels, setGabaritsReels] = useState<
+    Array<{ id: string; nom: string; vcpu: number; ramGo: number; diskGo: number }>
+  >([])
+  useEffect(() => {
+    if (!estActif()) return
+    requete<Array<{ id: string; nom: string }>>('/catalogue/images')
+      .then((images) => setCatalogueImages(Object.fromEntries(images.map((i) => [i.id, i.nom]))))
+      .catch(() => {})
+    requete<Array<{ id: string; nom: string; vcpu: number; ramGo: number; diskGo: number }>>(
+      '/catalogue/gabarits',
+    )
+      .then((gabarits) => {
+        setCatalogueGabarits(Object.fromEntries(gabarits.map((g) => [g.id, g.nom])))
+        setGabaritsReels(gabarits)
+      })
+      .catch(() => {})
+  }, [])
+
+  // `GET /vms/{id}/metriques` : un point instantané réel (diagnostics Nova/libvirt — temps
+  // CPU, mémoire, E/S réseau depuis l'hyperviseur), pas une série historique. Vide pour une
+  // machine arrêtée (rien à lire côté hyperviseur) ou tant que l'appel n'a pas répondu — les
+  // trois tuiles concernées retombent alors sur l'état « pas de lecture », jamais une valeur
+  // inventée. Le disque n'a pas d'équivalent : les diagnostics donnent des E/S, jamais
+  // l'occupation, qu'aucune intégration ne remonte aujourd'hui pour une VM — cette tuile reste
+  // en démonstration.
+  const [metriquesVm, setMetriquesVm] = useState<SerieMetriqueVm[] | null>(null)
+  useEffect(() => {
+    if (!estActif()) return
+    setMetriquesVm(null)
+    requete<{ series: SerieMetriqueVm[] }>(`/vms/${encodeURIComponent(id)}/metriques`)
+      .then((r) => setMetriquesVm(r.series ?? []))
+      .catch(() => setMetriquesVm([]))
+  }, [id])
+  const lectureVm = (metrique: string) =>
+    metriquesVm?.find((s) => s.metrique === metrique)?.points.at(-1)?.valeur
+  const uniteVm = (metrique: string) => metriquesVm?.find((s) => s.metrique === metrique)?.unite
+
+  const vm = parc.items.find((v) => v.id === id) ?? isolee
+
+  // Chargement distant en cours (lien direct, liste pas encore là) : des
+  // squelettes, pas un « supprimée » qui se contredirait une seconde après.
+  if (!vm && parc.chargement) {
+    return (
+      <div className="space-y-5">
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    )
+  }
 
   // La machine peut avoir été supprimée depuis cette page : le retour arrière
   // du navigateur ne doit pas casser l'écran.
@@ -105,12 +248,51 @@ export function VueVm({ id }: { id: string }) {
     )
   }
 
-  const espace = espaceById(vm.espaceId)
+  // Cibles de redimensionnement : uniquement des gabarits réels qui améliorent
+  // les trois dimensions à la fois (vcpu, ramGo, diskGo) — un disque ne se
+  // réduit jamais (règle backend) et Nova rejette tout triplet qui ne
+  // correspond pas exactement à un gabarit existant.
+  const gabaritsCibles = gabaritsReels
+    .filter((g) => g.vcpu >= vm.vcpu && g.ramGo >= vm.ramGo && g.diskGo >= vm.diskGo)
+    .filter((g) => g.vcpu > vm.vcpu || g.ramGo > vm.ramGo || g.diskGo > vm.diskGo)
+    .sort((a, b) => a.vcpu - b.vcpu || a.ramGo - b.ramGo || a.diskGo - b.diskGo)
+
+  const espace = espaces.items.find((e) => e.id === vm.espaceId)
+  const osAffiche = catalogueImages[vm.os] ?? vm.os
+  const flavorAffiche = vm.flavor ? (catalogueGabarits[vm.flavor] ?? vm.flavor) : undefined
   const ipPrivee = vm.ips.find((i) => i.type === 'privee')?.adresse
-  const ipPublique = vm.ips.find((i) => i.type === 'publique')?.adresse
+  // Une IP attachée après coup via `/app/reseau` (ou le bouton « Attacher une IP publique »
+  // ci-dessous) ne réécrit jamais `vm.ips` côté backend — seule la collection `ips`
+  // (`attachedTo`) le sait vraiment. `vm.ips` reste la source pour l'IP posée à la création.
+  const ipReelleAttachee = lesIps.items.find((i) => i.attachedTo === vm.id)
+  const ipPublique = vm.ips.find((i) => i.type === 'publique')?.adresse ?? ipReelleAttachee?.adresse
   const volumes = disques.items.filter((v) => v.attachedTo === vm.id)
-  const points = RESTORE_POINTS.filter((p) => p.resourceId === vm.id)
-  const plan = BACKUP_PLANS.find((p) => p.id === vm.backupPlanId)
+  const ipsDisponibles = lesIps.items.filter((i) => i.espaceId === vm.espaceId && !i.attachedTo)
+  // Interfaces à afficher dans l'onglet Réseau : celles connues de `vm.ips` (posées à la
+  // création) plus toute IP réellement attachée depuis (`lesIps`, dédupliquée par adresse).
+  const interfacesReseau = [
+    ...vm.ips,
+    ...lesIps.items
+      .filter((i) => i.attachedTo === vm.id && !vm.ips.some((v) => v.adresse === i.adresse))
+      .map((i) => ({ adresse: i.adresse, type: 'publique' as const, ptr: i.ptr })),
+  ]
+  const points = pointsRestauration.items.filter((p) => p.resourceId === vm.id)
+  // Un plan protège cette VM par portée directe (`ressource` == son id) ou par
+  // Espace (`espace` == son espaceId). `tag`/`service` sont traités par le
+  // backend comme couvrant toutes les ressources non-en-erreur — même règle que
+  // `_ressources_protegees` (`sauvegarde/service.py`) — donc comptés ici aussi ;
+  // `service` cible les services managés, jamais une VM, et reste exclu.
+  const plan = plansSauvegarde.items.find(
+    (p) =>
+      (p.scope.type === 'ressource' && p.scope.valeur === vm.id) ||
+      (p.scope.type === 'espace' && p.scope.valeur === vm.espaceId) ||
+      p.scope.type === 'tag',
+  )
+  const pointPlusRecent = points.reduce<RestorePoint | undefined>(
+    (plusRecent, p) => (!plusRecent || p.date > plusRecent.date ? p : plusRecent),
+    undefined,
+  )
+  const derniereSauvegarde = pointPlusRecent?.date
 
   const prendreUnSnapshot = (nom: string) => {
     snapshots.creer({
@@ -122,6 +304,10 @@ export function VueVm({ id }: { id: string }) {
     })
   }
 
+  /** POST /vms/{id}/instantanes — le backend n’exige que `nom`. */
+  const appelSnapshot = (nom: string) =>
+    creerRessource(`/vms/${encodeURIComponent(id)}/instantanes`, { nom })
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -132,20 +318,20 @@ export function VueVm({ id }: { id: string }) {
           { label: vm.nom },
         ]}
         titre={<span className="font-mono">{vm.nom}</span>}
-        sousTitre={`${vm.os} · ${vm.vcpu} vCPU / ${vm.ramGo} Go / ${num(vm.diskGo)} Go · ${SITE_LABEL[vm.site]}`}
+        sousTitre={`${osAffiche} · ${vm.vcpu} vCPU / ${vm.ramGo} Go / ${num(vm.diskGo)} Go · ${SITE_LABEL[vm.site]}`}
         meta={
           <>
             <HealthBadge etat={vm.statut} />
             {ipPrivee && <span className="font-mono text-[12px] text-g-500">{ipPrivee}</span>}
             {ipPublique && (
-              <Badge tone="neutral" size="sm">
+              <Badge tone="violet" size="sm">
                 {ipPublique}
               </Badge>
             )}
             {vm.applicationId && (
               <Link
                 href={hrefDuService(vm.applicationId)}
-                className="text-[12px] font-semibold text-p-700 hover:underline"
+                className="text-[12px] font-semibold text-p-700 hover:text-m-600"
               >
                 {vm.applicationNom} →
               </Link>
@@ -175,9 +361,14 @@ export function VueVm({ id }: { id: string }) {
                 ton: 'info',
                 titre: `Redémarrage de ${vm.nom}`,
                 detail: 'La machine sera de nouveau disponible dans environ 40 secondes.',
+                appel: () =>
+                  requete(`/vms/${encodeURIComponent(vm.id)}/redemarrage`, { methode: 'POST', corps: {} }),
                 effet: () => parc.modifier(vm.id, { statut: 'creating' }),
                 job: { workflow: 'vm.power.reboot', cible: vm.nom },
-                effetFinal: () => parc.modifier(vm.id, { statut: 'running' }),
+                effetFinal: () => {
+                  parc.modifier(vm.id, { statut: 'running' })
+                  parc.recharger()
+                },
               }}
             />
             <BoutonFormulaire
@@ -198,7 +389,9 @@ export function VueVm({ id }: { id: string }) {
               operation={(v) => ({
                 titre: `Snapshot « ${v.nom} » créé`,
                 detail: `Machine ${vm.nom}`,
+                appel: () => appelSnapshot(String(v.nom)),
                 effet: () => prendreUnSnapshot(String(v.nom)),
+                effetFinal: () => snapshots.recharger(),
               })}
             />
             <Popover
@@ -225,14 +418,21 @@ export function VueVm({ id }: { id: string }) {
                             vm.statut === 'running'
                               ? `Arrêt de ${vm.nom} demandé`
                               : `Démarrage de ${vm.nom} demandé`,
+                          appel: () =>
+                            requete(
+                              `/vms/${encodeURIComponent(vm.id)}/${vm.statut === 'running' ? 'arret' : 'demarrage'}`,
+                              { methode: 'POST', corps: {} },
+                            ),
                           job: {
                             workflow: vm.statut === 'running' ? 'vm.power.stop' : 'vm.power.start',
                             cible: vm.nom,
                           },
-                          effetFinal: () =>
+                          effetFinal: () => {
                             parc.modifier(vm.id, {
                               statut: vm.statut === 'running' ? 'stopped' : 'running',
-                            }),
+                            })
+                            parc.recharger()
+                          },
                         }),
                     },
                     {
@@ -245,9 +445,17 @@ export function VueVm({ id }: { id: string }) {
                           ton: 'info',
                           titre: `Migration à chaud de ${vm.nom}`,
                           detail: 'Aucune interruption de service attendue.',
+                          appel: () =>
+                            requete(`/vms/${encodeURIComponent(vm.id)}/migration`, {
+                              methode: 'POST',
+                              corps: { site: vm.site },
+                            }),
                           effet: () => parc.modifier(vm.id, { statut: 'migrating' }),
                           job: { workflow: 'vm.migrate', cible: vm.nom },
-                          effetFinal: () => parc.modifier(vm.id, { statut: 'running' }),
+                          effetFinal: () => {
+                            parc.modifier(vm.id, { statut: 'running' })
+                            parc.recharger()
+                          },
                         }),
                     },
                   ].map((a) => (
@@ -258,7 +466,7 @@ export function VueVm({ id }: { id: string }) {
                           close()
                           a.faire()
                         }}
-                        className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[13px] text-ink hover:bg-p-050"
+                        className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-p-050"
                       >
                         <span className="text-g-500">{a.i}</span>
                         {a.l}
@@ -275,7 +483,7 @@ export function VueVm({ id }: { id: string }) {
                         close()
                         setRedimensionnement(true)
                       }}
-                      className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[13px] text-ink hover:bg-p-050"
+                      className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-p-050"
                     >
                       <span className="text-g-500">
                         <Ruler size={13} />
@@ -294,7 +502,7 @@ export function VueVm({ id }: { id: string }) {
                           close()
                           setSuppression(true)
                         }}
-                        className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[13px] text-err hover:bg-err-bg"
+                        className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] text-err hover:bg-err-bg"
                       >
                         <Trash2 size={13} />
                         Supprimer la machine
@@ -322,7 +530,7 @@ export function VueVm({ id }: { id: string }) {
           pendant le transfert de la mémoire.
         </Callout>
       )}
-      {!vm.backupPlanId && (
+      {!plan && (
         <Callout ton="warn" titre="Aucun plan de sauvegarde">
           Cette machine n’est pas protégée : aucune restauration n’est possible en cas d’incident ou
           d’erreur humaine. Appliquez un plan depuis l’onglet Sauvegardes.
@@ -334,34 +542,92 @@ export function VueVm({ id }: { id: string }) {
       {/* ─── Aperçu ──────────────────────────────────────────────────── */}
       {onglet === 'apercu' && (
         <div className="space-y-4">
+          {/*
+            `GET /vms/{id}/metriques` renvoie un point instantané réel pour CPU/Mémoire/Réseau
+            (diagnostics Nova/libvirt, `synelia.modules.vms.service.diagnostics_instantanes`) —
+            vide (`metriquesVm === null` tant que l'appel n'a pas répondu, `[]` si la machine
+            est arrêtée ou l'hyperviseur injoignable) plutôt qu'une valeur inventée. Le disque
+            reste en démonstration : les diagnostics donnent des E/S, jamais l'occupation, et
+            rien ne la remonte aujourd'hui pour une VM. Le mode maquette garde les valeurs
+            illustratives déterministes.
+          */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatTile
               libelle="CPU"
-              valeur={vm.statut === 'running' ? 34 : 0}
-              unite="%"
-              variation={vm.statut === 'running' ? 6 : 0}
-              serie={seededSeries(`${id}-cpu`, 24, 18, 48)}
+              valeur={
+                api
+                  ? lectureVm('cpu') !== undefined
+                    ? Math.round(lectureVm('cpu')!)
+                    : '—'
+                  : vm.statut === 'running'
+                    ? 34
+                    : 0
+              }
+              unite={api ? (lectureVm('cpu') !== undefined ? '%' : undefined) : '%'}
+              variation={api ? undefined : vm.statut === 'running' ? 6 : 0}
+              detail={
+                api && lectureVm('cpu') === undefined
+                  ? detailLectureVm(metriquesVm, vm.statut)
+                  : undefined
+              }
+              serie={api ? undefined : seededSeries(`${id}-cpu`, 24, 18, 48)}
             />
             <StatTile
               libelle="Mémoire"
-              valeur={vm.statut === 'running' ? 61 : 0}
-              unite="%"
-              variation={vm.statut === 'running' ? -2 : 0}
-              serie={seededSeries(`${id}-mem`, 24, 52, 68)}
+              valeur={
+                api
+                  ? lectureVm('ram') !== undefined
+                    ? Math.round(lectureVm('ram')!)
+                    : '—'
+                  : vm.statut === 'running'
+                    ? 61
+                    : 0
+              }
+              unite={api ? (lectureVm('ram') !== undefined ? '%' : undefined) : '%'}
+              variation={api ? undefined : vm.statut === 'running' ? -2 : 0}
+              detail={
+                api && lectureVm('ram') === undefined
+                  ? detailLectureVm(metriquesVm, vm.statut)
+                  : undefined
+              }
+              serie={api ? undefined : seededSeries(`${id}-mem`, 24, 52, 68)}
             />
             <StatTile
               libelle="Disque"
-              valeur={vm.statut === 'running' ? 57 : 57}
-              unite="%"
-              detail={`${goHumain(Math.round(vm.diskGo * 0.57))} sur ${goHumain(vm.diskGo)}`}
-              serie={seededSeries(`${id}-disk`, 24, 55, 58)}
+              valeur={api ? '—' : vm.statut === 'running' ? 57 : 57}
+              unite={api ? undefined : '%'}
+              detail={
+                api
+                  ? 'Démonstration — les diagnostics de l’hyperviseur donnent des E/S disque, pas l’occupation'
+                  : `${goHumain(Math.round(vm.diskGo * 0.57))} sur ${goHumain(vm.diskGo)}`
+              }
+              serie={api ? undefined : seededSeries(`${id}-disk`, 24, 55, 58)}
             />
             <StatTile
               libelle="Réseau"
-              valeur={vm.statut === 'running' ? 148 : 0}
-              unite="Mbit/s"
-              ton="accent"
-              serie={seededSeries(`${id}-net`, 24, 40, 280)}
+              valeur={
+                api
+                  ? lectureVm('reseau_entrant') !== undefined
+                    ? Number(lectureVm('reseau_entrant')!.toFixed(2))
+                    : '—'
+                  : vm.statut === 'running'
+                    ? 148
+                    : 0
+              }
+              unite={
+                api
+                  ? lectureVm('reseau_entrant') !== undefined
+                    ? uniteVm('reseau_entrant')
+                    : undefined
+                  : 'Mbit/s'
+              }
+              detail={
+                api && lectureVm('reseau_entrant') === undefined
+                  ? detailLectureVm(metriquesVm, vm.statut)
+                  : undefined
+              }
+              ton="violet"
+              serie={api ? undefined : seededSeries(`${id}-net`, 24, 40, 280)}
             />
           </div>
 
@@ -372,8 +638,8 @@ export function VueVm({ id }: { id: string }) {
                 colonnes={2}
                 items={[
                   { cle: 'Identifiant', valeur: <span className="font-mono text-[12px]">{vm.id}</span> },
-                  { cle: 'Système', valeur: vm.os },
-                  { cle: 'Gabarit', valeur: <span className="font-mono">{vm.flavor}</span> },
+                  { cle: 'Système', valeur: osAffiche },
+                  { cle: 'Gabarit', valeur: <span className="font-mono">{flavorAffiche ?? '—'}</span> },
                   { cle: 'vCPU', valeur: `${vm.vcpu} vCPU` },
                   { cle: 'Mémoire', valeur: `${vm.ramGo} Go` },
                   { cle: 'Disque système', valeur: goHumain(vm.diskGo) },
@@ -385,7 +651,7 @@ export function VueVm({ id }: { id: string }) {
                   },
                   {
                     cle: 'Dernière sauvegarde',
-                    valeur: vm.derniereSauvegarde ? dateHeure(vm.derniereSauvegarde) : 'Aucune',
+                    valeur: derniereSauvegarde ? dateHeure(derniereSauvegarde) : 'Aucune',
                   },
                 ]}
               />
@@ -401,7 +667,7 @@ export function VueVm({ id }: { id: string }) {
                   value={`ssh ops@${ipPublique ?? ipPrivee} -p 22`}
                 />
               </div>
-              <p className="mt-3 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
+              <p className="mt-3 border-t border-g-100 pt-3 text-[11.5px] leading-relaxed text-g-500">
                 {ipPublique
                   ? 'L’accès SSH depuis Internet est filtré par le groupe de sécurité. Vérifiez que votre adresse est autorisée.'
                   : 'Cette machine n’a pas d’IP publique : l’accès SSH passe par le VPN ou par le bastion.'}
@@ -409,16 +675,29 @@ export function VueVm({ id }: { id: string }) {
             </Card>
           </div>
 
-          <GrilleSparkCharts
-            seed={`vm-${id}`}
-            metriques={[
-              { titre: 'CPU', unite: '%', min: 18, max: 48 },
-              { titre: 'Mémoire', unite: '%', min: 52, max: 68, seuil: 90 },
-              { titre: 'Disque', unite: '%', min: 55, max: 58, seuil: 85 },
-              { titre: 'Réseau', unite: 'Mbit/s', min: 40, max: 280, couleur: 'var(--color-m-600)' },
-            ]}
-            degrade={vm.statut === 'stopped'}
-          />
+          {api ? (
+            <Card>
+              <CardHeader titre="Historique des métriques" />
+              <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-4 text-center text-[12.5px] text-g-500">
+                Démonstration — le CPU, la mémoire et le réseau des tuiles ci-dessus sont une
+                lecture réelle de l’hyperviseur (diagnostics Nova/libvirt), mais instantanée :
+                rien ne persiste de série dans le temps côté backend, donc pas de courbe 24 h à
+                afficher ici. L’occupation disque reste indisponible : les diagnostics donnent
+                des E/S, jamais l’espace occupé.
+              </p>
+            </Card>
+          ) : (
+            <GrilleSparkCharts
+              seed={`vm-${id}`}
+              metriques={[
+                { titre: 'CPU', unite: '%', min: 18, max: 48 },
+                { titre: 'Mémoire', unite: '%', min: 52, max: 68, seuil: 90 },
+                { titre: 'Disque', unite: '%', min: 55, max: 58, seuil: 85 },
+                { titre: 'Réseau', unite: 'Mbit/s', min: 40, max: 280, couleur: 'var(--color-m-600)' },
+              ]}
+              degrade={vm.statut === 'stopped'}
+            />
+          )}
 
           <Card>
             <CardHeader titre="Cinq derniers événements" />
@@ -437,7 +716,94 @@ export function VueVm({ id }: { id: string }) {
       {onglet === 'reseau' && (
         <div className="space-y-4">
           <Card>
-            <CardHeader titre="Interfaces réseau" sousTitre={`${vm.hardware.nics} carte(s) virtuelle(s)`} />
+            <CardHeader
+              titre="Interfaces réseau"
+              sousTitre={`${vm.hardware.nics} carte(s) virtuelle(s)`}
+              actions={
+                <BoutonFormulaire
+                  libelle="Attacher une IP publique"
+                  action="network.manage"
+                  titre={`Attacher une IP publique à ${vm.nom}`}
+                  description="Une IP publique permet d’atteindre cette machine depuis Internet. Choisissez une adresse déjà réservée et libre dans cet Espace Cloud, ou faites-en réserver une nouvelle — facturée 3 500 FCFA par mois."
+                  champs={[
+                    {
+                      id: 'source',
+                      label: 'Adresse',
+                      type: 'select',
+                      options: [
+                        ...ipsDisponibles.map((ip) => ({
+                          value: ip.id,
+                          label: `${ip.adresse}${ip.ptr ? ` · ${ip.ptr}` : ''} (déjà réservée)`,
+                        })),
+                        { value: 'nouvelle', label: 'Réserver une nouvelle IP publique' },
+                      ],
+                    },
+                  ]}
+                  valeursDepart={{ source: ipsDisponibles[0]?.id ?? 'nouvelle' }}
+                  libelleValider="Attacher"
+                  operation={(v) => {
+                    const nouvelle = String(v.source) === 'nouvelle'
+                    const ipChoisie = nouvelle
+                      ? undefined
+                      : ipsDisponibles.find((ip) => ip.id === v.source)
+                    return {
+                      titre: nouvelle
+                        ? `IP publique attachée à ${vm.nom}`
+                        : `${ipChoisie?.adresse ?? ''} attachée à ${vm.nom}`,
+                      detail: nouvelle ? 'Facturée au prorata du mois en cours.' : undefined,
+                      appel: async () => {
+                        let ipId = String(v.source)
+                        if (nouvelle) {
+                          const reservee = (await creerRessource<PublicIP>('/ips', {
+                            espaceId: vm.espaceId,
+                            site: espace?.site,
+                            antiDdos: false,
+                          })) as PublicIP
+                          ipId = reservee.id
+                        }
+                        return requete(`/ips/${encodeURIComponent(ipId)}/attachement`, {
+                          methode: 'PUT',
+                          corps: { cibleId: vm.id },
+                        })
+                      },
+                      effet: () => {
+                        const adresse = nouvelle
+                          ? `102.176.20.${200 + lesIps.items.length}`
+                          : ipChoisie?.adresse
+                        if (!adresse) return
+                        if (nouvelle) {
+                          lesIps.creer({
+                            id: lesIps.identifiant('ip'),
+                            espaceId: vm.espaceId,
+                            adresse,
+                            antiDdos: false,
+                            attachedTo: vm.id,
+                            attachedLabel: vm.nom,
+                          })
+                        } else if (ipChoisie) {
+                          lesIps.modifier(ipChoisie.id, { attachedTo: vm.id, attachedLabel: vm.nom })
+                        }
+                        parc.modifier(vm.id, (m) => ({
+                          ips: [...m.ips, { adresse, type: 'publique' as const, ptr: ipChoisie?.ptr }],
+                        }))
+                      },
+                      job: {
+                        type: 'network.ip.attach',
+                        label: `IP publique · ${vm.nom}`,
+                        etapes: nouvelle
+                          ? ['Réserver l’adresse dans le pool', 'Annoncer la route', 'Attacher au port réseau']
+                          : ['Attacher au port réseau'],
+                        dureeEtapeMs: 900,
+                      },
+                      effetFinal: () => {
+                        parc.recharger()
+                        lesIps.recharger()
+                      },
+                    }
+                  }}
+                />
+              }
+            />
             <div className="overflow-x-auto">
               <table className="w-full min-w-max border-collapse">
                 <thead>
@@ -450,23 +816,31 @@ export function VueVm({ id }: { id: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {vm.ips.map((ip, i) => (
-                    <tr key={ip.adresse} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2.5 font-mono text-[12px] text-ink">eth{i}</td>
-                      <td className="px-3 py-2.5 font-mono text-[13px] text-ink">{ip.adresse}</td>
-                      <td className="px-3 py-2.5">
-                        <Badge tone={ip.type === 'publique' ? 'accent' : 'neutral'} size="sm">
-                          {ip.type === 'publique' ? 'Publique' : 'Privée'}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-[12px] text-g-700">
-                        {ip.ptr ?? '—'}
-                      </td>
-                      <td className="px-3 py-2.5 text-[13px] text-g-700">
-                        {ip.type === 'privee' ? 'prod-front · 10.0.1.0/24' : 'Internet'}
+                  {interfacesReseau.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-6 text-center text-[12.5px] text-g-500">
+                        Aucune IP publique — attachez-en une avec le bouton ci-dessus.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    interfacesReseau.map((ip, i) => (
+                      <tr key={ip.adresse} className="border-b border-g-100 last:border-0">
+                        <td className="px-3 py-2.5 font-mono text-[12px] text-ink">eth{i}</td>
+                        <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{ip.adresse}</td>
+                        <td className="px-3 py-2.5">
+                          <Badge tone={ip.type === 'publique' ? 'accent' : 'neutral'} size="sm">
+                            {ip.type === 'publique' ? 'Publique' : 'Privée'}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
+                          {ip.ptr ?? '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-[12.5px] text-g-700">
+                          {ip.type === 'privee' ? 'prod-front · 10.0.1.0/24' : 'Internet'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -533,16 +907,16 @@ export function VueVm({ id }: { id: string }) {
                               {r.direction === 'in' ? 'Entrée' : 'Sortie'}
                             </Badge>
                           </td>
-                          <td className="px-3 py-1.5 font-mono text-[12px] uppercase text-ink">
+                          <td className="px-3 py-1.5 font-mono text-[11.5px] uppercase text-ink">
                             {r.protocole}
                           </td>
-                          <td className="px-3 py-1.5 font-mono text-[12px] text-ink">
+                          <td className="px-3 py-1.5 font-mono text-[11.5px] text-ink">
                             {r.ports ?? 'tous'}
                           </td>
-                          <td className="px-3 py-1.5 font-mono text-[12px] text-g-700">
+                          <td className="px-3 py-1.5 font-mono text-[11.5px] text-g-700">
                             {r.cible}
                           </td>
-                          <td className="px-3 py-1.5 text-[12px] text-g-700">
+                          <td className="px-3 py-1.5 text-[11.5px] text-g-700">
                             {r.description ?? '—'}
                           </td>
                         </tr>
@@ -590,6 +964,16 @@ export function VueVm({ id }: { id: string }) {
                 operation={(v) => ({
                   titre: `Volume « ${v.nom} » attaché`,
                   detail: `${v.taille} Go · ${String(v.classe).toUpperCase()}`,
+                  appel: () =>
+                    creerRessource('/volumes', {
+                      espaceId: vm.espaceId,
+                      nom: String(v.nom),
+                      tailleGo: Number(v.taille),
+                      classe: v.classe,
+                      chiffre: Boolean(v.chiffre),
+                      attacherA: vm.id,
+                      montage: String(v.montage) || undefined,
+                    }),
                   effet: () =>
                     disques.creer({
                       id: disques.identifiant('vol'),
@@ -604,6 +988,7 @@ export function VueVm({ id }: { id: string }) {
                       iops: v.classe === 'nvme' ? 12000 : v.classe === 'ssd' ? 6000 : 900,
                       montage: String(v.montage),
                     }),
+                  effetFinal: () => disques.recharger(),
                 })}
               />
             }
@@ -611,10 +996,10 @@ export function VueVm({ id }: { id: string }) {
           <div className="mb-4 rounded-[8px] border border-g-300 bg-g-050 px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span>
-                <span className="block text-[13px] font-semibold text-ink">
+                <span className="block text-[12.5px] font-semibold text-ink">
                   Disque système ({goHumain(vm.diskGo)})
                 </span>
-                <span className="block font-mono text-[12px] text-g-500">/ · inclus au gabarit</span>
+                <span className="block font-mono text-[11.5px] text-g-500">/ · inclus au gabarit</span>
               </span>
               <span className="w-40">
                 <QuotaBar
@@ -650,11 +1035,11 @@ export function VueVm({ id }: { id: string }) {
                 <tbody>
                   {volumes.map((v) => (
                     <tr key={v.id} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2.5 font-mono text-[13px] text-ink">{v.nom}</td>
-                      <td className="px-3 py-2.5 font-mono text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{v.nom}</td>
+                      <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
                         {v.montage ?? '—'}
                       </td>
-                      <td className="tnum px-3 py-2.5 text-[13px] text-g-700">
+                      <td className="tnum px-3 py-2.5 text-[12.5px] text-g-700">
                         {goHumain(v.tailleGo)}
                       </td>
                       <td className="px-3 py-2.5">
@@ -690,8 +1075,14 @@ export function VueVm({ id }: { id: string }) {
                             libelleValider="Étendre"
                             operation={(f) => ({
                               titre: `${v.nom} étendu à ${num(Number(f.taille))} Go`,
+                              appel: () =>
+                                requete(`/volumes/${encodeURIComponent(v.id)}/extension`, {
+                                  methode: 'POST',
+                                  corps: { tailleGo: Number(f.taille) },
+                                }),
                               effet: () =>
                                 disques.modifier(v.id, { tailleGo: Number(f.taille) }),
+                              effetFinal: () => disques.recharger(),
                             })}
                           />
                           <BoutonAction
@@ -702,12 +1093,17 @@ export function VueVm({ id }: { id: string }) {
                               ton: 'warn',
                               titre: `${v.nom} détaché`,
                               detail: 'Le volume est conservé et peut être attaché à une autre machine.',
+                              appel: () =>
+                                requete(`/volumes/${encodeURIComponent(v.id)}/attachement`, {
+                                  methode: 'DELETE',
+                                }),
                               effet: () =>
                                 disques.modifier(v.id, {
                                   attachedTo: undefined,
                                   attachedLabel: undefined,
                                   montage: undefined,
                                 }),
+                              effetFinal: () => disques.recharger(),
                             }}
                           />
                         </span>
@@ -739,7 +1135,9 @@ export function VueVm({ id }: { id: string }) {
                 ]}
                 operation={(v) => ({
                   titre: `Snapshot « ${v.nom} » créé`,
+                  appel: () => appelSnapshot(String(v.nom)),
                   effet: () => prendreUnSnapshot(String(v.nom)),
+                  effetFinal: () => snapshots.recharger(),
                 })}
               />
             }
@@ -758,14 +1156,14 @@ export function VueVm({ id }: { id: string }) {
               <tbody>
                 {snapshots.items.map((s) => (
                   <tr key={s.id} className="border-b border-g-100 last:border-0">
-                    <td className="px-3 py-2.5 font-mono text-[13px] text-ink">{s.nom}</td>
-                    <td className="px-3 py-2.5 text-[13px] text-g-700">{dateHeure(s.date)}</td>
-                    <td className="tnum px-3 py-2.5 text-[13px] text-g-700">
-                      {goHumain(s.taille)}
+                    <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{s.nom}</td>
+                    <td className="px-3 py-2.5 text-[12.5px] text-g-700">{dateHeure(s.date ?? s.cree ?? MAINTENANT)}</td>
+                    <td className="tnum px-3 py-2.5 text-[12.5px] text-g-700">
+                      {goHumain(s.taille ?? s.tailleGo ?? 0)}
                     </td>
                     <td className="px-3 py-2.5">
                       <Badge tone="neutral" size="sm">
-                        {s.type}
+                        {s.type ?? '—'}
                       </Badge>
                     </td>
                     <td className="px-3 py-2.5">
@@ -777,6 +1175,11 @@ export function VueVm({ id }: { id: string }) {
                             action: 'vm.create_delete',
                             ton: 'info',
                             titre: `Restauration du snapshot « ${s.nom} »`,
+                            appel: () =>
+                              requete(
+                                `/vms/${encodeURIComponent(vm.id)}/instantanes/${encodeURIComponent(s.id)}`,
+                                { methode: 'POST', corps: {}, query: { confirmation: s.nom } },
+                              ),
                             effet: () => parc.modifier(vm.id, { statut: 'creating' }),
                             job: {
                               type: 'vm.snapshot.revert',
@@ -787,13 +1190,16 @@ export function VueVm({ id }: { id: string }) {
                                 'Rallumer la machine',
                               ],
                             },
-                            effetFinal: () => parc.modifier(vm.id, { statut: 'running' }),
+                            effetFinal: () => {
+                              parc.modifier(vm.id, { statut: 'running' })
+                              parc.recharger()
+                            },
                           }}
                           confirmation={{
-                            ressource: vm.nom,
+                            ressource: s.nom,
                             titre: `Revenir au snapshot « ${s.nom} » ?`,
                             pertes: [
-                              `Toutes les écritures postérieures au ${dateHeure(s.date)} seront perdues`,
+                              `Toutes les écritures postérieures au ${dateHeure(s.date ?? s.cree ?? MAINTENANT)} seront perdues`,
                               'La machine sera arrêtée pendant l’opération',
                             ],
                             libelleAction: 'Revenir à ce snapshot',
@@ -835,7 +1241,13 @@ export function VueVm({ id }: { id: string }) {
                               ton: 'warn',
                               titre: `Snapshot « ${s.nom} » supprimé`,
                               detail: 'L’espace disque est rendu immédiatement.',
+                              appel: () =>
+                                supprimerRessource(
+                                  `/vms/${encodeURIComponent(vm.id)}/instantanes`,
+                                  s.id,
+                                ),
                               effet: () => snapshots.supprimer(s.id),
+                              effetFinal: () => snapshots.recharger(),
                             })
                           }
                         >
@@ -913,20 +1325,29 @@ export function VueVm({ id }: { id: string }) {
               titre="Points de restauration"
               sousTitre="La restauration granulaire descend jusqu’au fichier."
               actions={
+                // `BoutonFormulaire` n'a pas de prop `disabled` : sans point réel à
+                // restaurer, `pointPlusRecent` serait absent et l'`appel` retomberait
+                // sur `undefined`, ce qui rejouerait le job simulé (le bug corrigé
+                // ci-dessous) au lieu de rester inerte. Ne pas rendre le bouton du tout
+                // tant qu'aucun point n'existe est la seule façon honnête de le
+                // désactiver ici — l'`EmptyState` en dessous explique déjà pourquoi.
+                points.length > 0 ? (
                 <BoutonFormulaire
                   libelle="Lancer une restauration"
                   variant="primary"
                   action="backup.restore"
                   titre={`Restaurer ${vm.nom}`}
-                  description="La granularité descend jusqu’au fichier. La destination peut être la machine d’origine, une nouvelle machine, ou un téléchargement."
+                  description="La granularité descend jusqu’au fichier. La destination peut être la machine d’origine, une nouvelle machine, ou l’autre site. Restaure le point le plus récent."
                   champs={[
                     {
                       id: 'granularite',
                       label: 'Granularité',
                       type: 'select',
+                      // Valeurs alignées sur `DemandeRestauration.granularite` (backend) :
+                      // pas de « volume » distinct côté contrat pour une VM, contrairement à
+                      // ce que la maquette laissait croire.
                       options: [
-                        { value: 'machine', label: 'Machine entière' },
-                        { value: 'volume', label: 'Un volume' },
+                        { value: 'complete', label: 'Machine entière' },
                         { value: 'fichiers', label: 'Fichiers et dossiers' },
                       ],
                     },
@@ -944,10 +1365,29 @@ export function VueVm({ id }: { id: string }) {
                   operation={(v) => ({
                     ton: 'info',
                     titre: 'Restauration lancée',
-                    detail: `${v.granularite === 'machine' ? 'Machine entière' : v.granularite === 'volume' ? 'Volume' : 'Fichiers'} · ${v.destination === 'origine' ? 'sur place' : 'vers une autre cible'}`,
+                    detail: `${v.granularite === 'complete' ? 'Machine entière' : 'Fichiers'} · ${v.destination === 'origine' ? 'sur place' : 'vers une autre cible'}`,
+                    // Avant ce correctif, ce bouton ne passait aucun `appel` : en mode
+                    // API, il jouait un job simulé et un toast de succès sans jamais
+                    // appeler `POST /sauvegarde/restaurations` — vérifié en direct sur
+                    // dev01 (aucune requête réseau). Cible le point le plus récent,
+                    // comme l'annonce la description.
+                    appel: pointPlusRecent
+                      ? () =>
+                          creerRessource('/sauvegarde/restaurations', {
+                            pointId: pointPlusRecent.id,
+                            cible:
+                              v.destination === 'origine'
+                                ? 'origine'
+                                : v.destination === 'autre-site'
+                                  ? 'autre_site'
+                                  : 'nouvelle_ressource',
+                            granularite: v.granularite,
+                          })
+                      : undefined,
                     job: { workflow: 'backup.restore', cible: vm.nom },
                   })}
                 />
+                ) : undefined
               }
             />
             {points.length === 0 ? (
@@ -970,12 +1410,12 @@ export function VueVm({ id }: { id: string }) {
                   <tbody>
                     {points.map((p) => (
                       <tr key={p.id} className="border-b border-g-100 last:border-0">
-                        <td className="px-3 py-2.5 text-[13px] text-ink">{dateHeure(p.date)}</td>
-                        <td className="px-3 py-2.5 text-[13px] text-g-700">{p.type}</td>
-                        <td className="tnum px-3 py-2.5 text-[13px] text-g-700">
+                        <td className="px-3 py-2.5 text-[12.5px] text-ink">{dateHeure(p.date)}</td>
+                        <td className="px-3 py-2.5 text-[12.5px] text-g-700">{p.type}</td>
+                        <td className="tnum px-3 py-2.5 text-[12.5px] text-g-700">
                           {goHumain(p.tailleGo)}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
                           {p.destination}
                         </td>
                         <td className="px-3 py-2.5 text-[12px] text-g-700">
@@ -994,6 +1434,16 @@ export function VueVm({ id }: { id: string }) {
                               action: 'backup.restore',
                               ton: 'info',
                               titre: `Restauration du ${dateHeure(p.date)}`,
+                              // Même correctif que `/app/sauvegarde` (`OngletPoints`) : sans
+                              // `appel`, ce bouton ne faisait jamais l'aller-retour réel —
+                              // toast de succès et job simulés sans que
+                              // `POST /sauvegarde/restaurations` ne parte.
+                              appel: () =>
+                                creerRessource('/sauvegarde/restaurations', {
+                                  pointId: p.id,
+                                  cible: 'origine',
+                                  granularite: 'complete',
+                                }),
                               job: { workflow: 'backup.restore', cible: `${vm.nom} · ${dateCourte(p.date)}` },
                             }}
                           />
@@ -1004,7 +1454,7 @@ export function VueVm({ id }: { id: string }) {
                 </table>
               </div>
             )}
-            <p className="mt-3 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
+            <p className="mt-3 border-t border-g-100 pt-3 text-[11.5px] leading-relaxed text-g-500">
               Granularité disponible pour une machine : machine entière, volume, système de fichiers
               parcourable, fichier unique. La destination peut être le même emplacement, un autre
               Espace Cloud, l’autre site, ou un téléchargement local.
@@ -1014,33 +1464,76 @@ export function VueVm({ id }: { id: string }) {
       )}
 
       {/* Console en panneau plein écran */}
-      <ConsoleDrawer
+      <Drawer
         open={console_}
         onClose={() => setConsole(false)}
-        titre={`Console · ${vm.nom}`}
+        title={`Console · ${vm.nom}`}
         description="Le portail encapsule la console KVM de l’hyperviseur. Il ne réimplémente pas le protocole."
-        statut={
+        size="full"
+        footer={
           <>
-            Connecté · {vm.nom} · {vm.os}
+            <span className="mr-auto text-[11.5px] text-g-500">
+              Session console chiffrée · déconnexion automatique après 15 minutes d’inactivité
+            </span>
+            {/*
+              Envoyer Ctrl+Alt+Suppr a été retiré plutôt que simulé : `vnc_lite.html`
+              (noVNC) n'expose ni contrôle à l'écran ni API `postMessage` pour piloter
+              la session depuis la page parente. Le rendre réel demanderait de modifier
+              la page noVNC vendée côté backend/Apache — hors périmètre d'un correctif
+              frontend. Un bouton manquant est honnête ; un bouton qui fait semblant ne
+              l'est pas.
+            */}
+            <Button
+              variant="ghost"
+              iconBefore={<Maximize2 size={13} />}
+              disabled={estActif() && !consoleUrl}
+              title={estActif() && !consoleUrl ? 'La console se connecte encore.' : undefined}
+              onClick={() => {
+                if (!estActif()) {
+                  executer({
+                    ton: 'info',
+                    titre: 'Console en plein écran',
+                    detail: 'Démonstration : il n’y a pas de console réelle à ouvrir en mode maquette.',
+                  })
+                  return
+                }
+                if (consoleUrl) window.open(consoleUrl, '_blank')
+              }}
+            >
+              Plein écran
+            </Button>
+            <Button variant="ghost" onClick={() => setConsole(false)}>
+              Fermer
+            </Button>
           </>
         }
-        footerExtra={
-          <Button
-            variant="secondary"
-            iconBefore={<RotateCw size={13} />}
-            onClick={() =>
-              executer({
-                action: 'vm.power',
-                ton: 'info',
-                titre: 'Ctrl+Alt+Suppr envoyé',
-                detail: `Séquence transmise à la console de ${vm.nom}.`,
-              })
-            }
-          >
-            Envoyer Ctrl+Alt+Suppr
-          </Button>
-        }
-        contenu={`Ubuntu 24.04.1 LTS ${vm.nom} tty1
+      >
+        <div className="flex h-full min-h-[60vh] flex-col overflow-hidden rounded-[8px] border border-g-300 bg-p-900">
+          <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+            <span
+              className={cn(
+                'h-1.5 w-1.5 rounded-full',
+                !estActif() || consoleUrl
+                  ? 'bg-ok animate-pulse-dot'
+                  : consoleErreur
+                    ? 'bg-err'
+                    : 'bg-warn animate-pulse-dot',
+              )}
+            />
+            <span className="type-micro text-p-300">
+              {!estActif()
+                ? `Démonstration · ${vm.nom} · ${vm.os}`
+                : consoleUrl
+                  ? `Connecté · ${vm.nom} · ${vm.os}`
+                  : consoleErreur
+                    ? `Échec de connexion · ${vm.nom}`
+                    : `Connexion à la console de ${vm.nom}…`}
+            </span>
+          </div>
+
+          {!estActif() ? (
+            <pre className="flex-1 overflow-auto px-4 py-3 font-mono text-[12.5px] leading-relaxed text-[#C9E4CA]">
+{`Ubuntu 24.04.1 LTS ${vm.nom} tty1
 
 ${vm.nom} login: ops
 Password:
@@ -1068,32 +1561,85 @@ ops@${vm.nom}:~$ systemctl is-system-running
 running
 
 ops@${vm.nom}:~$ _`}
-      />
+            </pre>
+          ) : consoleChargement ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <Skeleton className="h-10 w-10 rounded-full" />
+              <span className="type-micro text-p-300">Ouverture de la console…</span>
+            </div>
+          ) : consoleErreur ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <p className="text-[13px] font-semibold text-white">Impossible d’ouvrir la console</p>
+              <p className="max-w-md text-[12.5px] leading-relaxed text-p-300">{consoleErreur.message}</p>
+              {consoleErreur.correlationId && (
+                <div className="w-full max-w-xs [color-scheme:light]">
+                  <CopyField label="Identifiant de corrélation" value={consoleErreur.correlationId} />
+                </div>
+              )}
+              <Button size="sm" variant="secondary" onClick={ouvrirConsole}>
+                Réessayer
+              </Button>
+            </div>
+          ) : consoleUrl ? (
+            <iframe
+              src={consoleUrl}
+              title={`Console de ${vm.nom}`}
+              className="flex-1 border-0"
+              allow="clipboard-read; clipboard-write"
+            />
+          ) : null}
+        </div>
+      </Drawer>
 
       <ModaleFormulaire
         ouvert={redimensionnement}
         onFermer={() => setRedimensionnement(false)}
         titre={`Redimensionner ${vm.nom}`}
-        description="L’ajout de vCPU et de mémoire s’applique à chaud sur cette image ; un retrait exige un redémarrage."
-        champs={[
-          { id: 'vcpu', label: 'vCPU', type: 'nombre', demi: true, min: 1, max: 64 },
-          { id: 'ram', label: 'Mémoire', type: 'nombre', demi: true, min: 1, max: 256, suffixe: 'Go' },
-        ]}
-        valeursDepart={{ vcpu: vm.vcpu, ram: vm.ramGo }}
+        description={
+          gabaritsCibles.length > 0
+            ? 'L’ajout de vCPU et de mémoire s’applique à chaud sur cette image ; un retrait exige un redémarrage. Seuls les gabarits réels du catalogue sont proposés : Nova ne sait redimensionner que vers un gabarit existant, jamais vers un vCPU/Go choisi librement.'
+            : 'Aucun gabarit du catalogue n’offre plus de vCPU, de mémoire et de disque que le gabarit actuel : cette machine est déjà sur le plus grand gabarit disponible.'
+        }
+        champs={
+          gabaritsCibles.length > 0
+            ? [
+                {
+                  id: 'gabaritId',
+                  label: 'Nouveau gabarit',
+                  type: 'select',
+                  obligatoire: true,
+                  options: gabaritsCibles.map((g) => ({
+                    value: g.id,
+                    label: `${g.nom} — ${g.vcpu} vCPU · ${g.ramGo} Go · ${g.diskGo} Go`,
+                  })),
+                },
+              ]
+            : []
+        }
+        valeursDepart={{ gabaritId: gabaritsCibles[0]?.id ?? '' }}
         libelleValider="Redimensionner"
-        onValider={(v) =>
+        onValider={(v) => {
+          const cible = gabaritsCibles.find((g) => g.id === v.gabaritId)
+          if (!cible) return
           executer({
             action: 'vm.hardware.update',
             titre: `${vm.nom} redimensionnée`,
-            detail: `${v.vcpu} vCPU · ${v.ram} Go`,
+            detail: `${cible.vcpu} vCPU · ${cible.ramGo} Go · ${cible.diskGo} Go`,
+            appel: () =>
+              requete(`/vms/${encodeURIComponent(vm.id)}/redimensionnement`, {
+                methode: 'POST',
+                corps: { vcpu: cible.vcpu, ramGo: cible.ramGo, diskGo: cible.diskGo },
+              }),
             effet: () =>
               parc.modifier(vm.id, {
-                vcpu: Number(v.vcpu),
-                ramGo: Number(v.ram),
-                flavor: 'personnalisé',
+                vcpu: cible.vcpu,
+                ramGo: cible.ramGo,
+                diskGo: cible.diskGo,
+                flavor: cible.id,
               }),
+            effetFinal: () => parc.recharger(),
           })
-        }
+        }}
       />
 
       <ConfirmDialog
@@ -1105,10 +1651,17 @@ ops@${vm.nom}:~$ _`}
             ton: 'warn',
             titre: `Suppression de ${vm.nom} lancée`,
             detail: 'Le quota sera libéré à la fin de l’opération.',
+            // En mode API la suppression part avec le nom exact exigé par le
+            // backend ; les volumes de données survivent côté backend aussi.
+            appel: () => supprimerRessource('/vms', vm.id, vm.nom),
             effet: () => {
               // Les volumes de données survivent à la machine : on les détache.
               volumes.forEach((v) => disques.modifier(v.id, { attachedTo: undefined }))
               parc.supprimer(vm.id)
+              router.push('/app/vms')
+            },
+            effetFinal: () => {
+              parc.recharger()
               router.push('/app/vms')
             },
           })
@@ -1119,7 +1672,7 @@ ops@${vm.nom}:~$ _`}
           'Le disque système et son contenu seront détruits',
           `${volumes.length} volume(s) attaché(s) seront détaché(s) puis conservé(s) séparément`,
           `${snapshots.items.length} snapshot(s) seront supprimés`,
-          vm.backupPlanId
+          points.length > 0
             ? `Les points de restauration restent disponibles pendant ${plan?.retentionJours ?? 30} jours`
             : 'Aucun point de restauration n’existe : la perte sera définitive',
           `${vm.vcpu} vCPU et ${vm.ramGo} Go seront rendus au quota de ${espace?.code}`,
@@ -1184,6 +1737,13 @@ function OngletMateriel({ vm }: { vm: VM }) {
       detail: redemarrageNecessaire
         ? 'Un redémarrage est nécessaire pour que tout soit pris en compte.'
         : 'Modifications appliquées à chaud.',
+      // Seuls vCPU et mémoire ont un équivalent API ; le reste (cartes,
+      // USB, Secure Boot…) reste une préférence d’affichage locale.
+      appel: () =>
+        requete(`/vms/${encodeURIComponent(vm.id)}/redimensionnement`, {
+          methode: 'POST',
+          corps: { vcpu, ramGo: ram },
+        }),
       effet: () =>
         parc.modifier(vm.id, (v) => ({
           vcpu,
@@ -1203,6 +1763,7 @@ function OngletMateriel({ vm }: { vm: VM }) {
             job: { workflow: 'vm.resize', cible: vm.nom },
           }
         : {}),
+      effetFinal: () => parc.recharger(),
     })
 
   return (
@@ -1476,7 +2037,7 @@ function Ligne({
             {redemarrage ? 'Redémarrage requis' : 'Applicable à chaud'}
           </Badge>
         </p>
-        <p className="mt-0.5 text-[12px] leading-relaxed text-g-500">{note}</p>
+        <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-500">{note}</p>
       </div>
       <div className="shrink-0">{children}</div>
     </div>

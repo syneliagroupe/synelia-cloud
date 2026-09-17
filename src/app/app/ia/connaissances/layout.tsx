@@ -2,7 +2,10 @@ import type { Metadata } from 'next'
 import { CadreConnaissances } from './cadre'
 
 export const metadata: Metadata = {
-  title: 'Connaissances',
+  title: {
+    absolute: 'Connaissances · Espace client Synelia Cloud',
+    template: '%s · Espace client Synelia Cloud',
+  },
   description:
     'Collections vectorielles alimentées depuis vos sources : documents indexés, fraîcheur, découpage, habilitations et recherche.',
 }

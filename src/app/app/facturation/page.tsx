@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CreditCard, Download, FileText, Smartphone, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -34,10 +34,23 @@ import { Drawer } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StackedBar, StatTile } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import type { Invoice, MoyenPaiement, Subscription } from '@/lib/types'
+import { CostPreview } from '@/components/composition/flow'
+import { BoutonPaiementPaystack } from '@/components/composition/paystack'
+import {
+  ApiError,
+  creerRessource,
+  estActif,
+  lireSession,
+  modifierRessource,
+  requete,
+  supprimerRessource,
+} from '@/lib/api/client'
+import { useLectureDegradable } from '@/lib/api/degradable'
+import { telechargerCsv } from '@/lib/export'
+import type { Devis, Invoice, MoyenPaiement, Offer, Subscription } from '@/lib/types'
 
 const ONGLETS = [
   { id: 'apercu', label: 'Aperçu' },
@@ -78,6 +91,10 @@ interface MoyenEnregistre {
   moyen: MoyenPaiement
   detail: string
   principal: boolean
+  /** Backend (`GET /facturation/moyens-paiement`) : mêmes sens, autres noms. */
+  type?: MoyenPaiement
+  defaut?: boolean
+  libelle?: string
 }
 
 const MOYENS: MoyenEnregistre[] = [
@@ -86,25 +103,114 @@ const MOYENS: MoyenEnregistre[] = [
   { id: 'moy-3', moyen: 'carte', detail: 'Visa •••• 4821 · expire 09/28', principal: false },
 ]
 
+/** `GET /facturation/consommation` — même forme que `CONSOMMATION_JOURS`, plus les totaux. */
+interface ConsommationDistante {
+  periode: string
+  jours: Array<{ date: string; montant: number; vcpuHeures?: number }>
+  total: number
+  prevision?: number
+  totalMoisPrecedent?: number
+}
+
+/** `GET /facturation/ventilation?axe=` — la forme des barres de répartition. */
+interface VentilationDistante {
+  axe: string
+  lignes: Array<{ label: string; montant: number; pct: number }>
+  total: number
+}
+
+/**
+ * `GET /facturation/factures/{id}/pdf` : le contrat annonce `{ url, expire }`,
+ * le backend local renvoie le PDF lui-même. On accepte les deux — un lien
+ * s’ouvre, un binaire se télécharge — pour que le bouton fasse ce qu’il dit.
+ * Passe par `fetch` directement : `requete()` ne lit que du JSON.
+ */
+async function telechargerPdfFacture(id: string, nomFichier: string): Promise<void> {
+  const session = lireSession()
+  const base = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '')
+  const reponse = await fetch(`${base}/facturation/factures/${encodeURIComponent(id)}/pdf`, {
+    headers: {
+      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
+      ...(session?.organisationActive ? { 'X-Organisation-Id': session.organisationActive } : {}),
+    },
+  })
+  if (!reponse.ok) throw new ApiError(reponse.status, await reponse.json().catch(() => ({})))
+  if ((reponse.headers.get('content-type') ?? '').includes('application/json')) {
+    const { url } = (await reponse.json()) as { url?: string }
+    if (url) window.open(url, '_blank', 'noopener')
+    return
+  }
+  const url = URL.createObjectURL(await reponse.blob())
+  const lien = document.createElement('a')
+  lien.href = url
+  lien.download = nomFichier
+  lien.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function Facturation() {
-  const { autorise, refus, perm } = useApp()
+  const maintenant = useMaintenant()
+  const { autorise, refus, perm, organisations, organisationId } = useApp()
+  const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
+  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
   const executer = useOperation()
   const lesFactures = useCollection<Invoice>('factures', FACTURES)
   const souscriptions = useCollection<Subscription>('souscriptions', SOUSCRIPTIONS)
+  const lesDevis = useCollection<Devis>('devis', DEVIS)
   const moyens = useCollection<MoyenEnregistre>('moyens-paiement', MOYENS)
+  // Catalogue réel : un tarif changé côté /admin/catalogue doit se refléter
+  // dans les suggestions faites au client, pas seulement dans l'admin.
+  const offresReelles = useCollection<Offer>('offres', OFFRES)
+  // Le backend nomme les mêmes champs autrement (`type`, `defaut`) : on
+  // normalise une fois pour que l’onglet lise une seule forme.
+  const moyensNorm = moyens.items.map((m) => ({
+    ...m,
+    moyen: m.moyen ?? m.type ?? ('virement' as MoyenPaiement),
+    principal: m.principal ?? m.defaut ?? false,
+  }))
   const [onglet, setOnglet] = useState('apercu')
   const [facture, setFacture] = useState<string | null>(null)
+  // En mode API, la consommation du mois et les ventilations viennent du
+  // backend ; un `424` (comptage amont muet) se dit dans un bandeau daté au
+  // lieu d’afficher des graines dont on ne sait plus de quand elles datent.
+  const { donnees: consommationDistante, degrade: degradeConsommation } =
+    useLectureDegradable<ConsommationDistante>('/facturation/consommation')
+  const { donnees: ventilationFamilles } = useLectureDegradable<VentilationDistante>(
+    '/facturation/ventilation',
+    { axe: 'famille' },
+  )
+  const { donnees: ventilationEspaces } = useLectureDegradable<VentilationDistante>(
+    '/facturation/ventilation',
+    { axe: 'espace' },
+  )
+  const { donnees: ventilationApplications } = useLectureDegradable<VentilationDistante>(
+    '/facturation/ventilation',
+    { axe: 'application' },
+  )
+  const joursConso = consommationDistante?.jours ?? CONSOMMATION_JOURS
+  const periodeConso = consommationDistante?.periode ?? '2026-08'
+  const ventilation =
+    ventilationFamilles?.lignes.map((l) => ({ famille: l.label, montant: l.montant, pct: l.pct })) ??
+    VENTILATION_DEPENSE
   const [envoiMensuel, setEnvoiMensuel] = useState(true)
   const [inclureNonAffecte, setInclureNonAffecte] = useState(true)
 
   const peutVoir = perm('invoice.view') !== 'none'
-  const factures = lesFactures.items.filter((f) => f.orgId === ORG_COURANTE.id)
+  // En mode API le backend filtre déjà par organisation (et ses identifiants
+  // sont inconnus du jeu local) : on lit la collection telle quelle.
+  const enApi = estActif()
+  const factures = enApi ? lesFactures.items : lesFactures.items.filter((f) => f.orgId === ORG_COURANTE.id)
+  const abonnements = enApi ? souscriptions.items : SOUSCRIPTIONS
+  const devisVisibles = enApi ? lesDevis.items : DEVIS
   const impayees = factures.filter((f) => f.statut === 'impayee')
   const enCours = factures.find((f) => f.statut === 'brouillon')
   const detail = factures.find((f) => f.id === facture)
 
-  const consommeMois = CONSOMMATION_JOURS.reduce((a, j) => a + j.montant, 0)
-  const projete = Math.round((consommeMois / CONSOMMATION_JOURS.length) * 31)
+  const consommeMois =
+    consommationDistante?.total ?? joursConso.reduce((a, j) => a + j.montant, 0)
+  const projete =
+    consommationDistante?.prevision ??
+    Math.round((consommeMois / Math.max(1, joursConso.length)) * 31)
   const somme = (s: Subscription) => s.quantite * s.prixApplique
 
   /** Règlement d'une facture : le job simule l'encaissement du prestataire. */
@@ -112,14 +218,22 @@ export default function Facturation() {
     executer({
       action: 'payment.update',
       titre: `Règlement de ${f.numero} lancé`,
-      detail: `${money(f.total)} · moyen principal : ${MOYEN_LABEL[moyens.items.find((m) => m.principal)?.moyen ?? 'virement']}`,
+      detail: `${money(f.total)} · moyen principal : ${MOYEN_LABEL[moyensNorm.find((m) => m.principal)?.moyen ?? 'virement']}`,
+      appel: () =>
+        requete(`/facturation/factures/${encodeURIComponent(f.id)}/paiement`, {
+          methode: 'POST',
+          corps: { moyenId: moyensNorm.find((m) => m.principal)?.id },
+        }),
       job: {
         type: 'facture.paiement',
         label: `Règlement ${f.numero}`,
         etapes: ['Initier le paiement', 'Attendre la confirmation du prestataire', 'Rapprocher la facture'],
         dureeEtapeMs: 1100,
       },
-      effetFinal: () => lesFactures.modifier(f.id, { statut: 'payee' }),
+      effetFinal: () => {
+        lesFactures.modifier(f.id, { statut: 'payee' })
+        lesFactures.recharger()
+      },
     })
 
   const masque = (v: string) => (peutVoir ? v : '•••')
@@ -139,8 +253,26 @@ export default function Facturation() {
               operation={{
                 action: 'invoice.view',
                 titre: 'Export de la période préparé',
-                detail:
-                  'Consommation jour par jour, souscriptions et ventilation par étiquette, au format CSV et PDF.',
+                detail: 'Consommation jour par jour, au format CSV, pour votre tableur.',
+                // `POST /facturation/consommation/export` journalise l’export côté
+                // audit (`202`), mais l’URL qu’il renvoie (`/travaux/{id}/export`)
+                // ne correspond à aucune route réelle — `travaux/router.py` ne sert
+                // que lecture/relance/annulation d’un travail, jamais un fichier.
+                // Un clic ouvrait donc systématiquement un 404. Le navigateur sait
+                // déjà produire ce CSV lui-même à partir des données chargées :
+                // même patron que `DataTable`/`telechargerCsv` ailleurs dans
+                // l’appli, pas de fichier fantôme à faire fabriquer par le serveur.
+                appel: () =>
+                  requete('/facturation/consommation/export', {
+                    methode: 'POST',
+                    corps: { periode: periodeConso, format: 'csv', axe: 'famille' },
+                  }).then(() => {
+                    telechargerCsv(
+                      `consommation-${periodeConso}`,
+                      ['Date', 'Montant (FCFA)', 'vCPU-heures'],
+                      joursConso.map((j) => [j.date, j.montant, j.vcpuHeures ?? 0]),
+                    )
+                  }),
               }}
             />
           </GatedAction>
@@ -148,10 +280,12 @@ export default function Facturation() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {ORG_COURANTE.nom}
+              {nomOrg}
             </Badge>
             <Badge tone="neutral" size="sm">
-              Période du 1er au 19 août 2026
+              {consommationDistante
+                ? `Période ${periodeConso} · ${joursConso.length} jour${joursConso.length > 1 ? 's' : ''} relevés`
+                : 'Période du 1er au 19 août 2026'}
             </Badge>
             {impayees.length > 0 && (
               <Badge tone="err" dot size="sm">
@@ -170,6 +304,15 @@ export default function Facturation() {
         </Callout>
       )}
 
+      {degradeConsommation && (
+        <Callout ton="warn" titre="Le comptage de consommation ne répond pas">
+          L’intégration {degradeConsommation.integration ?? 'de comptage'} est indisponible : les
+          montants affichés sont ceux du dernier relevé connu
+          {degradeConsommation.dateDonnees ? `, du ${dateCourte(degradeConsommation.dateDonnees)}` : ''}.
+          Rien n’est perdu, la facture sera établie sur la mesure réelle.
+        </Callout>
+      )}
+
       {impayees.length > 0 && peutVoir && (
         <Callout ton="err" titre={`Une facture de ${money(impayees[0].total)} est en retard`}>
           La facture {impayees[0].numero}
@@ -184,8 +327,12 @@ export default function Facturation() {
         <StatTile
           libelle="Consommé ce mois"
           valeur={masque(money(consommeMois))}
-          detail="Du 1er au 19 août, au prorata"
-          serie={CONSOMMATION_JOURS.map((j) => j.montant)}
+          detail={
+            consommationDistante
+              ? `Du ${dateCourte(joursConso[0]?.date ?? periodeConso)} au ${dateCourte(joursConso[joursConso.length - 1]?.date ?? periodeConso)}, au prorata`
+              : 'Du 1er au 19 août, au prorata'
+          }
+          serie={joursConso.map((j) => j.montant)}
         />
         <StatTile
           libelle="Projection fin de mois"
@@ -195,23 +342,41 @@ export default function Facturation() {
         />
         <StatTile
           libelle="Engagement mensuel"
-          valeur={masque(money(SYNTHESE_CLIENT.depenseMois))}
-          detail={`${SOUSCRIPTIONS.length} souscriptions actives`}
+          // `abonnements` vient déjà du backend en mode API (`useCollection`
+          // plus haut) : sommer les souscriptions réelles plutôt que relire
+          // `SYNTHESE_CLIENT.depenseMois` (mock) évite l’incohérence vue en
+          // direct sur dev01 — « 214 500 FCFA » affiché à côté de « 0
+          // souscriptions actives » pour une organisation qui n’en a aucune.
+          valeur={masque(money(abonnements.reduce((a, s) => a + somme(s), 0)))}
+          detail={`${abonnements.length} souscriptions actives`}
         />
         <StatTile
           libelle="Variation sur 30 jours"
-          valeur={masque(
-            `+ ${pct(
-              Math.round(
-                ((SYNTHESE_CLIENT.depenseMois - SYNTHESE_CLIENT.depenseMoisPrecedent) /
-                  SYNTHESE_CLIENT.depenseMoisPrecedent) *
-                  1000,
-              ) / 10,
-              1,
-            )}`,
-          )}
-          ton="warn"
-          detail="Croissance du stockage objet et d’un nouveau service"
+          // Le backend ne renvoie pas encore de total du mois précédent
+          // (`totalMoisPrecedent` reste à `0` dans `metrologie.consommation`) :
+          // afficher une variation calculée sur le mock en mode API la
+          // ferait passer pour un fait. Masqué plutôt que fabriqué, même
+          // discipline que les autres champs sans contrepartie backend.
+          valeur={
+            consommationDistante
+              ? '—'
+              : masque(
+                  `+ ${pct(
+                    Math.round(
+                      ((SYNTHESE_CLIENT.depenseMois - SYNTHESE_CLIENT.depenseMoisPrecedent) /
+                        SYNTHESE_CLIENT.depenseMoisPrecedent) *
+                        1000,
+                    ) / 10,
+                    1,
+                  )}`,
+                )
+          }
+          ton={consommationDistante ? 'neutral' : 'warn'}
+          detail={
+            consommationDistante
+              ? 'Non disponible : le mois précédent n’est pas encore comparé.'
+              : 'Croissance du stockage objet et d’un nouveau service'
+          }
         />
       </div>
 
@@ -226,18 +391,18 @@ export default function Facturation() {
                 sousTitre="Chaque barre représente une journée. Un pic isolé s’explique généralement par une opération ponctuelle — une restauration, un transfert massif."
               />
               <div className="flex items-end gap-1">
-                {CONSOMMATION_JOURS.map((j) => {
-                  const max = Math.max(...CONSOMMATION_JOURS.map((x) => x.montant))
+                {joursConso.map((j) => {
+                  const max = Math.max(1, ...joursConso.map((x) => x.montant))
                   return (
                     <span
                       key={j.date}
                       className="group relative flex-1"
-                      title={`${dateCourte(j.date)} · ${money(j.montant)} · ${num(j.vcpuHeures)} vCPU-heures`}
+                      title={`${dateCourte(j.date)} · ${money(j.montant)} · ${num(j.vcpuHeures ?? 0)} vCPU-heures`}
                     >
                       <span
                         className={cn(
                           'block rounded-t-sm transition-colors',
-                          j.montant > max * 0.98 ? 'bg-m-600' : 'bg-p-600 group-hover:bg-p-700',
+                          j.montant > max * 0.98 ? 'bg-p-800' : 'bg-p-600 group-hover:bg-p-700',
                         )}
                         style={{ height: `${20 + (j.montant / max) * 120}px` }}
                       />
@@ -245,36 +410,52 @@ export default function Facturation() {
                   )
                 })}
               </div>
-              <div className="mt-2 flex justify-between text-[11px] text-g-500">
-                <span>1er août</span>
-                <span>19 août</span>
+              <div className="mt-2 flex justify-between text-[10.5px] text-g-500">
+                <span>{joursConso[0] ? dateCourte(joursConso[0].date) : '1er août'}</span>
+                <span>
+                  {joursConso[joursConso.length - 1]
+                    ? dateCourte(joursConso[joursConso.length - 1].date)
+                    : '19 août'}
+                </span>
               </div>
               <div className="mt-4 grid grid-cols-1 gap-3 border-t border-g-100 pt-4 sm:grid-cols-4">
                 <div>
                   <MicroLabel className="text-g-500">Moyenne journalière</MicroLabel>
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
-                    {masque(money(Math.round(consommeMois / CONSOMMATION_JOURS.length)))}
+                    {masque(money(Math.round(consommeMois / Math.max(1, joursConso.length))))}
                   </p>
                 </div>
                 <div>
                   <MicroLabel className="text-g-500">Jour le plus coûteux</MicroLabel>
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
-                    {masque(money(Math.max(...CONSOMMATION_JOURS.map((j) => j.montant))))}
+                    {masque(money(Math.max(0, ...joursConso.map((j) => j.montant))))}
                   </p>
-                  <p className="text-[11px] text-g-500">Restauration de test du 19 août</p>
+                  {/* Anecdote propre au jeu de données maquette : n'a aucun sens une fois
+                      les vraies journées de consommation chargées. */}
+                  {!consommationDistante && (
+                    <p className="text-[10.5px] text-g-500">Restauration de test du 19 août</p>
+                  )}
                 </div>
                 <div>
                   <MicroLabel className="text-g-500">vCPU-heures cumulées</MicroLabel>
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
-                    {num(CONSOMMATION_JOURS.reduce((a, j) => a + j.vcpuHeures, 0))}
+                    {num(joursConso.reduce((a, j) => a + (j.vcpuHeures ?? 0), 0))}
                   </p>
                 </div>
                 <div>
-                  <MicroLabel className="text-g-500">Prorata au 19 août</MicroLabel>
+                  <MicroLabel className="text-g-500">
+                    {consommationDistante ? 'Consommé à date' : 'Prorata au 19 août'}
+                  </MicroLabel>
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
-                    {masque(money(prorata(SYNTHESE_CLIENT.depenseMois, 19)))}
+                    {masque(
+                      money(consommationDistante ? consommeMois : prorata(SYNTHESE_CLIENT.depenseMois, 19)),
+                    )}
                   </p>
-                  <p className="text-[11px] text-g-500">Sur 31 jours</p>
+                  <p className="text-[10.5px] text-g-500">
+                    {consommationDistante
+                      ? `Sur ${joursConso.length} jour${joursConso.length > 1 ? 's' : ''} relevés`
+                      : 'Sur 31 jours'}
+                  </p>
                 </div>
               </div>
             </Card>
@@ -282,14 +463,14 @@ export default function Facturation() {
             <Card>
               <CardHeader titre="Ventilation par famille" sousTitre="Mois en cours." />
               <StackedBar
-                segments={VENTILATION_DEPENSE.map((v, i) => ({
+                segments={ventilation.map((v, i) => ({
                   label: v.famille,
                   valeur: v.montant,
                   couleur: COULEURS[i % COULEURS.length],
                 }))}
               />
               <div className="mt-4 space-y-1.5 border-t border-g-100 pt-3.5">
-                {VENTILATION_DEPENSE.map((v, i) => (
+                {ventilation.map((v, i) => (
                   <div key={v.famille} className="flex items-baseline justify-between gap-3">
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span
@@ -325,9 +506,11 @@ export default function Facturation() {
           )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Callout ton="violet" titre="Facturation à la consommation, pas à la réservation">
-              Une machine arrêtée ne paie que son disque. Un compartiment vidé cesse d’être facturé le
-              jour même. Un siège de service managé libéré est décompté au prorata.
+            <Callout ton="violet" titre="Nous facturons ce que vous consommez, pas ce que vous réservez">
+              Une machine arrêtée ne consomme ni processeur ni mémoire : vous ne payez que son disque.
+              Un compartiment vidé cesse d’être facturé le jour même. Un siège de service managé
+              libéré est décompté au prorata. Il n’y a pas de facturation à la réservation dissimulée
+              dans nos grilles.
             </Callout>
             <Callout ton="info" titre="Le transfert sortant est plafonné">
               Au-delà du forfait inclus dans votre offre, le transfert sortant est facturé, mais son
@@ -368,7 +551,7 @@ export default function Facturation() {
                   rendu: (f) => (
                     <span className="flex items-center gap-2">
                       <FileText size={13} className="shrink-0 text-p-700" />
-                      <span className="font-mono text-[13px] font-semibold text-ink">
+                      <span className="font-mono text-[12.5px] font-semibold text-ink">
                         {f.numero}
                       </span>
                     </span>
@@ -398,17 +581,17 @@ export default function Facturation() {
                     f.echeance ? (
                       <span
                         className={cn(
-                          'text-[12px]',
+                          'text-[11.5px]',
                           f.statut === 'impayee' ? 'font-semibold text-err' : 'text-g-700',
                         )}
                       >
                         {dateCourte(f.echeance)}
                         {f.statut === 'impayee' && (
-                          <span className="block text-[11px]">{relatif(f.echeance)}</span>
+                          <span className="block text-[10px]">{relatif(f.echeance, maintenant)}</span>
                         )}
                       </span>
                     ) : (
-                      <span className="text-[12px] text-g-500">—</span>
+                      <span className="text-[11.5px] text-g-500">—</span>
                     ),
                 },
                 {
@@ -427,7 +610,7 @@ export default function Facturation() {
                   aligne: 'right',
                   cle: (f) => f.total,
                   rendu: (f) => (
-                    <span className="tnum text-[13px] font-bold text-ink">
+                    <span className="tnum text-[12.5px] font-bold text-ink">
                       {money(f.total, f.devise)}
                     </span>
                   ),
@@ -448,7 +631,7 @@ export default function Facturation() {
                   cle: (f) => f.moyen ?? '',
                   masquable: true,
                   rendu: (f) => (
-                    <span className="text-[12px] text-g-700">
+                    <span className="text-[11.5px] text-g-700">
                       {f.moyen ? MOYEN_LABEL[f.moyen] : '—'}
                     </span>
                   ),
@@ -471,6 +654,7 @@ export default function Facturation() {
                           ton: 'info',
                           titre: `Facture ${f.numero} téléchargée`,
                           detail: `${money(f.total)} · TVA détaillée séparément`,
+                          appel: () => telechargerPdfFacture(f.id, `${f.numero}.pdf`),
                         }}
                       />
                       {f.statut === 'impayee' && (
@@ -478,9 +662,17 @@ export default function Facturation() {
                           autorise={autorise('payment.update')}
                           message={refus('payment.update')}
                         >
-                          <Button size="sm" variant="secondary" onClick={() => regler(f)}>
-                            Régler
-                          </Button>
+                          <span className="flex items-center gap-1.5">
+                            {estActif() && (
+                              <BoutonPaiementPaystack
+                                factureId={f.id}
+                                onSuccess={() => lesFactures.recharger()}
+                              />
+                            )}
+                            <Button size="sm" variant="secondary" onClick={() => regler(f)}>
+                              Régler
+                            </Button>
+                          </span>
                         </GatedAction>
                       )}
                     </span>
@@ -529,13 +721,13 @@ export default function Facturation() {
                   </tr>
                 </thead>
                 <tbody>
-                  {SOUSCRIPTIONS.map((s) => (
+                  {abonnements.map((s) => (
                     <tr key={s.id} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2.5">
-                        <span className="block text-[13px] font-semibold text-ink">
+                        <span className="block text-[12.5px] font-semibold text-ink">
                           {s.cible.label}
                         </span>
-                        <span className="block font-mono text-[11px] text-g-500">
+                        <span className="block font-mono text-[10.5px] text-g-500">
                           {s.cible.ref}
                         </span>
                       </td>
@@ -553,13 +745,14 @@ export default function Facturation() {
                       <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
                         {masque(money(s.prixApplique))}
                       </td>
-                      <td className="tnum px-3 py-2.5 text-[13px] font-bold text-ink">
+                      <td className="tnum px-3 py-2.5 text-[12.5px] font-bold text-ink">
                         {masque(money(somme(s)))}
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                         {dateCourte(s.debut)}
                       </td>
                       <td className="px-3 py-2.5 text-right">
+                        <span className="flex items-center justify-end gap-1.5">
                         <BoutonFormulaire
                           libelle="Modifier"
                           variant="ghost"
@@ -580,16 +773,61 @@ export default function Facturation() {
                             },
                           ]}
                           valeursDepart={{ quantite: s.quantite, periodicite: s.periodicite }}
+                          complement={(v) => (
+                            <EstimationModification
+                              cible={s.cible}
+                              prixApplique={s.prixApplique}
+                              quantite={Number(v.quantite) || s.quantite}
+                              periodicite={
+                                String(v.periodicite) === 'annuelle' ? 'annuelle' : 'mensuelle'
+                              }
+                            />
+                          )}
                           operation={(v) => ({
                             titre: `Souscription ${s.cible.label} modifiée`,
                             detail: `${v.quantite} × ${money(s.prixApplique)} · ${v.periodicite === 'annuelle' ? 'annuelle' : 'mensuelle'}`,
+                            appel: () =>
+                              modifierRessource('/facturation/souscriptions', s.id, {
+                                quantite: Number(v.quantite),
+                                periodicite: v.periodicite,
+                              }),
                             effet: () =>
                               souscriptions.modifier(s.id, {
                                 quantite: Number(v.quantite),
                                 periodicite: v.periodicite as Subscription['periodicite'],
                               }),
+                            effetFinal: () => souscriptions.recharger(),
                           })}
                         />
+                        <BoutonAction
+                          libelle="Résilier"
+                          variant="ghost"
+                          confirmation={{
+                            ressource: s.cible.label,
+                            titre: `Résilier ${s.cible.label} ?`,
+                            pertes: [
+                              'La facturation cesse à la fin du mois en cours',
+                              'Les ressources liées sont libérées à l’échéance',
+                              'L’historique de consommation reste consultable',
+                            ],
+                            libelleAction: 'Résilier',
+                          }}
+                          operation={{
+                            action: 'payment.update',
+                            ton: 'warn',
+                            titre: `Souscription ${s.cible.label} résiliée`,
+                            detail: 'Fin d’effet à la prochaine échéance.',
+                            appel: () =>
+                              supprimerRessource(
+                                '/facturation/souscriptions',
+                                s.id,
+                                s.cible.label,
+                              ),
+                            effet: () => souscriptions.supprimer(s.id),
+                            effetFinal: () => souscriptions.recharger(),
+                          }}
+                        />
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -600,7 +838,7 @@ export default function Facturation() {
                       Engagement mensuel total
                     </td>
                     <td className="tnum px-3 py-2.5 text-[14px] font-bold text-p-700">
-                      {masque(money(SOUSCRIPTIONS.reduce((a, s) => a + somme(s), 0)))}
+                      {masque(money(abonnements.reduce((a, s) => a + somme(s), 0)))}
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -616,7 +854,7 @@ export default function Facturation() {
                 sousTitre="15 % de remise sur les lignes d’abonnement, à périmètre identique."
               />
               <div className="space-y-2">
-                {SOUSCRIPTIONS.filter((s) => s.periodicite === 'mensuelle').map((s) => {
+                {abonnements.filter((s) => s.periodicite === 'mensuelle').map((s) => {
                   const economie = Math.round(somme(s) * 12 * 0.15)
                   return (
                     <div
@@ -624,7 +862,7 @@ export default function Facturation() {
                       className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                     >
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold text-ink">
+                        <span className="block text-[12.5px] font-semibold text-ink">
                           {s.cible.label}
                         </span>
                         <span className="block text-[11px] text-g-500">
@@ -632,7 +870,7 @@ export default function Facturation() {
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className="tnum text-[13px] font-bold text-ok">
+                        <span className="tnum text-[12.5px] font-bold text-ok">
                           − {masque(money(economie))}/an
                         </span>
                         <BoutonAction
@@ -642,7 +880,12 @@ export default function Facturation() {
                             action: 'payment.update',
                             titre: `${s.cible.label} passe à l’engagement annuel`,
                             detail: `${masque(money(economie))} économisés sur douze mois. Une réduction de périmètre en cours d’année est ajustée à la baisse.`,
+                            appel: () =>
+                              modifierRessource('/facturation/souscriptions', s.id, {
+                                periodicite: 'annuelle',
+                              }),
                             effet: () => souscriptions.modifier(s.id, { periodicite: 'annuelle' }),
+                            effetFinal: () => souscriptions.recharger(),
                           }}
                         />
                       </span>
@@ -660,10 +903,10 @@ export default function Facturation() {
             <Card>
               <CardHeader titre="Offres du catalogue" sousTitre="Ce qui pourrait compléter votre périmètre." />
               <div className="space-y-2">
-                {OFFRES.filter(
+                {offresReelles.items.filter(
                   (o) =>
                     o.statut === 'publiee' &&
-                    !SOUSCRIPTIONS.some((s) => s.cible.ref === o.id) &&
+                    !abonnements.some((s) => s.cible.ref === o.id) &&
                     !o.surDevis,
                 )
                   .slice(0, 6)
@@ -673,7 +916,7 @@ export default function Facturation() {
                       className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                     >
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold text-ink">{o.nom}</span>
+                        <span className="block text-[12.5px] font-semibold text-ink">{o.nom}</span>
                         <span className="block text-[11px] text-g-500">{o.specs}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
@@ -694,9 +937,10 @@ export default function Facturation() {
 
       {onglet === 'repartition' && (
         <div className="space-y-4">
-          <Callout ton="violet" titre="Ventilation par étiquette">
-            La répartition suit vos étiquettes — centre de coût, projet, environnement — et se calcule
-            à partir de celles que porte chaque ressource. Rien à reconstituer à la main.
+          <Callout ton="violet" titre="Refacturer en interne, sans y passer une journée">
+            La répartition suit vos étiquettes : centre de coût, projet, environnement. Chaque
+            ressource porte les siennes, la ventilation se calcule seule. C’est la différence entre
+            une refacturation interne réelle et un tableau reconstitué à la main tous les trimestres.
           </Callout>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -705,7 +949,11 @@ export default function Facturation() {
                 titre="Par Espace Cloud"
                 sousTitre="Calcul, stockage et sauvegardes de chaque espace."
               />
-              <BarresShowback lignes={SHOWBACK_ESPACES} couleur="bg-p-600" peutVoir={peutVoir} />
+              <BarresShowback
+                lignes={ventilationEspaces?.lignes ?? SHOWBACK_ESPACES}
+                couleur="bg-p-600"
+                peutVoir={peutVoir}
+              />
             </Card>
 
             <Card>
@@ -714,8 +962,8 @@ export default function Facturation() {
                 sousTitre="Environnements, composants, registre et transfert sortant."
               />
               <BarresShowback
-                lignes={SHOWBACK_APPLICATIONS}
-                couleur="bg-m-600"
+                lignes={ventilationApplications?.lignes ?? SHOWBACK_APPLICATIONS}
+                couleur="bg-p-400"
                 peutVoir={peutVoir}
               />
             </Card>
@@ -819,7 +1067,7 @@ export default function Facturation() {
               sousTitre="Nous acceptons les moyens réellement utilisés en Afrique de l’Ouest, pas seulement la carte internationale."
             />
             <div className="space-y-2">
-              {moyens.items.map((m) => (
+              {moyensNorm.map((m) => (
                 <div
                   key={m.id}
                   className={cn(
@@ -836,7 +1084,7 @@ export default function Facturation() {
                       )}
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-[13px] font-semibold text-ink">
+                      <span className="block text-[12.5px] font-semibold text-ink">
                         {MOYEN_LABEL[m.moyen]}
                       </span>
                       <span className="block font-mono text-[11px] text-g-500">{m.detail}</span>
@@ -855,28 +1103,35 @@ export default function Facturation() {
                           action: 'payment.update',
                           titre: `${MOYEN_LABEL[m.moyen]} devient le moyen principal`,
                           detail: 'Les prochains prélèvements passeront par ce moyen.',
+                          appel: () =>
+                            modifierRessource('/facturation/moyens-paiement', m.id, { defaut: true }),
                           effet: () =>
                             moyens.modifierPlusieurs(
-                              moyens.items.map((x) => x.id),
+                              moyensNorm.map((x) => x.id),
                               (x) => ({ principal: x.id === m.id }),
                             ),
+                          effetFinal: () => moyens.recharger(),
                         }}
                       />
                     )}
-                    <BoutonAction
-                      libelle="Retirer"
-                      variant="ghost"
-                      desactive={m.principal && moyens.items.length > 1}
-                      operation={{
-                        action: 'payment.update',
-                        ton: 'warn',
-                        titre: `${MOYEN_LABEL[m.moyen]} retiré`,
-                        detail: m.principal
-                          ? 'Aucun moyen principal : les factures devront être réglées manuellement.'
-                          : undefined,
-                        effet: () => moyens.supprimer(m.id),
-                      }}
-                    />
+                      <BoutonAction
+                        libelle="Retirer"
+                        variant="ghost"
+                        desactive={m.principal && moyensNorm.length > 1}
+                        operation={{
+                          action: 'payment.update',
+                          ton: 'warn',
+                          titre: `${MOYEN_LABEL[m.moyen]} retiré`,
+                          detail: m.principal
+                            ? 'Aucun moyen principal : les factures devront être réglées manuellement.'
+                            : undefined,
+                          // `DELETE /facturation/moyens-paiement/{id}` → `204`,
+                          // sans confirmation : l’identifiant suffit.
+                          appel: () => supprimerRessource('/facturation/moyens-paiement', m.id),
+                          effet: () => moyens.supprimer(m.id),
+                          effetFinal: () => moyens.recharger(),
+                        }}
+                      />
                   </span>
                 </div>
               ))}
@@ -909,10 +1164,16 @@ export default function Facturation() {
               operation={(v) => ({
                 titre: `${MOYEN_LABEL[v.moyen as MoyenPaiement]} ajouté`,
                 detail: v.principal ? 'Défini comme moyen principal.' : undefined,
+                appel: () =>
+                  creerRessource('/facturation/moyens-paiement', {
+                    type: v.moyen,
+                    numero: String(v.reference),
+                    defaut: Boolean(v.principal),
+                  }),
                 effet: () => {
                   if (v.principal)
                     moyens.modifierPlusieurs(
-                      moyens.items.map((x) => x.id),
+                      moyensNorm.map((x) => x.id),
                       { principal: false },
                     )
                   moyens.creer({
@@ -922,6 +1183,7 @@ export default function Facturation() {
                     principal: Boolean(v.principal),
                   })
                 },
+                effetFinal: () => moyens.recharger(),
               })}
             />
             <Callout ton="info" className="mt-4" titre="Ce que nous ne stockons pas">
@@ -947,8 +1209,10 @@ export default function Facturation() {
                 ]}
               />
               <Callout ton="violet" className="mt-4" titre="Notre politique de suspension">
-                Aucune suspension avant un rappel écrit et quinze jours supplémentaires, et un
-                échelonnement est proposé à chaque fois. La décision est humaine et consignée.
+                Couper un service pour un retard de paiement de trois jours cause un dommage
+                disproportionné à un client dont la trésorerie est simplement tendue. Nous
+                n’intervenons qu’après un rappel écrit et un délai de quinze jours, et nous préférons
+                toujours discuter d’un échelonnement.
               </Callout>
             </Card>
 
@@ -964,7 +1228,7 @@ export default function Facturation() {
                     >
                       <span className="min-w-0">
                         <span className="font-mono text-[12px] text-ink">{f.numero}</span>
-                        <span className="ml-2 text-[11px] text-g-500">
+                        <span className="ml-2 text-[10.5px] text-g-500">
                           {f.moyen ? MOYEN_LABEL[f.moyen] : '—'} · {f.periode}
                         </span>
                       </span>
@@ -1003,19 +1267,19 @@ export default function Facturation() {
                   </tr>
                 </thead>
                 <tbody>
-                  {DEVIS.map((d) => (
+                  {devisVisibles.map((d) => (
                     <tr key={d.id} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2.5 font-mono text-[12px] font-semibold text-ink">
                         {d.numero}
                       </td>
                       <td className="px-3 py-2.5 text-[12px] text-ink">{d.objet}</td>
-                      <td className="tnum px-3 py-2.5 text-[13px] font-bold text-ink">
+                      <td className="tnum px-3 py-2.5 text-[12.5px] font-bold text-ink">
                         {masque(money(d.montant))}
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                         {dateCourte(d.createdAt)}
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                         {dateCourte(d.validite)}
                       </td>
                       <td className="px-3 py-2.5">
@@ -1047,11 +1311,29 @@ export default function Facturation() {
                             libelle="PDF"
                             variant="ghost"
                             icone={<Download size={12} />}
+                            // En mode API, un devis sans `pdfUrl` (le backend n'édite
+                            // jamais ce champ pour l'instant, aucun devis réel n'en
+                            // porte) désactive le bouton plutôt que de faire croire à
+                            // un téléchargement : sans `appel`, `useOperation` retombe
+                            // sur le chemin simulé et affiche quand même une
+                            // notification de succès, sans rien produire.
+                            desactive={enApi && !d.pdfUrl}
+                            nomAccessible={
+                              enApi && !d.pdfUrl
+                                ? 'PDF non disponible pour ce devis : demandez-le à votre contact commercial'
+                                : undefined
+                            }
                             operation={{
                               action: 'invoice.view',
                               ton: 'info',
                               titre: 'Devis téléchargé',
                               detail: `${d.numero} · valable jusqu’au ${dateCourte(d.validite)}`,
+                              appel: d.pdfUrl
+                                ? () => {
+                                    window.open(d.pdfUrl, '_blank', 'noopener')
+                                    return Promise.resolve()
+                                  }
+                                : undefined,
                             }}
                           />
                           {d.statut === 'envoye' && (
@@ -1068,6 +1350,17 @@ export default function Facturation() {
                                     titre: `Devis ${d.numero} accepté`,
                                     detail:
                                       'Les souscriptions correspondantes sont créées et le provisionnement démarre.',
+                                    appel: () =>
+                                      requete(
+                                        `/facturation/devis/${encodeURIComponent(d.id)}/acceptation`,
+                                        { methode: 'POST', corps: {} },
+                                      ),
+                                    effet: () =>
+                                      lesDevis.modifier(d.id, { statut: 'accepte' }),
+                                    effetFinal: () => {
+                                      lesDevis.recharger()
+                                      souscriptions.recharger()
+                                    },
                                     job: { workflow: 'devis.accept', cible: d.numero },
                                   })
                                 }
@@ -1148,6 +1441,7 @@ export default function Facturation() {
                   ton: 'info',
                   titre: `Facture ${detail.numero} téléchargée`,
                   detail: `${money(detail.total)} · exemplaire opposable, horodaté`,
+                  appel: () => telechargerPdfFacture(detail.id, `${detail.numero}.pdf`),
                 }}
               />
               <BoutonAction
@@ -1160,6 +1454,19 @@ export default function Facturation() {
                   ton: 'info',
                   titre: 'Détail des lignes exporté',
                   detail: `${detail.lignes.length} ligne(s), avec l’étiquette de répartition de chacune.`,
+                  // Même bug que « Exporter la période » (commit 73ef40c) : sans `appel`,
+                  // le bouton n'affichait qu'une notification de succès sans jamais rien
+                  // produire — aucune donnée à faire fabriquer par le serveur pour un
+                  // fichier que le navigateur sait déjà générer depuis les lignes déjà
+                  // chargées.
+                  appel: () => {
+                    telechargerCsv(
+                      `${detail.numero}-lignes`,
+                      ['Ligne', 'Référence', 'Quantité', 'Prix unitaire (FCFA)', 'Montant HT (FCFA)'],
+                      detail.lignes.map((l) => [l.libelle, l.ref, l.quantite, l.pu, l.total]),
+                    )
+                    return Promise.resolve()
+                  },
                 }}
               />
               {detail.statut === 'impayee' && (
@@ -1201,7 +1508,7 @@ function TableLignes({ facture, peutVoir }: { facture: Invoice; peutVoir: boolea
           {facture.lignes.map((l, i) => (
             <tr key={`${l.ref}-${i}`} className="border-b border-g-100 last:border-0">
               <td className="px-3 py-2 text-[12px] text-ink">{l.libelle}</td>
-              <td className="px-3 py-2 font-mono text-[11px] text-g-500">{l.ref}</td>
+              <td className="px-3 py-2 font-mono text-[10.5px] text-g-500">{l.ref}</td>
               <td className="tnum px-3 py-2 text-[12px] text-g-700">{num(l.quantite)}</td>
               <td className="tnum px-3 py-2 text-[12px] text-g-700">
                 {masque(money(l.pu, facture.devise))}
@@ -1243,8 +1550,88 @@ function TableLignes({ facture, peutVoir }: { facture: Invoice; peutVoir: boolea
   )
 }
 
-function BarresShowback({
-  lignes,
+/**
+ * Aperçu de coût d’une modification de souscription, exigé avant validation.
+ * En mode API, les sièges de service managé sont chiffrés par le backend
+ * (`POST /facturation/estimation`, barème de sièges) ; le reste — offres dont
+ * le backend ne connaît pas le prix — garde le calcul local (quantité × prix
+ * appliqué, −15 % en annuel). Toute erreur distante retombe sur le local, sans
+ * bruit : l’estimation ne doit jamais bloquer la saisie.
+ */
+function EstimationModification({
+  cible,
+  prixApplique,
+  quantite,
+  periodicite,
+}: {
+  cible: Subscription['cible']
+  prixApplique: number
+  quantite: number
+  periodicite: 'mensuelle' | 'annuelle'
+}) {
+  const [totalDistant, setTotalDistant] = useState<number | null>(null)
+  useEffect(() => {
+    if (!estActif() || cible.type !== 'service') {
+      setTotalDistant(null)
+      return
+    }
+    let annule = false
+    const minuteur = setTimeout(() => {
+      requete<{ totalMensuel: number }>('/facturation/estimation', {
+        methode: 'POST',
+        corps: {
+          type: 'siege',
+          quantite,
+          periodicite,
+          specification: { nom: cible.label },
+        },
+      }).then(
+        (r) => {
+          if (!annule) setTotalDistant(r.totalMensuel)
+        },
+        () => {
+          if (!annule) setTotalDistant(null)
+        },
+      )
+    }, 400)
+    return () => {
+      annule = true
+      clearTimeout(minuteur)
+    }
+  }, [cible.label, cible.type, quantite, periodicite])
+
+  const mensuelLocal = quantite * prixApplique
+  // Le total distant est déjà TTC (barème plateforme) : il ne repasse pas par
+  // `CostPreview`, qui raisonne hors taxes et ajouterait la TVA une seconde fois.
+  if (totalDistant !== null) {
+    return (
+      <div className="rounded-[8px] border border-p-300 bg-p-050 px-4 py-3">
+        <p className="type-micro text-p-700">Impact estimé par la plateforme</p>
+        <p className="tnum mt-1 text-[15px] font-bold text-ink">
+          {money(totalDistant)}
+          <span className="ml-1.5 text-[11px] font-normal text-g-500">
+            / mois · {cible.label} × {quantite}
+          </span>
+        </p>
+      </div>
+    )
+  }
+  return (
+    <CostPreview
+      lignes={[
+        {
+          libelle: cible.label,
+          detail: 'Quantité × prix appliqué, −15 % en annuel',
+          montant: mensuelLocal,
+          quantite,
+        },
+      ]}
+      periodicite={periodicite}
+    />
+  )
+}
+
+function BarresShowback({  lignes,
   couleur,
   peutVoir,
 }: {
@@ -1261,7 +1648,7 @@ function BarresShowback({
             <span className="min-w-0 truncate font-mono text-[12px] font-semibold text-ink">
               {l.label}
             </span>
-            <span className="tnum shrink-0 text-[13px]">
+            <span className="tnum shrink-0 text-[12.5px]">
               <span className="font-bold text-ink">{peutVoir ? money(l.montant) : '•••'}</span>
               <span className="ml-1.5 text-g-500">{pct(l.pct, 1)}</span>
             </span>

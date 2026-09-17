@@ -16,6 +16,7 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'apercu', label: 'Vue d’ensemble' },
@@ -259,8 +260,19 @@ export function VueApplication({ id }: { id: string }) {
                     action: 'service.admin',
                     titre: 'Mise à jour programmée',
                     detail: 'Sauvegarde prise, application dans la prochaine fenêtre de maintenance.',
+                    appel: () =>
+                      requete(`/web/sites/${encodeURIComponent(s.id)}/mise-a-jour`, {
+                        methode: 'POST',
+                        corps: { coeur: true, extensions: true, themes: true, instantaneAvant: true },
+                      }),
                     job: { workflow: 'web.app.update', cible: s.hote },
-                    effetFinal: () => sites.modifier(s.id, { majEnAttente: 0 }),
+                    effetFinal: () => {
+                      if (estActif()) {
+                        sites.recharger()
+                        return
+                      }
+                      sites.modifier(s.id, { majEnAttente: 0 })
+                    },
                   })
                 }
               >
@@ -301,18 +313,28 @@ export function VueApplication({ id }: { id: string }) {
                       ton: 'info',
                       titre: 'Resynchronisation lancée',
                       detail: 'La préproduction est écrasée par la production ; l’inverse n’arrive jamais tout seul.',
+                      appel: () =>
+                        requete(`/web/sites/${encodeURIComponent(s.id)}/preproduction`, {
+                          methode: 'POST',
+                          corps: { copierBase: true },
+                        }),
                       job: {
                         type: 'site.staging.sync',
                         label: `Resynchronisation · ${s.preproduction?.hote ?? s.hote}`,
                         etapes: ['Copier les fichiers', 'Copier la base', 'Réécrire les URL'],
                         dureeEtapeMs: 1100,
                       },
-                      effetFinal: () =>
+                      effetFinal: () => {
+                        if (estActif()) {
+                          sites.recharger()
+                          return
+                        }
                         sites.modifier(s.id, (x) => ({
                           preproduction: x.preproduction
                             ? { ...x.preproduction, derniereSync: MAINTENANT.slice(0, 10) }
                             : undefined,
-                        })),
+                        }))
+                      },
                     }}
                   />
                   <BoutonAction
@@ -350,6 +372,11 @@ export function VueApplication({ id }: { id: string }) {
                     action: 'service.admin',
                     titre: 'Préproduction en création',
                     detail: 'Clone des fichiers et de la base, exclu des moteurs de recherche.',
+                    appel: () =>
+                      requete(`/web/sites/${encodeURIComponent(s.id)}/preproduction`, {
+                        methode: 'POST',
+                        corps: { copierBase: true },
+                      }),
                     job: {
                       type: 'site.staging.create',
                       label: `Préproduction · ${s.hote}`,
@@ -361,14 +388,19 @@ export function VueApplication({ id }: { id: string }) {
                       ],
                       dureeEtapeMs: 1100,
                     },
-                    effetFinal: () =>
+                    effetFinal: () => {
+                      if (estActif()) {
+                        sites.recharger()
+                        return
+                      }
                       sites.modifier(s.id, {
                         preproduction: {
                           actif: true,
                           hote: `staging-${s.hote}`,
                           derniereSync: MAINTENANT.slice(0, 10),
                         },
-                      }),
+                      })
+                    },
                   }}
                 />
               </>
@@ -422,6 +454,14 @@ export function VueApplication({ id }: { id: string }) {
                   v.portee === 'tout'
                     ? 'La base de production sera écrasée : commandes et commentaires récents seront perdus.'
                     : 'Thème, extensions et code seulement. La base de production reste intacte.',
+                // La mise en production écrase la production : le backend exige
+                // la confirmation par le nom du site, saisie dans le dialogue.
+                appel: () =>
+                  requete(`/web/sites/${encodeURIComponent(s.id)}/mise-en-production`, {
+                    methode: 'POST',
+                    query: { confirmation: s.hote },
+                    corps: { inclureBase: v.portee === 'tout' },
+                  }),
                 job: {
                   type: 'site.publish',
                   label: `Publication · ${s.hote}`,
@@ -433,6 +473,7 @@ export function VueApplication({ id }: { id: string }) {
                     'Vérifier que le site répond',
                   ],
                 },
+                effetFinal: () => sites.recharger(),
               })}
             />
           </Card>
@@ -478,6 +519,21 @@ export function VueApplication({ id }: { id: string }) {
                 </div>
               ))}
             </div>
+            <BoutonAction
+              libelle="Lancer une analyse de sécurité"
+              className="mt-3"
+              operation={{
+                action: 'service.admin',
+                ton: 'info',
+                titre: 'Analyse de sécurité lancée',
+                detail: 'Le rapport arrive dans les notifications et dans le centre de tâches.',
+                appel: () =>
+                  requete(`/web/sites/${encodeURIComponent(s.id)}/analyse-securite`, {
+                    methode: 'POST',
+                  }),
+                effetFinal: () => sites.recharger(),
+              }}
+            />
           </Card>
 
           <Card>

@@ -10,7 +10,7 @@ export type ButtonVariant =
   | 'accent'
   | 'inverse'
   | 'ghostInverse'
-export type ButtonSize = 'sm' | 'md' | 'lg'
+export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl'
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
@@ -40,6 +40,8 @@ const SIZES: Record<ButtonSize, string> = {
   sm: 'h-8 px-3 text-[13px] gap-1.5',
   md: 'h-9 px-4 text-[13px] gap-2',
   lg: 'h-11 px-6 text-[14px] gap-2',
+  /** Grand appel à l'action — héros de la vitrine, uniquement. */
+  xl: 'h-[52px] px-7 text-[15px] gap-2',
 }
 
 const BASE =

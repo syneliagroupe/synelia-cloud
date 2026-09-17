@@ -79,7 +79,7 @@ const domaines = fusion(
         id: 'verifierDisponibiliteDomaine',
         resume: 'Vérifier la disponibilité d’un nom',
         params: [
-          filtre('nom', chaine(), 'Nom complet avec son extension.'),
+          filtre('nom', chaine(), 'Nom complet avec son extension.', true),
           filtre('extensions', chaine(), 'Extensions supplémentaires à tester, séparées par des virgules.'),
         ],
         ok: ref('DisponibiliteDomaine'),
@@ -500,7 +500,7 @@ const sitesWeb = fusion(
         ok: ref('TravailProvisioning'),
         code: 202,
         rbac: 'service.admin',
-        erreurs: [409, 402],
+        erreurs: [409, 402, 404],
       }),
     },
     '/web/sites/{siteId}': {
@@ -779,6 +779,18 @@ const emails = fusion(
         ok: ref('Messagerie'),
         rbac: 'service.admin',
       }),
+      delete: op({
+        tag: T_MAIL,
+        id: 'supprimerMessagerie',
+        resume: 'Supprimer une messagerie',
+        detail: 'Action destructive : le domaine Zimbra et ses boîtes sont détruits ; le nom exact de la ressource est exigé en confirmation.',
+        params: [chemin('messagerieId', 'Identifiant de la messagerie.', 'mail-dba-africa')],
+        ok: ref('TravailProvisioning'),
+        code: 202,
+        destructif: true,
+        rbac: 'marketplace.subscribe',
+        erreurs: [409],
+      }),
     },
     '/web/emails/{messagerieId}/boites': {
       post: op({
@@ -925,6 +937,18 @@ const drive = fusion(
         }),
         ok: ref('Drive'),
         rbac: 'service.admin',
+      }),
+      delete: op({
+        tag: T_DRIVE,
+        id: 'desactiverDrive',
+        resume: 'Désactiver le drive d’un domaine',
+        detail: 'Action destructive : le serveur Nextcloud est détruit ; le nom exact de la ressource est exigé en confirmation.',
+        params: [chemin('driveId', 'Identifiant du drive.', 'drive-dba-africa')],
+        ok: ref('TravailProvisioning'),
+        code: 202,
+        destructif: true,
+        rbac: 'service.admin',
+        erreurs: [409],
       }),
     },
     '/web/drive/{driveId}/sieges': {

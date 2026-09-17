@@ -1,12 +1,13 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Copy, Layers, Plus, Server, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, num } from '@/lib/format'
-import { BACKUP_PLANS, ESPACES, SECURITY_GROUPS, PUBLIC_IPS, LOAD_BALANCERS, VMS } from '@/lib/mock'
-import type { EspaceCloud, VM } from '@/lib/types'
+import { BACKUP_PLANS, ESPACES, NETWORKS, SECURITY_GROUPS, PUBLIC_IPS, LOAD_BALANCERS, VMS } from '@/lib/mock'
+import type { EspaceCloud, LoadBalancer, Network, PublicIP, SecurityGroup, VM } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import {
@@ -20,9 +21,12 @@ import {
   Switch,
 } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { CostPreview, WizardShell } from '@/components/composition/flow'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
+import { useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
 
 const ETAPES = [
   { numero: 1, titre: 'Mode' },
@@ -94,7 +98,32 @@ export default function NouvellesVms() {
   const espaceCourant = useEspace()
   const parc = useCollection<VM>('vms', VMS)
   const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
+  // Étape « Réseau » : les quatre sélecteurs lisaient jusqu'ici des graines de
+  // maquette (`SECURITY_GROUPS`/`PUBLIC_IPS`/`LOAD_BALANCERS` importés tels
+  // quels, `reseau` sur une liste de valeurs en dur) même en mode API, alors
+  // que `/app/reseau` prouve que ces quatre collections sont réellement
+  // provisionnées sur Neutron (`reseaux`, `ips`, `groupes-securite`,
+  // `load-balancers`, toutes dans le registre `collections.ts`).
+  const reseauxCollection = useCollection<Network>('reseaux', NETWORKS)
+  const ipsCollection = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  const groupesCollection = useCollection<SecurityGroup>('groupes-securite', SECURITY_GROUPS)
+  const lbCollection = useCollection<LoadBalancer>('load-balancers', LOAD_BALANCERS)
+  // `GET /catalogue/gabarits` est le même catalogue que `/tarifs` publie
+  // (`familles_tarifs()` le dérive des mêmes `GABARITS` OpenStack côté
+  // backend) : on l'utilise ici pour que le prix affiché dans l'assistant
+  // ne contredise jamais celui de la vitrine.
+  const [gabaritsReels, setGabaritsReels] = useState<
+    Array<{ vcpu: number; ramGo: number; prixMensuel: number }>
+  >([])
+  useEffect(() => {
+    if (!estActif()) return
+    requete<Array<{ vcpu: number; ramGo: number; prixMensuel: number }>>('/catalogue/gabarits').then(
+      setGabaritsReels,
+      () => {},
+    )
+  }, [])
   const { lancerJob } = useAtelier()
+  const executer = useOperation()
 
   const [etape, setEtape] = useState(1)
   const [mode, setMode] = useState<'identique' | 'differencie'>('identique')
@@ -116,9 +145,9 @@ export default function NouvellesVms() {
     { id: 'l2', nom: 'db-01', vcpu: 8, ram: 32, disk: 500, image: 'debian-12' },
   ])
 
-  const [reseau, setReseau] = useState('prod-front')
+  const [reseau, setReseau] = useState('')
   const [ipPublique, setIpPublique] = useState(false)
-  const [sg, setSg] = useState('sg-2')
+  const [sg, setSg] = useState('')
   const [lb, setLb] = useState('')
 
   const [cloudInit, setCloudInit] = useState(CLOUD_INIT_DEFAUT)
@@ -129,8 +158,71 @@ export default function NouvellesVms() {
 
   const images = sourceImage === 'synelia' ? IMAGES_SYNELIA : IMAGES_PRIVEES
   const imageChoisie = [...IMAGES_SYNELIA, ...IMAGES_PRIVEES].find((i) => i.id === image)
-  const flavorChoisi = FLAVORS.find((f) => f.id === flavor)!
-  const espace = espaces.items.find((e) => e.id === espaceId)!
+  // Les gabarits (vCPU/RAM/disque) restent ceux de la maquette — le choix
+  // visuel ne correspond de toute façon pas au gabarit réel provisionné
+  // (voir le commentaire plus bas sur `creerLeLot`) — mais le tarif affiché
+  // vient du catalogue réel (`/catalogue/gabarits`) quand il a chargé, pour
+  // ne plus contredire `/tarifs`.
+  const prixReel = (vcpu: number) => {
+    if (gabaritsReels.length === 0) return undefined
+    const proche = gabaritsReels.reduce((best, g) =>
+      Math.abs(g.vcpu - vcpu) < Math.abs(best.vcpu - vcpu) ? g : best,
+    )
+    return proche.prixMensuel
+  }
+  const FLAVORS_AFFICHES = FLAVORS.map((f) => ({ ...f, prix: prixReel(f.vcpu) ?? f.prix }))
+  const flavorChoisi = FLAVORS_AFFICHES.find((f) => f.id === flavor)!
+  // L’espace choisi peut ne plus figurer dans la liste (supprimé pendant la
+  // session, autre organisation) : on retombe sur le premier au lieu de
+  // planter sur `espace.usage`.
+  const espace = espaces.items.find((e) => e.id === espaceId) ?? espaces.items[0]
+
+  // Périmètre de l'étape Réseau : les quatre collections filtrées à l'espace
+  // choisi, sur le même motif que `/app/reseau` (`n.espaceId === espace.id`).
+  const reseauxEspace = useMemo(
+    () => reseauxCollection.items.filter((n) => n.espaceId === espace?.id),
+    [reseauxCollection.items, espace?.id],
+  )
+  const ipsEspace = useMemo(
+    () => ipsCollection.items.filter((i) => i.espaceId === espace?.id),
+    [ipsCollection.items, espace?.id],
+  )
+  const groupesEspace = useMemo(
+    () => groupesCollection.items.filter((s) => s.espaceId === espace?.id),
+    [groupesCollection.items, espace?.id],
+  )
+  const lbEspace = useMemo(
+    () => lbCollection.items.filter((l) => l.espaceId === espace?.id),
+    [lbCollection.items, espace?.id],
+  )
+  const ipsDisponibles = ipsEspace.filter((i) => !i.attachedTo).length
+
+  // `reseau`/`sg` par défaut pointaient sur des identifiants de maquette
+  // (`prod-front`, `sg-2`) qui n'existent jamais dans le vrai dépôt — resync
+  // sur la vraie liste dès qu'elle charge (mode API) ou change (changement
+  // d'espace), même motif que `offerId` dans `espaces/new`. Un changement
+  // d'espace invalide le choix précédent, qu'on ne veut pas garder muet.
+  // Le garde `length === 0 → return` d'origine laissait une valeur de
+  // maquette (`net-1`/`sg-1`, capturée pendant l'instant où `reseauxEspace`/
+  // `groupesEspace` valaient encore la graine, avant la première réponse
+  // réelle) survivre telle quelle quand l'Espace n'a en fait aucun réseau ou
+  // groupe réel — l'écran affichait alors « Aucun réseau privé dans… » (donc
+  // aucun sélecteur pour la corriger) tout en envoyant ce vieil identifiant à
+  // Nova, qui le rejette (`{'uuid': 'net-1'} is not valid`) — trouvé en testant
+  // une création réelle en direct sur dev01. Invalider dans tous les cas,
+  // vide y compris, pas seulement quand la liste réelle est non vide.
+  useEffect(() => {
+    if (!reseauxEspace.some((n) => n.id === reseau)) setReseau(reseauxEspace[0]?.id ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reseauxEspace])
+  useEffect(() => {
+    if (!groupesEspace.some((s) => s.id === sg)) setSg(groupesEspace[0]?.id ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupesEspace])
+  useEffect(() => {
+    if (lb && !lbEspace.some((l) => l.id === lb)) setLb('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lbEspace])
 
   const machinesACreer = useMemo(() => {
     if (mode === 'differencie') {
@@ -160,8 +252,8 @@ export default function NouvellesVms() {
 
   const coutCalcul = machinesACreer.reduce((a, m) => {
     const proche =
-      FLAVORS.find((f) => f.vcpu === m.vcpu && f.ram === m.ram) ??
-      FLAVORS.reduce((best, f) =>
+      FLAVORS_AFFICHES.find((f) => f.vcpu === m.vcpu && f.ram === m.ram) ??
+      FLAVORS_AFFICHES.reduce((best, f) =>
         Math.abs(f.vcpu - m.vcpu) < Math.abs(best.vcpu - m.vcpu) ? f : best,
       )
     return a + Math.round((proche.prix * m.vcpu) / proche.vcpu)
@@ -197,10 +289,21 @@ export default function NouvellesVms() {
   ]
 
   const quotaSuffisant =
+    espace !== undefined &&
     espace.usage.vcpu + totalVcpu <= espace.quota.vcpu &&
     espace.usage.ramGo + totalRam <= espace.quota.ramGo
 
   const peutContinuer = etape === 6 ? conditions && quotaSuffisant : true
+
+  if (!espace) {
+    return (
+      <EmptyState
+        titre="Aucun Espace Cloud disponible"
+        phrase="Créez d’abord un Espace Cloud : c’est l’enveloppe de quota dans laquelle naissent les machines."
+        action={{ libelle: 'Créer un Espace Cloud', href: '/app/espaces/new' }}
+      />
+    )
+  }
 
   /**
    * Les machines apparaissent tout de suite dans la liste, à l'état
@@ -208,6 +311,89 @@ export default function NouvellesVms() {
    * du centre de tâches quelque chose à faire basculer en fin de course.
    */
   const creerLeLot = () => {
+    // En mode API le lot part en une passe (`202` + travail suivi) ; sinon
+    // la maquette simule, comme avant.
+    if (estActif()) {
+      executer({
+        action: 'vm.create_delete',
+        titre: `Création de ${machinesACreer.length} machine${machinesACreer.length > 1 ? 's' : ''} lancée`,
+        detail: 'Le quota est réservé. Suivi dans le centre de tâches.',
+        // Le backend valide `imageId` contre l’identifiant Glance réel
+        // (`GET /catalogue/images`) et exige un vcpu/ramGo/diskGo qui
+        // correspond **exactement** à un gabarit du catalogue
+        // (`GET /catalogue/gabarits`) — ni l’un ni l’autre picker de cet
+        // assistant n’est branché sur le catalogue réel (`IMAGES_SYNELIA` et
+        // `FLAVORS` sont des constantes de maquette, un chantier à part) :
+        // sans cette résolution, le backend rejetait tout (`422 Image
+        // système inconnue`, puis `422 Aucun gabarit du catalogue ne
+        // correspond`) — vérifié en direct sur dev01. On résout ici l’image
+        // et le gabarit réels les plus proches du choix visuel, au moment de
+        // l’appel — le nombre de vCPU/Go affiché avant validation reste celui
+        // de la maquette, le réel part dans la requête.
+        appel: () =>
+          Promise.all([
+            requete<Array<{ id: string; nom: string; famille: string }>>('/catalogue/images'),
+            requete<Array<{ vcpu: number; ramGo: number; diskGo: number }>>('/catalogue/gabarits'),
+          ]).then(([images, gabarits]) => {
+            if (images.length === 0) throw new Error('Aucune image système au catalogue.')
+            if (gabarits.length === 0) throw new Error('Aucun gabarit au catalogue.')
+            return creerRessource('/vms/lot', {
+              espaceId: espace.id,
+              site: espace.site,
+              // Le champ n'existait pas encore dans la charge utile : le contenu tapé à
+              // l'étape « Options » (clé SSH incluse) ne partait jamais vers le backend,
+              // donc jamais vers Nova — la machine démarrait sans qu'aucune des lignes de
+              // ce champ n'ait jamais été appliquée. Trouvé en vérifiant en direct
+              // l'injection de clé SSH par cloud-init sur une machine réellement créée.
+              cloudInit,
+              // Idem pour l'étape Réseau : les quatre sélecteurs lisaient une graine de
+              // maquette et rien ne partait vers le backend. `reseauId` est réellement
+              // consommé par `ExecuteurVmCompose` (fallback sur le réseau par défaut de
+              // l'espace si absent, cf. `service.py`). `groupesSecurite` est accepté par
+              // le contrat (`VmLotCreation.groupesSecurite`) mais pas encore appliqué par
+              // cet exécuteur — trouvé en lisant `service.py`, noté dans DEMO-TODO.md
+              // comme gap backend plutôt que masqué. IP publique et load balancer n'ont
+              // aucun champ correspondant sur `/vms/lot` : leurs sélecteurs sont désactivés
+              // en mode API (voir l'étape Réseau) plutôt que d'envoyer un choix ignoré.
+              reseauId: reseau || undefined,
+              groupesSecurite: sg ? [sg] : undefined,
+              machines: machinesACreer.map((m) => {
+                const famille = m.image.startsWith('win') ? 'windows' : 'linux'
+                const motCle = m.image.replace(/[0-9]/g, '').replace(/-/g, '')
+                const image =
+                  images.find((i) => i.nom.toLowerCase().replace(/[.\-]/g, '').includes(motCle)) ??
+                  images.find((i) => i.famille === famille) ??
+                  images[0]
+                // Le gabarit réel le plus proche du choix visuel (vCPU
+                // d'abord, puis RAM, puis disque) — plus le plus petit du
+                // catalogue quel que soit ce choix. Contournement posé quand
+                // comp1/comp2 n'avaient que 85 Go libres chacun (un gabarit
+                // « moyen » suffisait à faire échouer Nova, seul `micro`
+                // construisait) : les deux nœuds ont depuis été étendus à
+                // 485 Go (2026-09-09), et le gabarit `medium` du catalogue
+                // (2 vCPU/4 Go/40 Go) a construit à trois reprises sans
+                // erreur en direct sur dev01 — voir DEMO-TODO.md.
+                const gabarit = [...gabarits].reduce((best, g) => {
+                  const ecart = (x: typeof g) =>
+                    Math.abs(x.vcpu - m.vcpu) * 100 +
+                    Math.abs(x.ramGo - m.ram) * 10 +
+                    Math.abs(x.diskGo - m.disk)
+                  return ecart(g) < ecart(best) ? g : best
+                })
+                return {
+                  nom: m.nom,
+                  imageId: image.id,
+                  vcpu: gabarit.vcpu,
+                  ramGo: gabarit.ramGo,
+                  diskGo: gabarit.diskGo,
+                }
+              }),
+            })
+          }),
+        effetFinal: () => parc.recharger(),
+      })
+      return
+    }
     const octet = parc.items.length + 11
     const nouvelles: VM[] = machinesACreer.map((m, i) => ({
       id: parc.identifiant('vm'),
@@ -337,7 +523,7 @@ export default function NouvellesVms() {
         <div className="space-y-4">
           <Field label="Espace Cloud de destination">
             <Select value={espaceId} onChange={(e) => setEspaceId(e.target.value)}>
-              {ESPACES.map((e) => (
+              {(estActif() ? espaces.items : ESPACES).map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.code} · {e.site} · {e.quota.vcpu - e.usage.vcpu} vCPU disponibles
                 </option>
@@ -442,7 +628,7 @@ export default function NouvellesVms() {
                   />
                 </Field>
                 <Field label="Nombre de machines">
-                  <Slider value={nombre} onChange={setNombre} min={1} max={20} unite="machines" />
+                  <Slider label="Nombre de machines" value={nombre} onChange={setNombre} min={1} max={20} unite="machines" />
                 </Field>
               </div>
 
@@ -477,7 +663,7 @@ export default function NouvellesVms() {
                 </Card>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {FLAVORS.map((f) => (
+                  {FLAVORS_AFFICHES.map((f) => (
                     <button
                       key={f.id}
                       type="button"
@@ -638,45 +824,84 @@ export default function NouvellesVms() {
             <CardHeader titre="Rattachement réseau" />
             <div className="space-y-4">
               <Field label="Réseau privé">
-                <Select value={reseau} onChange={(e) => setReseau(e.target.value)}>
-                  <option value="prod-front">prod-front · 10.0.1.0/24</option>
-                  <option value="prod-data">prod-data · 10.0.2.0/24</option>
-                  <option value="prod-cache">prod-cache · 10.0.3.0/24</option>
-                  <option value="ci-cd">ci-cd · 10.0.4.0/24</option>
-                </Select>
+                {reseauxEspace.length > 0 ? (
+                  <Select value={reseau} onChange={(e) => setReseau(e.target.value)}>
+                    {reseauxEspace.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.nom} · {n.cidr}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <p className="text-[12.5px] text-g-500">
+                    Aucun réseau privé dans {espace.code} — la machine partira sur le réseau par
+                    défaut de l’espace. Découpez-en un depuis{' '}
+                    <Link href="/app/reseau" className="underline">
+                      Réseau &amp; IP
+                    </Link>{' '}
+                    pour segmenter le trafic.
+                  </p>
+                )}
               </Field>
               <Switch
                 checked={ipPublique}
                 onChange={setIpPublique}
+                disabled={estActif()}
                 label="Attribuer une IP publique à chaque machine"
-                description={`${money(3500)} par IP et par mois. ${PUBLIC_IPS.filter((i) => !i.attachedTo).length} IP déjà réservées sont disponibles et seront utilisées en priorité.`}
+                description={
+                  estActif()
+                    ? `Pas pris en charge par la création groupée aujourd’hui — réservez puis attachez une IP par machine depuis Réseau & IP après la création. ${ipsDisponibles} IP déjà réservées dans ${espace.code} attendent d’être attachées.`
+                    : `${money(3500)} par IP et par mois. ${ipsDisponibles} IP déjà réservées sont disponibles et seront utilisées en priorité.`
+                }
               />
               <Field label="Groupe de sécurité">
-                <Select value={sg} onChange={(e) => setSg(e.target.value)}>
-                  {SECURITY_GROUPS.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nom} · {s.rules.length} règles
-                    </option>
-                  ))}
-                </Select>
+                {groupesEspace.length > 0 ? (
+                  <Select value={sg} onChange={(e) => setSg(e.target.value)}>
+                    {groupesEspace.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nom} · {s.rules.length} règles
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <p className="text-[12.5px] text-g-500">
+                    Aucun groupe de sécurité dans {espace.code} — créez-en un depuis{' '}
+                    <Link href="/app/reseau" className="underline">
+                      Réseau &amp; IP
+                    </Link>{' '}
+                    avant de créer la machine.
+                  </p>
+                )}
               </Field>
               <Field label="Rattacher à un load balancer" hint="facultatif">
-                <Select value={lb} onChange={(e) => setLb(e.target.value)}>
+                <Select
+                  value={lb}
+                  onChange={(e) => setLb(e.target.value)}
+                  disabled={estActif() && lbEspace.length > 0}
+                >
                   <option value="">Aucun</option>
-                  {LOAD_BALANCERS.map((l) => (
+                  {lbEspace.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.nom} · {l.layer.toUpperCase()} · {l.vip}
                     </option>
                   ))}
                 </Select>
+                {estActif() && lbEspace.length > 0 && (
+                  <p className="mt-1 text-[11.5px] text-g-500">
+                    Pas pris en charge par la création groupée aujourd’hui — ajoutez la machine au
+                    pool depuis Réseau &amp; IP → Load balancers après la création.
+                  </p>
+                )}
               </Field>
             </div>
           </Card>
-          <Callout ton="info" titre="Politique par défaut du groupe de sécurité">
-            {SECURITY_GROUPS.find((s) => s.id === sg)?.defaultPolicy.ingress === 'deny'
-              ? 'Refus par défaut en entrée, sortie autorisée. Seules les règles explicites du groupe ouvrent des ports.'
-              : 'Autorisation par défaut en entrée — configuration à vérifier avant mise en production.'}
-          </Callout>
+          {groupesEspace.length > 0 && (
+            <Callout ton="info" titre="Politique par défaut du groupe de sécurité">
+              {groupesEspace.find((s) => s.id === sg)?.defaultPolicy.ingress === 'deny'
+                ? 'Refus par défaut en entrée, sortie autorisée. Seules les règles explicites du groupe ouvrent des ports.'
+                : 'Autorisation par défaut en entrée — configuration à vérifier avant mise en production.'}
+            </Callout>
+          )}
         </div>
       )}
 
@@ -792,15 +1017,18 @@ export default function NouvellesVms() {
             <KeyValueList
               colonnes={2}
               items={[
-                { cle: 'Réseau privé', valeur: reseau },
+                {
+                  cle: 'Réseau privé',
+                  valeur: reseauxEspace.find((n) => n.id === reseau)?.nom ?? 'Réseau par défaut de l’espace',
+                },
                 { cle: 'IP publique', valeur: ipPublique ? 'Oui, une par machine' : 'Non' },
                 {
                   cle: 'Groupe de sécurité',
-                  valeur: SECURITY_GROUPS.find((s) => s.id === sg)?.nom ?? '—',
+                  valeur: groupesEspace.find((s) => s.id === sg)?.nom ?? '—',
                 },
                 {
                   cle: 'Load balancer',
-                  valeur: lb ? LOAD_BALANCERS.find((l) => l.id === lb)?.nom ?? '—' : 'Aucun',
+                  valeur: lb ? lbEspace.find((l) => l.id === lb)?.nom ?? '—' : 'Aucun',
                 },
                 {
                   cle: 'Plan de sauvegarde',

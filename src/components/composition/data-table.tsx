@@ -61,7 +61,7 @@ export function DataTable<T extends { id: string }>({
   actionsGroupees?: (ids: string[]) => ReactNode
   parPage?: number
   chargement?: boolean
-  vide?: { titre: string; phrase: string; action?: { libelle: string; href: string } }
+  vide?: { titre: string; phrase: string; action?: { libelle: string; href?: string; onClick?: () => void } }
   /**
    * Lien de la ligne. La première colonne visible est alors enveloppée dans un
    * `<a>` : son `rendu` ne doit pas contenir de lien à son tour, deux ancres

@@ -1,14 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { cn, seededSeries, surfaceMarque } from '@/lib/utils'
 import { dateCourte, goHumain, money, num, pct } from '@/lib/format'
 import { BASES_MANAGEES } from '@/lib/mock'
-import { Badge, MicroLabel } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
-import { Field, Input, Select, Switch } from '@/components/ui/field'
+import { Field, Input, Select } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { HealthBadge, QuotaBar, StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
@@ -16,13 +16,16 @@ import { GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
+import { creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
 import type { LigneLog, ManagedDatabase } from '@/lib/types'
 
+// `id` reste le code attendu par le backend (`BaseManageeCreation.palier` :
+// s1/s2/m1/m2/l1/xl1) — seul `label` est un texte d'affichage.
 const PALIERS = [
-  { id: 'db-s', label: 'Small · 2 vCPU · 8 Go' },
-  { id: 'db-m', label: 'Medium · 4 vCPU · 16 Go' },
-  { id: 'db-l', label: 'Large · 8 vCPU · 32 Go' },
-  { id: 'db-xl', label: 'XLarge · 16 vCPU · 64 Go' },
+  { id: 's1', label: 'Small · 2 vCPU · 8 Go' },
+  { id: 'm1', label: 'Medium · 4 vCPU · 16 Go' },
+  { id: 'l1', label: 'Large · 8 vCPU · 32 Go' },
+  { id: 'xl1', label: 'XLarge · 16 vCPU · 64 Go' },
 ]
 
 const MOTEURS: Record<string, { nom: string; teinte: string; port: number }> = {
@@ -54,22 +57,39 @@ const REQUETES_LENTES: LigneLog[] = [
 export default function BasesManagees() {
   const espace = useEspace()
   const { autorise, refus } = useApp()
+  const [motDePasseRegenere, setMotDePasseRegenere] = useState<string | null>(null)
   const collection = useCollection<ManagedDatabase>('bases-managees', BASES_MANAGEES)
   const bases = collection.items.filter((b) => b.espaceId === espace.id)
   const [selection, setSelection] = useState(bases[0]?.id ?? '')
-  const [reseaux, setReseaux] = useState([
-    '10.0.1.0/24 · prod-front',
-    '10.0.4.0/24 · ci-cd',
-    '10.99.0.0/24 · pool VPN',
-  ])
-  const [restreint, setRestreint] = useState(true)
-  const [ipsExternes, setIpsExternes] = useState(false)
+  const [creationOuverte, setCreationOuverte] = useState(false)
   const [instantPitr, setInstantPitr] = useState('2026-08-19T14:00')
   const [destinationPitr, setDestinationPitr] = useState('nouvelle')
   const [onglet, setOnglet] = useState('connexion')
 
   const base = bases.find((b) => b.id === selection)
   const moteur = base ? MOTEURS[base.moteur] : undefined
+
+  // L'utilisateur réel (`synelia_postgresql`…) vient du backend, pas d'un
+  // générique « app » : sans cet appel, la chaîne de connexion affichée
+  // mentirait sur l'identifiant à utiliser. Silencieux hors mode API ou en
+  // cas de refus (le rôle courant peut ne pas porter `secrets.update`).
+  const [identifiants, setIdentifiants] = useState<{ utilisateur: string } | null>(null)
+  const baseId = base?.id
+  useEffect(() => {
+    setIdentifiants(null)
+    setMotDePasseRegenere(null)
+    if (!estActif() || !baseId) return
+    let annule = false
+    requete<{ utilisateur: string }>(`/bases/${encodeURIComponent(baseId)}/identifiants`).then(
+      (r) => {
+        if (!annule) setIdentifiants(r)
+      },
+      () => {},
+    )
+    return () => {
+      annule = true
+    }
+  }, [baseId])
 
   return (
     <div className="space-y-5">
@@ -90,6 +110,8 @@ export default function BasesManagees() {
             action="network.manage"
             titre="Créer une base de données managée"
             description="Nous exploitons le moteur : haute disponibilité, sauvegardes avec restauration à un instant précis, montées de version qualifiées."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
             champs={[
               { id: 'nom', label: 'Nom de l’instance', placeholder: 'pg-facturation', obligatoire: true },
               {
@@ -110,13 +132,26 @@ export default function BasesManagees() {
               { id: 'ha', label: 'Haute disponibilité', type: 'switch', demi: true, placeholder: 'Deux nœuds' },
               { id: 'pitr', label: 'Restauration à un instant précis', type: 'switch', placeholder: 'Journalisation continue' },
             ]}
-            valeursDepart={{ moteur: 'postgresql', palier: 'db-m', taille: 100, ha: true, pitr: true }}
+            valeursDepart={{ moteur: 'postgresql', palier: 'm1', taille: 100, ha: true, pitr: true }}
             libelleValider="Créer la base"
             operation={(v) => {
               const id = collection.identifiant('db')
               return {
                 titre: `Création de ${v.nom} lancée`,
                 detail: `${MOTEURS[String(v.moteur)]?.nom} · ${v.ha ? 'HA' : 'nœud unique'}`,
+                appel: () =>
+                  creerRessource('/bases', {
+                    espaceId: espace.id,
+                    nom: String(v.nom),
+                    moteur: v.moteur,
+                    version: { postgresql: '16.4', mysql: '8.4', mariadb: '11.4', mongodb: '7.0', redis: '7.4' }[
+                      String(v.moteur)
+                    ] ?? '1.0',
+                    palier: String(v.palier),
+                    ha: Boolean(v.ha),
+                    tailleGo: Number(v.taille),
+                    pitr: Boolean(v.pitr),
+                  }),
                 effet: () =>
                   collection.creer({
                     id,
@@ -147,6 +182,13 @@ export default function BasesManagees() {
                   ],
                 },
                 effetFinal: () => {
+                  // En mode API la base réelle vient du backend, sous son propre
+                  // identifiant : `id` n'est qu'un identifiant local de secours pour
+                  // le mode maquette, PATCH dessus échouerait (base introuvable).
+                  if (estActif()) {
+                    collection.recharger()
+                    return
+                  }
                   collection.modifier(id, { statut: 'running' })
                   setSelection(id)
                 },
@@ -160,7 +202,7 @@ export default function BasesManagees() {
         <EmptyState
           titre="Aucune base managée dans cet espace"
           phrase="Une base managée vous évite d’exploiter vous-même le moteur : nous gérons la haute disponibilité, les sauvegardes avec restauration à un instant précis, les montées de version et la supervision fine."
-          action={{ libelle: 'Créer une base', href: '#' }}
+          action={{ libelle: 'Créer une base', onClick: () => setCreationOuverte(true) }}
         />
       ) : (
         <>
@@ -263,6 +305,36 @@ export default function BasesManagees() {
                     <CardHeader
                       titre="Chaîne de connexion"
                       sousTitre="Ne codez jamais le mot de passe en dur : référencez le coffre de secrets."
+                      actions={
+                        <BoutonAction
+                          libelle="Régénérer le mot de passe"
+                          variant="ghost"
+                          size="sm"
+                          operation={{
+                            action: 'secrets.update',
+                            ton: 'warn',
+                            titre: `Mot de passe de ${base.nom} régénéré`,
+                            detail:
+                              'Affiché une seule fois ci-dessous. Le moteur en cours d’exécution garde l’ancien mot de passe tant que la configuration applicative n’est pas mise à jour.',
+                            appel: () =>
+                              requete<{ motDePasse: string }>(
+                                `/bases/${encodeURIComponent(base.id)}/identifiants/rotation`,
+                                { methode: 'POST', corps: {} },
+                              ).then((r) => {
+                                setMotDePasseRegenere(r.motDePasse)
+                                return r
+                              }),
+                          }}
+                          confirmation={{
+                            ressource: base.nom,
+                            titre: `Régénérer le mot de passe de ${base.nom} ?`,
+                            pertes: [
+                              'Toute application qui utilise encore l’ancien mot de passe perdra sa connexion',
+                            ],
+                            libelleAction: 'Régénérer',
+                          }}
+                        />
+                      }
                     />
                     <div className="space-y-3">
                       <CopyField label="Hôte" value={base.host} />
@@ -271,11 +343,11 @@ export default function BasesManagees() {
                         label="Chaîne de connexion"
                         masque
                         value={
-                          base.moteur === 'postgresql'
-                            ? `postgresql://app:••••••••@${base.host}:${moteur.port}/${base.nom}?sslmode=require`
-                            : base.moteur === 'redis'
-                              ? `rediss://default:••••••••@${base.host}:${moteur.port}/0`
-                              : `mysql://app:••••••••@${base.host}:${moteur.port}/${base.nom}?ssl-mode=REQUIRED`
+                          base.moteur === 'redis'
+                            ? `rediss://${identifiants?.utilisateur ?? 'default'}:••••••••@${base.host}:${moteur.port}/0`
+                            : base.moteur === 'postgresql'
+                              ? `postgresql://${identifiants?.utilisateur ?? 'app'}:••••••••@${base.host}:${moteur.port}/${base.nom}?sslmode=require`
+                              : `mysql://${identifiants?.utilisateur ?? 'app'}:••••••••@${base.host}:${moteur.port}/${base.nom}?ssl-mode=REQUIRED`
                         }
                       />
                       <CopyField
@@ -283,6 +355,11 @@ export default function BasesManagees() {
                         value={`{{ vault:org-dba/db/${base.nom}#url }}`}
                       />
                     </div>
+                    {motDePasseRegenere && (
+                      <Callout ton="warn" className="mt-4" titre="Nouveau mot de passe — affiché une seule fois">
+                        <CopyField className="mt-2" value={motDePasseRegenere} masque mono />
+                      </Callout>
+                    )}
                     <Callout ton="info" className="mt-4" titre="TLS obligatoire">
                       Les connexions non chiffrées sont refusées par le moteur. Le certificat serveur
                       est signé par notre autorité interne, dont le paquet racine est disponible dans
@@ -291,7 +368,36 @@ export default function BasesManagees() {
                   </Card>
 
                   <Card>
-                    <CardHeader titre="Caractéristiques" />
+                    <CardHeader
+                      titre="Caractéristiques"
+                      actions={
+                        <BoutonAction
+                          libelle="Supprimer la base"
+                          variant="ghost"
+                          operation={{
+                            action: 'vm.create_delete',
+                            ton: 'warn',
+                            titre: `Suppression de ${base.nom} lancée`,
+                            detail: 'L’instance et son volume sont détruits ; les sauvegardes existantes ne sont pas affectées.',
+                            appel: () => supprimerRessource('/bases', base.id, base.nom),
+                            effet: () => collection.supprimer(base.id),
+                            effetFinal: () => {
+                              collection.recharger()
+                              setSelection('')
+                            },
+                          }}
+                          confirmation={{
+                            ressource: base.nom,
+                            titre: `Supprimer ${base.nom} ?`,
+                            pertes: [
+                              'L’instance et ses données sont détruites, sans retour possible',
+                              'Les applications qui s’y connectent perdent immédiatement l’accès',
+                            ],
+                            libelleAction: 'Supprimer la base',
+                          }}
+                        />
+                      }
+                    />
                     <KeyValueList
                       colonnes={1}
                       items={[
@@ -332,14 +438,21 @@ export default function BasesManagees() {
                           action: 'network.manage',
                           titre: `Réplica de lecture ajouté à ${base.nom}`,
                           detail: 'Le rattrapage initial dure quelques minutes selon la taille de la base.',
+                          appel: () =>
+                            requete(`/bases/${encodeURIComponent(base.id)}/replicas`, {
+                              methode: 'POST',
+                              corps: {},
+                            }),
                           job: {
                             type: 'db.replica.create',
                             label: `Réplica de lecture · ${base.nom}`,
                             etapes: ['Cloner la base', 'Rattraper les journaux', 'Ouvrir les connexions en lecture'],
                             dureeEtapeMs: 1100,
                           },
-                          effetFinal: () =>
-                            collection.modifier(base.id, (b) => ({ replicas: b.replicas + 1 })),
+                          effetFinal: () => {
+                            collection.modifier(base.id, (b) => ({ replicas: b.replicas + 1 }))
+                            collection.recharger()
+                          },
                         }}
                       />
                     }
@@ -477,6 +590,15 @@ export default function BasesManagees() {
                           destinationPitr === 'nouvelle'
                             ? 'Une nouvelle instance est créée : l’actuelle continue de servir.'
                             : 'L’instance actuelle sera écrasée.',
+                        appel: () =>
+                          requete(`/bases/${encodeURIComponent(base.id)}/restauration`, {
+                            methode: 'POST',
+                            corps: {
+                              instant: `${instantPitr.length === 16 ? `${instantPitr}:00Z` : instantPitr}`,
+                              nomCible:
+                                destinationPitr === 'nouvelle' ? `${base.nom}-restore` : base.nom,
+                            },
+                          }),
                         job: {
                           type: 'db.pitr',
                           label: `Restauration ${base.nom} · ${instantPitr}`,
@@ -491,7 +613,14 @@ export default function BasesManagees() {
                         },
                         effetFinal:
                           destinationPitr === 'nouvelle'
-                            ? () =>
+                            ? () => {
+                                // En mode API l’instance restaurée vient du
+                                // backend : la recréer localement la
+                                // dupliquerait (la collection `POST` à nouveau).
+                                if (estActif()) {
+                                  collection.recharger()
+                                  return
+                                }
                                 collection.creer({
                                   ...base,
                                   id: collection.identifiant('db'),
@@ -499,7 +628,8 @@ export default function BasesManagees() {
                                   replicas: 0,
                                   host: base.host.replace(base.nom, `${base.nom}-restore`),
                                 })
-                            : undefined,
+                              }
+                            : () => collection.recharger(),
                       }}
                       confirmation={
                         destinationPitr === 'ecraser'
@@ -655,7 +785,18 @@ export default function BasesManagees() {
                                       ],
                                     },
                                     effetFinal: () =>
-                                      collection.modifier(base.id, { version: x.v }),
+                                      // `PATCH /bases/{id}` reprend le schéma de création
+                                      // (`espaceId`/`nom`/`moteur`/`palier` obligatoires) : un
+                                      // correctif partiel (`{ version }` seul) échoue en 422
+                                      // côté backend, avalé silencieusement par le
+                                      // `.then(recharger, recharger)` de `collection.modifier`.
+                                      collection.modifier(base.id, {
+                                        espaceId: base.espaceId,
+                                        nom: base.nom,
+                                        moteur: base.moteur,
+                                        palier: base.palier,
+                                        version: x.v,
+                                      }),
                                   }
                                 : {}),
                             })}
@@ -676,70 +817,17 @@ export default function BasesManagees() {
               {onglet === 'reseau' && (
                 <Card>
                   <CardHeader
-                    titre="Restriction réseau"
-                    sousTitre="Par défaut, la base n’est joignable que depuis les réseaux privés de son Espace Cloud."
+                    titre="Acces reseau"
+                    sousTitre="Les bases gerees n'ont pas acces a Internet par conception."
                   />
-                  <div className="space-y-3.5">
-                    <Switch
-                      checked={restreint}
-                      onChange={setRestreint}
-                      label="Restreindre aux réseaux privés de l’espace"
-                      description={`Seules les ressources de ${espace.code} (${espace.cidr}) peuvent se connecter. Aucune exposition sur Internet.`}
-                    />
-                    <Switch
-                      checked={ipsExternes}
-                      onChange={setIpsExternes}
-                      label="Autoriser des adresses IP externes"
-                      description="À n’activer que temporairement, pour une migration ou un outil d’administration ponctuel. Chaque adresse autorisée élargit la surface d’attaque."
-                    />
-                  </div>
-                  <div className="mt-4 border-t border-g-100 pt-4">
-                    <MicroLabel className="mb-2">Réseaux autorisés</MicroLabel>
-                    <div className="space-y-2">
-                      {reseaux.map((r) => (
-                        <div
-                          key={r}
-                          className="flex items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2"
-                        >
-                          <span className="font-mono text-[12px] text-ink">{r}</span>
-                          <span className="flex items-center gap-2">
-                            <Badge tone="ok" size="sm">
-                              Autorisé
-                            </Badge>
-                            <BoutonAction
-                              libelle="Retirer"
-                              variant="ghost"
-                              operation={{
-                                action: 'network.manage',
-                                ton: 'warn',
-                                titre: `${r.split(' · ')[0]} retiré des réseaux autorisés`,
-                                effet: () => setReseaux((prev) => prev.filter((x) => x !== r)),
-                              }}
-                            />
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <BoutonFormulaire
-                      libelle="Ajouter un réseau"
-                      variant="ghost"
-                      className="mt-2.5"
-                      icone={<Plus size={12} />}
-                      action="network.manage"
-                      titre="Autoriser un réseau"
-                      description="Une base mutualisée n’a pas à être joignable depuis Internet : n’autorisez que des plages privées, sauf migration ponctuelle."
-                      champs={[
-                        { id: 'cidr', label: 'Plage', placeholder: '10.0.5.0/24', obligatoire: true },
-                        { id: 'libelle', label: 'À quoi elle sert', placeholder: 'outillage BI' },
-                      ]}
-                      libelleValider="Autoriser"
-                      operation={(f) => ({
-                        titre: `${f.cidr} autorisé`,
-                        effet: () =>
-                          setReseaux((prev) => [...prev, `${f.cidr}${f.libelle ? ` · ${f.libelle}` : ''}`]),
-                      })}
-                    />
-                  </div>
+                  <Callout ton="info" titre="Aucun acces distant — par conception">
+                    Cette base de donnees geree n'a pas d'adresse IP flottante et n'est joignable que
+                    depuis les reseaux prives de son Espace Cloud{' '}
+                    <span className="font-mono text-[12px]">({espace.cidr})</span>. C'est une
+                    propriete immuable du service, qui garantit l'isolation de vos donnees par rapport
+                    a Internet. Aucune configuration de pare-feu ou de liste d'acces n'est proposee:
+                    cette restriction est encodee dans l'infrastructure sous-jacente.
+                  </Callout>
                 </Card>
               )}
             </>

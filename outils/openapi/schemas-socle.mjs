@@ -53,48 +53,43 @@ const communs = {
     'Forme unique de toutes les erreurs de l’API.',
   ),
 
-  ErreurInterdit: objet(
+  // Les erreurs voyagent sous une enveloppe `erreur` : un client distingue ainsi
+  // un échec d'une ressource sans regarder le code HTTP. `erreur` ne porte que
+  // le socle commun (code, message, correlationId) ; le détail propre à
+  // chaque famille d'erreur (rôles requis, champs en défaut, intégration en
+  // panne) voyage à côté, au même niveau que `erreur` — c'est la forme que
+  // `AppError.corps()` construit réellement côté serveur.
+  ReponseErreur: objet({ erreur: ref('Erreur') }, ['erreur']),
+
+  ReponseErreurInterdit: objet(
     {
-      code: chaine(),
-      message: chaine(),
-      correlationId: chaine(),
-      actionRbac: chaine("Identifiant de l'action refusée dans la matrice RBAC (`vm.create_delete`)."),
+      erreur: ref('Erreur'),
       rolesRequis: tableau(liste(ROLES), 'Rôles qui exécutent pleinement cette action.'),
       roleCourant: liste(ROLES),
     },
-    ['code', 'message', 'correlationId', 'rolesRequis'],
+    ['erreur', 'rolesRequis'],
   ),
 
-  ErreurValidation: objet(
+  ReponseErreurValidation: objet(
     {
-      code: chaine(),
-      message: chaine(),
-      correlationId: chaine(),
-      champs: tableau(
-        objet({ champ: chaine(), message: chaine(), attendu: chaine() }, ['champ', 'message']),
+      erreur: ref('Erreur'),
+      champs: dictionnaire(
+        chaine(),
+        'Message de validation par champ en défaut, indexé par son chemin (`prix`, `espaceId`…).',
       ),
     },
-    ['code', 'message', 'correlationId', 'champs'],
+    ['erreur', 'champs'],
   ),
 
-  ErreurDegrade: objet(
+  ReponseErreurDegrade: objet(
     {
-      code: chaine(),
-      message: chaine(),
-      correlationId: chaine(),
+      erreur: ref('Erreur'),
       integration: chaine('Intégration en défaut : `centreon`, `grafana`, `victorialogs`, `openstack`…'),
       donneesPartielles: booleen('Vrai quand une réponse dégradée accompagne l’erreur.'),
       dateDonnees: horodatage('Fraîcheur des dernières données connues.'),
     },
-    ['code', 'message', 'correlationId', 'integration'],
+    ['erreur', 'integration'],
   ),
-
-  // Les erreurs voyagent sous une enveloppe `erreur` : un client distingue ainsi
-  // un échec d'une ressource sans regarder le code HTTP.
-  ReponseErreur: objet({ erreur: ref('Erreur') }, ['erreur']),
-  ReponseErreurInterdit: objet({ erreur: ref('ErreurInterdit') }, ['erreur']),
-  ReponseErreurValidation: objet({ erreur: ref('ErreurValidation') }, ['erreur']),
-  ReponseErreurDegrade: objet({ erreur: ref('ErreurDegrade') }, ['erreur']),
 
   Quota: objet(
     { vcpu: entier(), ramGo: entier(), stockageTo: nombre() },
@@ -733,6 +728,7 @@ const iaas = {
         'Plan de déploiement composé dans l’écran de composition.',
       ),
       cleSsh: chaine(),
+      cloudInit: chaine('Script d’amorçage, encodé en clair, commun au lot.'),
       antiAffinite: booleen('Répartit les machines du lot sur des hôtes distincts.'),
     },
     ['espaceId', 'machines'],

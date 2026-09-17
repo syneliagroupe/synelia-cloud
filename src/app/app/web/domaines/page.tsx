@@ -6,17 +6,21 @@ import { ArrowRightLeft, Globe, Search, Server, ShieldCheck } from 'lucide-react
 import { cn } from '@/lib/utils'
 import { dateCourte, money, num } from '@/lib/format'
 import { SITE_LABEL } from '@/lib/types'
-import { DOMAINES, SITES_WEB, entreesWebCloud, joursAvant, sitesDeLHebergement } from '@/lib/mock'
-import type { Domaine } from '@/lib/types'
+import { DOMAINES, HEBERGEMENTS, SITES_WEB, ZONES_DNS, assemblerEntrees, entreesWebCloud, joursAvant, sitesDeLHebergement } from '@/lib/mock'
+import { ORG_COURANTE, UTILISATEUR_COURANT } from '@/lib/mock/orgs'
+import type { DnsZone, Domaine, SiteWeb, WebHosting } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
 import { Field, Input, Select } from '@/components/ui/field'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
+import { DegradedState } from '@/components/composition/states'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { ApiError, creerRessource, estActif, requete } from '@/lib/api/client'
+import { payerAvantDeCreer } from '@/components/composition/paystack'
 
 /** Tarifs annuels indicatifs, en francs CFA. */
 const EXTENSIONS = [
@@ -32,6 +36,9 @@ export default function PortefeuilleWebCloud() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const portefeuille = useCollection<Domaine>('domaines', DOMAINES)
+  const parcHebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
+  const zones = useCollection<DnsZone>('zones-dns', ZONES_DNS)
+  const tousSites = useCollection<SiteWeb>('sites-web', SITES_WEB)
   const [recherche, setRecherche] = useState('')
   const [extension, setExtension] = useState('.ci')
   const [aTransferer, setATransferer] = useState('')
@@ -40,36 +47,112 @@ export default function PortefeuilleWebCloud() {
   const nomComplet = `${recherche.trim().toLowerCase()}${extension}`
   const dejaPris = portefeuille.items.some((d) => d.nom === nomComplet)
 
-  const enregistrer = (nom: string, ext: string) =>
-    executer({
-      action: 'service.admin',
-      titre: `${nom} enregistré`,
-      detail: 'Le titulaire déclaré au registre est votre organisation, jamais Synelia.',
-      job: {
-        type: 'domaine.register',
-        label: `Enregistrement de ${nom}`,
-        etapes: [
-          'Vérifier la disponibilité au registre',
-          'Déposer le nom',
-          'Créer la zone DNS',
-          'Activer la protection WHOIS',
-        ],
-        dureeEtapeMs: 1100,
-      },
-      effetFinal: () =>
-        portefeuille.creer({
-          id: portefeuille.identifiant('dom'),
-          orgId: 'org-dba',
-          nom,
-          extension: ext,
-          expiration: '2027-08-19',
-          renouvellementAuto: true,
-          whoisProtege: true,
-          verrouTransfert: true,
-        }),
-    })
+  // Disponibilité réelle au registre quand l’API est active (`424` → état
+  // dégradé nommant l’intégration). En maquette, le portefeuille local suffit.
+  const [dispo, setDispo] = useState<{
+    disponible: boolean
+    prixAnnuel?: number
+    registre?: string
+  } | null>(null)
+  const [dispoDegrade, setDispoDegrade] = useState<{
+    integration?: string
+    dateDonnees?: string
+  } | null>(null)
+  const [transfertDegrade, setTransfertDegrade] = useState<{
+    integration?: string
+    dateDonnees?: string
+  } | null>(null)
 
-  const entrees = entreesWebCloud()
+  /**
+   * Éligibilité au transfert : le contrat n’a pas de route dédiée, mais
+   * `GET /web/domaines/disponibilite` dit si le nom existe au registre — un
+   * nom libre n’a rien à transférer, un nom pris peut l’être avec son code.
+   */
+  const verifierTransfert = () => {
+    const nom = aTransferer.trim().toLowerCase()
+    if (!nom) return
+    if (!estActif()) {
+      executer({
+        ton: 'info',
+        titre: `${nom} est transférable`,
+        detail:
+          'Le domaine a plus de 60 jours et n’est pas verrouillé. Il vous reste à fournir le code d’autorisation.',
+      })
+      return
+    }
+    setTransfertDegrade(null)
+    requete<{ disponible: boolean; registre?: string; whois?: string }>(
+      '/web/domaines/disponibilite',
+      { query: { nom } },
+    ).then(
+      (r) => {
+        executer({
+          ton: r.disponible ? 'warn' : 'info',
+          titre: r.disponible ? `${nom} n’est enregistré nulle part` : `${nom} est transférable`,
+          detail: r.disponible
+            ? 'Rien à transférer : commandez-le depuis le bouton en haut de page.'
+            : `Enregistré${r.registre ? ` au registre ${r.registre}` : ''}${r.whois ? ` (${r.whois})` : ''}. Il vous reste à fournir le code d’autorisation.`,
+        })
+      },
+      (e: unknown) => {
+        if (e instanceof ApiError && e.statut === 424) {
+          setTransfertDegrade({ integration: e.integration, dateDonnees: e.dateDonnees })
+          return
+        }
+        executer({
+          ton: 'err',
+          titre: 'Éligibilité invérifiable',
+          detail: e instanceof Error ? e.message : undefined,
+        })
+      },
+    )
+  }
+
+  const verifierDispo = () => {
+    if (!estActif()) {
+      executer({
+        ton: dejaPris ? 'warn' : 'ok',
+        titre: dejaPris ? `${nomComplet} est déjà dans votre portefeuille` : `${nomComplet} est disponible`,
+        detail: dejaPris
+          ? 'Ouvrez sa fiche pour le gérer.'
+          : `${money(EXTENSIONS.find((x) => x.ext === extension)?.prix ?? 9500)} par an — enregistrez-le depuis le bouton en haut de page.`,
+      })
+      return
+    }
+    setDispo(null)
+    setDispoDegrade(null)
+    requete<{ disponible: boolean; prixAnnuel?: number; registre?: string }>(
+      '/web/domaines/disponibilite',
+      { query: { nom: nomComplet } },
+    ).then(
+      (r) => {
+        setDispo(r)
+        executer({
+          ton: r.disponible ? 'ok' : 'warn',
+          titre: r.disponible ? `${nomComplet} est disponible` : `${nomComplet} est déjà pris`,
+          detail: r.disponible && r.prixAnnuel ? `${money(r.prixAnnuel)} par an.` : undefined,
+        })
+      },
+      (e: unknown) => {
+        if (e instanceof ApiError && e.statut === 424) {
+          setDispoDegrade({ integration: e.integration, dateDonnees: e.dateDonnees })
+          return
+        }
+        executer({
+          ton: 'err',
+          titre: 'Disponibilité invérifiable',
+          detail: e instanceof Error ? e.message : undefined,
+        })
+      },
+    )
+  }
+
+  // Avec l’API, les entrées sont assemblées depuis les collections distantes
+  // (le backend filtre déjà) ; en maquette, depuis le périmètre fictif.
+  const entrees = estActif()
+    ? assemblerEntrees(portefeuille.items, parcHebergements.items, zones.items)
+    : entreesWebCloud()
+  const sitesConnus = estActif() ? tousSites.items : SITES_WEB
   const heberges = entrees.filter((e) => e.hebergement)
   const sansRenouvellement = entrees.filter(
     (e) => e.domaine && !e.domaine.renouvellementAuto,
@@ -106,16 +189,65 @@ export default function PortefeuilleWebCloud() {
                   type: 'select',
                   options: EXTENSIONS.map((x) => ({ value: x.ext, label: `${x.ext} · ${money(x.prix)} / an` })),
                 },
+                {
+                  id: 'duree',
+                  label: 'Durée',
+                  type: 'select',
+                  demi: true,
+                  options: [
+                    { value: '1', label: '1 an' },
+                    { value: '2', label: '2 ans' },
+                    { value: '5', label: '5 ans' },
+                  ],
+                },
                 { id: 'whois', label: 'Protection WHOIS', type: 'switch', placeholder: 'Activée' },
                 { id: 'auto', label: 'Renouvellement automatique', type: 'switch', placeholder: 'Activé' },
+                { id: 'titulaireNom', label: 'Titulaire — nom', demi: true, obligatoire: true },
+                { id: 'titulaireEmail', label: 'Titulaire — courriel', demi: true, obligatoire: true },
+                { id: 'titulaireTel', label: 'Titulaire — téléphone', demi: true, obligatoire: true },
+                { id: 'titulaireAdresse', label: 'Titulaire — adresse', demi: true, obligatoire: true },
+                { id: 'titulaireVille', label: 'Titulaire — ville', demi: true, obligatoire: true },
+                { id: 'titulairePays', label: 'Titulaire — pays', demi: true, obligatoire: true },
               ]}
-              valeursDepart={{ extension: '.ci', whois: true, auto: true }}
+              valeursDepart={{
+                extension: '.ci',
+                duree: '1',
+                whois: true,
+                auto: true,
+                titulaireNom: ORG_COURANTE.nom,
+                titulaireEmail: UTILISATEUR_COURANT.email,
+                titulaireTel: '+225 27 20 00 00 00',
+                titulaireAdresse: 'Plateau, Abidjan',
+                titulaireVille: 'Abidjan',
+                titulairePays: 'CI',
+              }}
               libelleValider="Enregistrer"
               operation={(v) => {
                 const nom = `${String(v.nom).trim().toLowerCase()}${v.extension}`
+                const prixAnnuel = EXTENSIONS.find((x) => x.ext === v.extension)?.prix ?? 9500
                 return {
                   titre: `${nom} enregistré`,
-                  detail: `${money(EXTENSIONS.find((x) => x.ext === v.extension)?.prix ?? 9500)} par an, au prorata du mois en cours.`,
+                  detail: `${money(prixAnnuel)} par an${estActif() ? ', payé maintenant' : ', au prorata du mois en cours'}.`,
+                  appel: async () => {
+                    // Le paiement est exigé avant l'enregistrement au registre — pas de
+                    // domaine réservé sans réservation payée derrière.
+                    if (estActif()) await payerAvantDeCreer(prixAnnuel * Number(v.duree))
+                    return creerRessource('/web/domaines', {
+                      nom,
+                      dureeAnnees: Number(v.duree),
+                      renouvellementAuto: Boolean(v.auto),
+                      whoisProtege: Boolean(v.whois),
+                      titulaire: {
+                        nom: String(v.titulaireNom),
+                        email: String(v.titulaireEmail),
+                        telephone: String(v.titulaireTel),
+                        adresse: String(v.titulaireAdresse),
+                        ville: String(v.titulaireVille),
+                        pays: String(v.titulairePays),
+                      },
+                      creerZoneDns: true,
+                    })
+                  },
                   job: {
                     type: 'domaine.register',
                     label: `Enregistrement de ${nom}`,
@@ -127,7 +259,11 @@ export default function PortefeuilleWebCloud() {
                     ],
                     dureeEtapeMs: 1100,
                   },
-                  effetFinal: () =>
+                  effetFinal: () => {
+                    if (estActif()) {
+                      portefeuille.recharger()
+                      return
+                    }
                     portefeuille.creer({
                       id: portefeuille.identifiant('dom'),
                       orgId: 'org-dba',
@@ -137,7 +273,8 @@ export default function PortefeuilleWebCloud() {
                       renouvellementAuto: Boolean(v.auto),
                       whoisProtege: Boolean(v.whois),
                       verrouTransfert: true,
-                    }),
+                    })
+                  },
                 }
               }}
             />
@@ -157,6 +294,12 @@ export default function PortefeuilleWebCloud() {
                 ton: 'info',
                 titre: `Transfert de ${v.domaine} engagé`,
                 detail: 'Cinq à sept jours pour un .com, jusqu’à dix jours ouvrés pour un .ci : le registre impose son délai.',
+                appel: () =>
+                  creerRessource('/web/domaines/transferts', {
+                    nom: String(v.domaine),
+                    codeAuth: String(v.code),
+                    renouvellementAuto: true,
+                  }),
                 job: {
                   type: 'domaine.transfer',
                   label: `Transfert de ${v.domaine}`,
@@ -167,7 +310,11 @@ export default function PortefeuilleWebCloud() {
                     'Attendre la confirmation du registre',
                   ],
                 },
-                effetFinal: () =>
+                effetFinal: () => {
+                  if (estActif()) {
+                    portefeuille.recharger()
+                    return
+                  }
                   portefeuille.creer({
                     id: portefeuille.identifiant('dom'),
                     orgId: 'org-dba',
@@ -177,7 +324,8 @@ export default function PortefeuilleWebCloud() {
                     renouvellementAuto: true,
                     whoisProtege: true,
                     verrouTransfert: true,
-                  }),
+                  })
+                },
               })}
             />
           </>
@@ -213,8 +361,8 @@ export default function PortefeuilleWebCloud() {
         />
         <StatTile
           libelle="Sites en ligne"
-          valeur={SITES_WEB.filter((s) => s.statut === 'en_ligne').length}
-          detail={`sur ${SITES_WEB.length} installés`}
+          valeur={sitesConnus.filter((s) => s.statut === 'en_ligne').length}
+          detail={`sur ${sitesConnus.length} installés`}
         />
         <StatTile
           libelle="Échéance la plus proche"
@@ -246,7 +394,11 @@ export default function PortefeuilleWebCloud() {
             </thead>
             <tbody>
               {entrees.map((e) => {
-                const sites = e.hebergement ? sitesDeLHebergement(e.hebergement.id) : []
+                const sites = e.hebergement
+                  ? estActif()
+                    ? tousSites.items.filter((s) => s.hebergementId === e.hebergement!.id)
+                    : sitesDeLHebergement(e.hebergement.id)
+                  : []
                 return (
                   <tr key={e.id} className="border-b border-g-100 last:border-0">
                     <td className="px-3 py-2.5">
@@ -327,8 +479,8 @@ export default function PortefeuilleWebCloud() {
             titre="Enregistrer un nom de domaine"
             sousTitre="Le titulaire déclaré au registre est votre organisation, jamais Synelia. Vous pouvez demander le code de transfert à tout moment, sans justification."
           />
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label="Nom recherché" className="min-w-0 flex-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+            <Field label="Nom recherché" className="min-w-0 sm:flex-1">
               <Input
                 value={recherche}
                 onChange={(e) => setRecherche(e.target.value)}
@@ -347,19 +499,38 @@ export default function PortefeuilleWebCloud() {
             <Button
               iconBefore={<Search size={14} />}
               disabled={!recherche.trim()}
-              onClick={() =>
-                executer({
-                  ton: dejaPris ? 'warn' : 'ok',
-                  titre: dejaPris ? `${nomComplet} est déjà dans votre portefeuille` : `${nomComplet} est disponible`,
-                  detail: dejaPris
-                    ? 'Ouvrez sa fiche pour le gérer.'
-                    : `${money(EXTENSIONS.find((x) => x.ext === extension)?.prix ?? 9500)} par an — enregistrez-le depuis le bouton en haut de page.`,
-                })
-              }
+              onClick={verifierDispo}
             >
               Vérifier
             </Button>
           </div>
+          {dispoDegrade && (
+            <div className="mt-3">
+              <DegradedState
+                source="registre"
+                hauteur="h-28"
+                integration={dispoDegrade.integration}
+                dateDonnees={dispoDegrade.dateDonnees}
+              />
+            </div>
+          )}
+          {dispo && (
+            <p className="mt-3 text-[12.5px] text-g-700">
+              {dispo.disponible ? (
+                <>
+                  <span className="font-semibold text-ok">{nomComplet} est disponible</span>
+                  {dispo.prixAnnuel ? ` — ${money(dispo.prixAnnuel)} par an` : ''}
+                  {dispo.registre ? ` (${dispo.registre})` : ''}. Enregistrez-le depuis le
+                  bouton en haut de page.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-warn">{nomComplet} est déjà pris</span>.
+                  Essayez une autre extension ou lancez un transfert.
+                </>
+              )}
+            </p>
+          )}
 
           <ul className="mt-4 divide-y divide-g-100 border-t border-g-100 pt-1">
             {EXTENSIONS.map((x) => (
@@ -407,18 +578,20 @@ export default function PortefeuilleWebCloud() {
                 placeholder="mon-entreprise.ci"
               />
             </Field>
-            <BoutonAction
-              libelle="Vérifier l’éligibilité"
-              size="md"
-              desactive={!aTransferer.trim()}
-              operation={{
-                ton: 'info',
-                titre: `${aTransferer} est transférable`,
-                detail:
-                  'Le domaine a plus de 60 jours et n’est pas verrouillé. Il vous reste à fournir le code d’autorisation.',
-              }}
-            />
+            <Button size="md" disabled={!aTransferer.trim()} onClick={verifierTransfert}>
+              Vérifier l’éligibilité
+            </Button>
           </div>
+          {transfertDegrade && (
+            <div className="mt-3">
+              <DegradedState
+                source="registre"
+                hauteur="h-28"
+                integration={transfertDegrade.integration}
+                dateDonnees={transfertDegrade.dateDonnees}
+              />
+            </div>
+          )}
 
           <Callout ton="info" className="mt-3" titre="Durée réelle">
             Cinq à sept jours pour un <span className="font-mono">.com</span>, et jusqu’à dix jours
@@ -463,7 +636,7 @@ export default function PortefeuilleWebCloud() {
           <Link href="/app/applications/projets" className="font-semibold text-p-700 hover:underline">
             Les projets applicatifs
           </Link>{' '}
-          répondent à ce besoin — {num(SITES_WEB.length)} sites mutualisés ne remplacent pas une
+          répondent à ce besoin — {num(sitesConnus.length)} sites mutualisés ne remplacent pas une
           application dédiée.
         </p>
       </Card>

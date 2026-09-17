@@ -13,6 +13,7 @@ import { ORGANISATIONS } from '@/lib/mock/orgs'
 import { DOMAINES } from '@/lib/mock/web'
 import { HEBERGEMENTS, SERVICES_PARTAGES, nomServi } from '@/lib/mock/hebergement'
 import { BACKENDS } from '@/lib/mock/iaas'
+import { estActif, requete } from '@/lib/api/client'
 import type { Portee } from '@/lib/navigation'
 
 interface Entree {
@@ -67,13 +68,13 @@ function entreesClient(): Entree[] {
       href: `/app/applications/projets/${s.projetId}/${s.id}`,
       meta: `${s.environnement} · ${s.emplacement.site}`,
     })),
-    // Les modèles n'ont plus de fiche propre : ils se choisissent à l'étape
-    // « Source » de la création de projet, là où ils servent réellement.
+    // Les modèles n'ont plus de fiche propre : ils se choisissent comme
+    // source d'un service « Application », depuis un projet existant.
     ...MODELES.map((m) => ({
       id: m.slug,
       label: m.nom,
       categorie: 'Solutions à déployer',
-      href: '/app/applications/nouveau',
+      href: '/app/applications/projets',
       meta: `${m.solution} ${m.version}`,
     })),
     ...HEBERGEMENTS.map((h) => ({
@@ -166,6 +167,43 @@ export function RechercheGlobale({ portee = 'client' }: { portee?: Portee }) {
   const router = useRouter()
   const [ouvert, setOuvert] = useState(false)
   const [q, setQ] = useState('')
+  // En mode API la recherche part au backend, qui connaît les ressources
+  // réelles (la maquette ne connaît que les siennes). À vide, on garde les
+  // raccourcis locaux.
+  const [distants, setDistants] = useState<Entree[] | null>(null)
+  useEffect(() => {
+    if (!estActif() || !ouvert || !q.trim()) {
+      setDistants(null)
+      return
+    }
+    let annule = false
+    const minuteur = setTimeout(() => {
+      requete<{ resultats?: Array<{ type: string; id: string; libelle: string; href: string; statut?: string }> }>(
+        '/recherche',
+        { query: { q: q.trim() } },
+      ).then(
+        (r) => {
+          if (!annule)
+            setDistants(
+              (r.resultats ?? []).map((x) => ({
+                id: x.id,
+                label: x.libelle,
+                categorie: x.type,
+                href: x.href,
+                meta: x.statut,
+              })),
+            )
+        },
+        () => {
+          if (!annule) setDistants([])
+        },
+      )
+    }, 250)
+    return () => {
+      annule = true
+      clearTimeout(minuteur)
+    }
+  }, [q, ouvert])
 
   const entrees = useMemo(
     () => (portee === 'client' ? entreesClient() : entreesSuperAdmin()),
@@ -185,6 +223,7 @@ export function RechercheGlobale({ portee = 'client' }: { portee?: Portee }) {
   }, [])
 
   const resultats = useMemo(() => {
+    if (distants) return distants.slice(0, 14)
     if (!q.trim()) return entrees.slice(0, 8)
     const needle = q.trim().toLowerCase()
     return entrees
@@ -195,7 +234,7 @@ export function RechercheGlobale({ portee = 'client' }: { portee?: Portee }) {
           (e.meta ?? '').toLowerCase().includes(needle),
       )
       .slice(0, 14)
-  }, [q, entrees])
+  }, [q, entrees, distants])
 
   const groupes = useMemo(() => {
     const map = new Map<string, Entree[]>()

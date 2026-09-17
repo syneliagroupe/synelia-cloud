@@ -4,11 +4,27 @@ import { ArrowDown, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money } from '@/lib/format'
 import { FICHES_PRODUIT } from '@/lib/mock'
+import { lirePublicServeur } from '@/lib/api/public-serveur'
+import { fusionnerFicheProduit, type FicheProduitPublique } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { Card, KeyValueList } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { Accordeon, AppelFinal, Container, SiteSection } from '@/components/site/blocs'
+
+/**
+ * Fiche locale, enrichie de `GET /public/offres/{slug}` quand l’API est
+ * active (nom, accroche, résumé, paliers, FAQ). Une offre connue du seul
+ * backend n’a ni schéma ni architecture à montrer : la page reste 404.
+ */
+async function ficheDe(slug: string) {
+  const locale = FICHES_PRODUIT.find((x) => x.slug === slug)
+  if (!locale) return undefined
+  const distante = await lirePublicServeur<FicheProduitPublique>(
+    `/public/offres/${encodeURIComponent(slug)}`,
+  )
+  return fusionnerFicheProduit(distante, locale)
+}
 
 export async function generateMetadata({
   params,
@@ -16,7 +32,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>
 }): Promise<Metadata> {
   const { slug } = await params
-  const f = FICHES_PRODUIT.find((x) => x.slug === slug)
+  const f = await ficheDe(slug)
   return {
     title: f ? `${f.nom} — ${f.accroche}` : 'Offre introuvable',
     description: f?.resume,
@@ -29,7 +45,7 @@ export default async function FicheProduit({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  const f = FICHES_PRODUIT.find((x) => x.slug === slug)
+  const f = await ficheDe(slug)
   if (!f) notFound()
 
   return (

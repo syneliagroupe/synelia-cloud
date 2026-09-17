@@ -635,7 +635,7 @@ export const SAUVEGARDES_WEB: SauvegardeWeb[] = [
 const hebergementsDeLOrg = (orgId: string = ORG_COURANTE.id) =>
   HEBERGEMENTS.filter((h) => h.orgId === orgId)
 
-const domainesDeLOrg = (orgId: string = ORG_COURANTE.id) =>
+export const domainesDeLOrg = (orgId: string = ORG_COURANTE.id) =>
   DOMAINES.filter((d) => d.orgId === orgId)
 
 export const serveursBasesDeLOrg = (orgId?: string) => {

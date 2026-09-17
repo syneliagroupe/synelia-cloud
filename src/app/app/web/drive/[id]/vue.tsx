@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, Plus, Share2, Trash2 } from 'lucide-react'
 import { money, relatif } from '@/lib/format'
-import { DRIVES, type DriveDomaine } from '@/lib/mock'
+import { DRIVES, USERS, type DriveDomaine } from '@/lib/mock'
 import { configurationDuService } from '@/lib/configurations'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink, IconButton } from '@/components/ui/button'
@@ -13,9 +13,10 @@ import { PageHeader, Card, CardHeader, Callout, KeyValueList } from '@/component
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { ConfigurationServicePanel } from '@/components/business/configuration-service'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
-import { BoutonAction, BoutonFormulaire, ModaleFormulaire, useOperation } from '@/components/app/actions'
+import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, modifierRessource, requete, supprimerRessource } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'sieges', label: 'Sièges' },
@@ -25,19 +26,61 @@ const ONGLETS = [
 ]
 
 export function VueDrive({ id }: { id: string }) {
-  const { autorise, refus } = useApp()
+  const maintenant = useMaintenant()
+  const { autorise, refus, pousser } = useApp()
   const executer = useOperation()
   const drives = useCollection<DriveDomaine>('drives', DRIVES)
   const [onglet, setOnglet] = useState('sieges')
   const [externe, setExterne] = useState(true)
   const [motDePasse, setMotDePasse] = useState(true)
-  const [edition, setEdition] = useState<string | null>(null)
+  /** Sièges retirés dans la session : le jeu de données n'a pas de table. */
+  const [retires, setRetires] = useState<string[]>([])
 
   const d = drives.items.find((x) => x.id === id)
   if (!d) return null
+
+  // Contrairement au webmail (Zimbra `DelegateAuthRequest`), il n’y a pas de SSO applicatif
+  // ici : `POST /web/drive/{id}/ouverture` renvoie l’URL de l’instance Nextcloud réelle,
+  // sans jeton de connexion — l’utilisateur atterrit sur l’écran de connexion Nextcloud, pas
+  // déjà authentifié. En maquette, le lien direct suffit pareillement.
+  const ouvrirDrive = () => {
+    if (!estActif()) {
+      window.open(`https://${d.hote}`, '_blank', 'noopener')
+      return
+    }
+    requete<{ url: string }>(`/web/drive/${encodeURIComponent(d.id)}/ouverture`, {
+      methode: 'POST',
+    }).then(
+      (r) => window.open(r.url, '_blank', 'noopener'),
+      (e: unknown) =>
+        pousser({
+          ton: 'err',
+          titre: 'Ouverture du drive impossible',
+          detail: e instanceof Error ? e.message : undefined,
+        }),
+    )
+  }
+
+  const reglerPartage = (patch: {
+    externeAutorise: boolean
+    motDePasseObligatoire: boolean
+  }) =>
+    executer({
+      action: 'service.admin',
+      titre: 'Politique de partage mise à jour',
+      detail: patch.externeAutorise
+        ? 'Le partage vers l’extérieur reste autorisé.'
+        : 'Les fichiers ne se partagent plus qu’entre titulaires de sièges.',
+      appel: () =>
+        modifierRessource('/web/drive', d.id, {
+          partage: { ...patch, expirationJours: d.partage.expirationJours },
+        }),
+      effet: () =>
+        drives.modifier(d.id, (x) => ({ partage: { ...x.partage, ...patch } })),
+      effetFinal: () => drives.recharger(),
+    })
   const config = configurationDuService('drive-pro')
-  const titulaires = d.utilisateurs
-  const enEdition = titulaires.find((u) => u.id === edition)
+  const titulaires = USERS.slice(0, d.sieges.attribues).filter((u) => !retires.includes(u.id))
 
   return (
     <div className="space-y-5">
@@ -64,58 +107,89 @@ export function VueDrive({ id }: { id: string }) {
             <>
               <GatedAction autorise={autorise('seat.assign')} message={refus('seat.assign')}>
                 <BoutonFormulaire
-                  libelle="Ajouter un utilisateur"
+                  libelle="Attribuer un siège"
                   size="md"
                   icone={<Plus size={14} />}
                   action="seat.assign"
-                  titre="Ajouter un utilisateur au drive"
-                  description="Un utilisateur applicatif de ce drive : identifiant, mot de passe et quota se gèrent ici, sans lien avec le compte du portail."
+                  titre="Attribuer un siège de drive"
+                  description="Un siège attribué est facturé, qu’il soit utilisé ou non. Il s’agit d’un droit d’accès et d’une ligne de facturation : le portail ne crée pas encore de compte Nextcloud pour le titulaire, qui doit en recevoir un directement depuis l’administration Nextcloud."
                   champs={[
-                    { id: 'nom', label: 'Nom', obligatoire: true, placeholder: 'Prénom Nom' },
-                    { id: 'motDePasse', label: 'Mot de passe', obligatoire: true, demi: true },
                     {
-                      id: 'quota',
-                      label: 'Quota',
-                      type: 'nombre',
-                      obligatoire: true,
-                      demi: true,
-                      suffixe: 'Go',
-                      min: 5,
-                      max: 2000,
+                      id: 'membre',
+                      label: 'Membre',
+                      type: 'select',
+                      options: USERS.slice(0, 12).map((u) => ({ value: u.id, label: `${u.nom} · ${u.email}` })),
                     },
                   ]}
-                  valeursDepart={{ quota: 50 }}
-                  libelleValider="Ajouter"
+                  libelleValider="Attribuer"
                   operation={(v) => {
-                    const nouvelId = drives.identifiant('drv')
+                    const membre = USERS.find((u) => u.id === v.membre)
                     return {
-                      titre: `${v.nom} ajouté au drive`,
+                      titre: `Siège attribué à ${membre?.nom ?? ''}`,
                       detail:
                         d.sieges.attribues + 1 > d.sieges.souscrits
                           ? 'Un siège supplémentaire est souscrit automatiquement, facturé au prorata.'
                           : `${d.sieges.attribues + 1} sièges attribués sur ${d.sieges.souscrits} souscrits.`,
-                      effet: () =>
+                      // Le backend attend l’identifiant du membre (`userId`) ;
+                      // les `USERS` de la maquette n’existent pas de son côté.
+                      appel: () =>
+                        creerRessource(`/web/drive/${encodeURIComponent(d.id)}/sieges`, {
+                          userId: String(v.membre),
+                        }),
+                      effet: () => {
+                        setRetires((prev) => prev.filter((x) => x !== v.membre))
                         drives.modifier(d.id, (x) => ({
-                          utilisateurs: [
-                            ...x.utilisateurs,
-                            { id: nouvelId, nom: String(v.nom), quotaGo: Number(v.quota), utiliseGo: 0 },
-                          ],
                           sieges: {
                             attribues: x.sieges.attribues + 1,
                             souscrits: Math.max(x.sieges.souscrits, x.sieges.attribues + 1),
                           },
-                        })),
+                        }))
+                      },
+                      effetFinal: () => drives.recharger(),
                     }
                   }}
                 />
               </GatedAction>
-              <ButtonLink
-                href={`https://${d.hote}`}
-                variant="accent"
-                iconAfter={<ExternalLink size={13} />}
-              >
+              <Button variant="accent" iconAfter={<ExternalLink size={13} />} onClick={ouvrirDrive}>
                 Ouvrir
-              </ButtonLink>
+              </Button>
+              <GatedAction autorise={autorise('service.admin')} message={refus('service.admin')}>
+                <BoutonAction
+                  libelle="Désactiver"
+                  variant="danger"
+                  size="md"
+                  icone={<Trash2 size={14} />}
+                  operation={{
+                    action: 'service.admin',
+                    ton: 'err',
+                    titre: `Drive de ${d.domaine} en cours de désactivation`,
+                    detail: 'Le serveur Nextcloud est détruit ; les fichiers restent dans la sauvegarde le temps de la rétention.',
+                    appel: () => supprimerRessource('/web/drive', d.id, d.domaine),
+                    job: {
+                      type: 'web.drive.desactiver',
+                      label: `Désactivation du drive ${d.domaine}`,
+                      etapes: ['Supprimer le serveur Nextcloud', 'Retirer la route du load balancer'],
+                    },
+                    effetFinal: () => {
+                      if (estActif()) {
+                        drives.recharger()
+                        return
+                      }
+                      drives.modifier(d.id, { actif: false })
+                    },
+                  }}
+                  confirmation={{
+                    ressource: d.domaine,
+                    titre: 'Désactiver ce drive ?',
+                    pertes: [
+                      'Le serveur Nextcloud sera détruit',
+                      `Les ${d.sieges.attribues} siège(s) attribué(s) perdront l’accès`,
+                      'Les fichiers restent dans la sauvegarde le temps de la rétention',
+                    ],
+                    libelleAction: 'Désactiver le drive',
+                  }}
+                />
+              </GatedAction>
             </>
           ) : (
             <GatedAction autorise={autorise('service.admin')} message={refus('service.admin')}>
@@ -128,8 +202,20 @@ export function VueDrive({ id }: { id: string }) {
                   action: 'service.admin',
                   titre: `Drive de ${d.domaine} en cours d’activation`,
                   detail: `${money(d.prixSiege)} par siège et par mois.`,
+                  appel: () =>
+                    creerRessource('/web/drive', {
+                      domaine: d.domaine,
+                      palier: d.palier,
+                      sieges: d.sieges.souscrits,
+                    }),
                   job: { workflow: 'web.drive.activate', cible: d.domaine },
-                  effetFinal: () => drives.modifier(d.id, { actif: true }),
+                  effetFinal: () => {
+                    if (estActif()) {
+                      drives.recharger()
+                      return
+                    }
+                    drives.modifier(d.id, { actif: true })
+                  },
                 }}
               />
             </GatedAction>
@@ -167,7 +253,7 @@ export function VueDrive({ id }: { id: string }) {
             />
             <StatTile
               libelle="Dernière sauvegarde"
-              valeur={d.derniereSauvegarde ? relatif(d.derniereSauvegarde) : '—'}
+              valeur={d.derniereSauvegarde ? relatif(d.derniereSauvegarde, maintenant) : '—'}
               ton="ok"
             />
           </div>
@@ -184,48 +270,41 @@ export function VueDrive({ id }: { id: string }) {
                   </p>
                 </div>
                 <ul className="divide-y divide-g-100">
-                  {titulaires.map((u) => (
+                  {titulaires.map((u, i) => (
                     <li
                       key={u.id}
                       className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5"
                     >
                       <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-semibold text-ink">
+                        <span className="block truncate text-[12.5px] font-semibold text-ink">
                           {u.nom}
                         </span>
-                        <span className="tnum block truncate text-[11px] text-g-500">
-                          {u.utiliseGo.toFixed(0)} / {u.quotaGo} Go
-                        </span>
+                        <span className="block truncate text-[11px] text-g-500">{u.email}</span>
                       </span>
-                      <span className="flex shrink-0 items-center gap-1">
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="tnum text-[11.5px] text-g-700">
+                          {(((d.quota.utiliseGo / Math.max(1, titulaires.length)) * (1 + (i % 3) * 0.4)) / 1).toFixed(0)} Go
+                        </span>
                         <GatedAction autorise={autorise('seat.assign')} message={refus('seat.assign')}>
                           <IconButton
-                            label={`Modifier ${u.nom}`}
-                            size="sm"
-                            onClick={() => setEdition(u.id)}
-                          >
-                            <Pencil size={13} />
-                          </IconButton>
-                        </GatedAction>
-                        <GatedAction autorise={autorise('seat.assign')} message={refus('seat.assign')}>
-                          <IconButton
-                            label={`Retirer ${u.nom}`}
+                            label={`Retirer le siège de ${u.nom}`}
                             size="sm"
                             onClick={() =>
                               executer({
                                 action: 'seat.assign',
                                 ton: 'warn',
-                                titre: `${u.nom} retiré du drive`,
+                                titre: `Siège de ${u.nom} retiré`,
                                 detail:
                                   'Ses fichiers personnels restent trente jours avant suppression ; les fichiers partagés restent au groupe.',
-                                effet: () =>
+                                effet: () => {
+                                  setRetires((prev) => [...prev, u.id])
                                   drives.modifier(d.id, (x) => ({
-                                    utilisateurs: x.utilisateurs.filter((y) => y.id !== u.id),
                                     sieges: {
                                       ...x.sieges,
                                       attribues: Math.max(0, x.sieges.attribues - 1),
                                     },
-                                  })),
+                                  }))
+                                },
                               })
                             }
                           >
@@ -290,13 +369,19 @@ export function VueDrive({ id }: { id: string }) {
                     label="Autoriser le partage vers l’extérieur"
                     description="Sans cela, un fichier ne se partage qu’entre titulaires de sièges."
                     checked={externe}
-                    onChange={setExterne}
+                    onChange={(v) => {
+                      setExterne(v)
+                      reglerPartage({ externeAutorise: v, motDePasseObligatoire: motDePasse })
+                    }}
                   />
                   <Switch
                     label="Mot de passe obligatoire sur les liens publics"
                     description="Un lien transféré dans une conversation reste sinon ouvert à qui le reçoit."
                     checked={motDePasse}
-                    onChange={setMotDePasse}
+                    onChange={(v) => {
+                      setMotDePasse(v)
+                      reglerPartage({ externeAutorise: externe, motDePasseObligatoire: v })
+                    }}
                   />
                   <Field label="Expiration par défaut des liens">
                     <Select defaultValue={String(d.partage.expirationJours)}>
@@ -325,7 +410,7 @@ export function VueDrive({ id }: { id: string }) {
                       key={x.t}
                       className="flex items-center justify-between gap-2 rounded-[6px] border border-g-300 px-3 py-2"
                     >
-                      <span className="text-[13px] text-g-700">{x.t}</span>
+                      <span className="text-[12.5px] text-g-700">{x.t}</span>
                       <Badge tone={x.ton} size="sm">
                         {x.n}
                       </Badge>
@@ -392,38 +477,6 @@ export function VueDrive({ id }: { id: string }) {
               messageRefus={refus('service.admin')}
             />
           )}
-
-          <ModaleFormulaire
-            ouvert={edition !== null}
-            onFermer={() => setEdition(null)}
-            titre={`Modifier ${enEdition?.nom ?? ''}`}
-            description="Le quota s’applique immédiatement. Laisser le mot de passe vide pour ne pas le changer."
-            champs={[
-              { id: 'quota', label: 'Quota', type: 'nombre', demi: true, suffixe: 'Go', min: 5, max: 2000 },
-              {
-                id: 'motDePasse',
-                label: 'Nouveau mot de passe',
-                demi: true,
-                placeholder: 'laisser vide pour ne pas changer',
-              },
-            ]}
-            valeursDepart={{ quota: enEdition?.quotaGo ?? 0 }}
-            libelleValider="Enregistrer"
-            onValider={(v) => {
-              if (!edition) return
-              executer({
-                action: 'seat.assign',
-                titre: `Quota de ${enEdition?.nom} mis à jour`,
-                detail: v.motDePasse ? 'Quota et mot de passe mis à jour.' : undefined,
-                effet: () =>
-                  drives.modifier(d.id, (x) => ({
-                    utilisateurs: x.utilisateurs.map((y) =>
-                      y.id === edition ? { ...y, quotaGo: Number(v.quota) } : y,
-                    ),
-                  })),
-              })
-            }}
-          />
         </>
       )}
     </div>

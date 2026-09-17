@@ -13,6 +13,8 @@ import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/component
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
 import { GrilleSparkCharts } from '@/components/business/observabilite'
 import { useCollection } from '@/components/app/atelier'
+import { useLectureDegradable } from '@/lib/api/degradable'
+import { estActif } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'sites', label: 'Sites physiques' },
@@ -21,7 +23,10 @@ const ONGLETS = [
   { id: 'contraintes', label: 'Contraintes de placement' },
 ]
 
-const SITES: Site[] = ['ABJ', 'GBM']
+// Grand-Bassam (GBM) n'existe pas réellement sur ce lab — un seul site physique (ABJ) est
+// adossé à de la vraie infrastructure (cf. GET /admin/sites, qui ne renvoie qu'ABJ). GBM
+// reste un second site de démonstration en mode maquette uniquement, jamais en mode API.
+const SITES: Site[] = estActif() ? ['ABJ'] : ['ABJ', 'GBM']
 
 const CARACTERISTIQUES: Record<
   Site,
@@ -78,12 +83,16 @@ export default function Sites() {
   // aussi : les deux écrans parlent du même parc.
   const parc = useCollection<Backend>('backends', BACKENDS_GRAINE)
   const [onglet, setOnglet] = useState('sites')
+  // `GET /admin/sites` ne sert que son `424` : le descriptif reste local,
+  // mais un site dont l’état réel est inconnu se signale.
+  const { degrade } = useLectureDegradable('/admin/sites')
 
   const BACKENDS = parc.items
 
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Sites physiques' }]}
         titre="Sites physiques"
         sousTitre="Deux sites en Côte d’Ivoire, à 42 kilomètres l’un de l’autre. Assez proches pour une réplication synchrone, assez éloignés pour qu’un même sinistre — inondation, coupure de réseau électrique, incendie — ne les touche pas ensemble."
         actions={
@@ -105,6 +114,17 @@ export default function Sites() {
           </>
         }
       />
+
+      {degrade && (
+        <Callout
+          ton="warn"
+          titre={`État des sites incertain${degrade.integration ? ` — ${degrade.integration}` : ''}`}
+        >
+          L’intégration amont ne répond pas
+          {degrade.dateDonnees ? ` (données du ${degrade.dateDonnees})` : ''} : le descriptif
+          ci-dessous reste valable, mais l’état temps réel des socles est inconnu.
+        </Callout>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

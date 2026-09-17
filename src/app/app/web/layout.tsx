@@ -8,7 +8,12 @@ import type { Metadata } from 'next'
  * layout, ce qui évite d'en afficher un vide ici.
  */
 export const metadata: Metadata = {
-  title: { default: 'Web Cloud', template: '%s · Web Cloud Synelia' },
+  // Même gabarit que `/app/layout.tsx`, redéfini ici (et non hérité) parce que
+  // les huit sections qui suivent sont deux niveaux sous `/app` : un titre
+  // simple ne reprend le gabarit que de son parent direct (§ piège Next.js),
+  // donc sans ce doublon elles perdraient tout gabarit, pas seulement « Web
+  // Cloud Synelia ».
+  title: { default: 'Web Cloud', template: '%s · Espace client Synelia Cloud' },
   description:
     'Domaines, hébergement mutualisé, bases de données, messagerie, drive, applications, certificats et sauvegardes.',
 }

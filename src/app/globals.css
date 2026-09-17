@@ -47,7 +47,13 @@
    * Mesuré crème / crème-2 :
    *   encre-2  15,6 / 14,0     violet p-600  6,8 / 6,0
    *   p-700     9,98 / 8,9     terre         6,0 / 5,4
-   *   ok        5,6 / 5,0      g-500         5,0 / 4,5
+   *   ok        5,6 / 5,0      g-500         5,6 / 5,0
+   *
+   * `g-500` a été réchauffé en même temps que les neutres du produit (§ neutres
+   * ci-dessous) : le premier essai (H 40°, L 44,5 %) retombait à 4,27:1 sur
+   * crème-2, sous le seuil — l'audit l'a relevé sur le pied de page de la
+   * vitrine, qui partage ce jeton avec le produit. Assombri à L 37 % pour
+   * retrouver la marge d'origine.
    *
    * Deux réserves à ne pas oublier :
    * - `m-600` tombe à 4,48:1 sur crème-2 : réservé au grand texte là-dessus
@@ -74,15 +80,26 @@
   --color-info-bg: #e9f1fa;
 
   /* ─── Neutres ─────────────────────────────────────────────────────── */
-  --color-ink: #2b1b4d;
-  --color-g-700: #43434f;
+  /*
+   * Le produit (`/app`, `/admin`) gardait un gris neutre bleuté, contrastant
+   * volontairement avec le crème chaud de la vitrine — un choix documenté,
+   * revu depuis : décision produit de faire lire les deux surfaces comme une
+   * seule marque plutôt que deux registres. La teinte se déplace du bleu-gris
+   * (H 240°) vers la même famille chaude que le crème et l'ocre (H 40°),
+   * luminance et contraste texte/fond tenus (audit `outils/audit.mjs` rejoué
+   * après coup). `ink` reprend au passage la valeur d'`encre-2` : les deux
+   * noms coexistaient pour la même encre, avec deux valeurs légèrement
+   * différentes selon qui l'avait écrit.
+   */
+  --color-ink: #241436;
+  --color-g-700: #4d4a45;
   /* #77778a ne donnait que 4,38:1 sur blanc et 4,03:1 sur p-050 : sous le
      seuil AA pour du texte courant, or g-500 porte tous les sous-titres. */
-  --color-g-500: #67677c;
+  --color-g-500: #676156;
   /* Réservé aux bordures et aux séparateurs, jamais au texte porteur de sens. */
-  --color-g-300: #c8c8d4;
-  --color-g-100: #efeff4;
-  --color-g-050: #f8f8fb;
+  --color-g-300: #d2cfca;
+  --color-g-100: #f3f2f0;
+  --color-g-050: #fbfaf8;
 
   /* ─── Typographie ─────────────────────────────────────────────────── */
   --font-display: var(--font-montserrat), 'Montserrat', 'Segoe UI', sans-serif;

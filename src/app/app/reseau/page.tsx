@@ -15,6 +15,13 @@ import { EmptyState } from '@/components/composition/states'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import {
+  creerRessource,
+  estActif,
+  modifierRessource,
+  requete,
+  supprimerRessource,
+} from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'prives', label: 'Réseaux privés' },
@@ -28,6 +35,7 @@ export default function Reseau() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const [onglet, setOnglet] = useState('prives')
+  const [creationReseauOuverte, setCreationReseauOuverte] = useState(false)
 
   const lesReseaux = useCollection<Network>('reseaux', NETWORKS)
   const lesIps = useCollection<PublicIP>('ips', PUBLIC_IPS)
@@ -85,12 +93,22 @@ export default function Reseau() {
                 action="network.manage"
                 titre="Créer un réseau privé"
                 description={`Le réseau découpe la plage ${espace.cidr} de l’espace. Le routage entre réseaux privés d’un même espace est automatique ; le filtrage se fait par groupe de sécurité.`}
+                ouvert={creationReseauOuverte}
+                onOuvertChange={setCreationReseauOuverte}
                 champs={champsReseau}
                 valeursDepart={{ vlan: 100 + reseaux.length, dns: true }}
                 libelleValider="Créer le réseau"
                 operation={(v) => ({
                   titre: `Réseau ${v.nom} créé`,
                   detail: `Plage ${v.cidr} · VLAN ${v.vlan}`,
+                  appel: () =>
+                    creerRessource('/reseaux', {
+                      nom: String(v.nom),
+                      cidr: String(v.cidr),
+                      espaceId: espace.id,
+                      dnsInterne: Boolean(v.dns),
+                      vlan: Number(v.vlan),
+                    }),
                   effet: () =>
                     lesReseaux.creer({
                       id: lesReseaux.identifiant('net'),
@@ -101,6 +119,7 @@ export default function Reseau() {
                       workloads: 0,
                       vlan: Number(v.vlan),
                     }),
+                  effetFinal: () => lesReseaux.recharger(),
                 })}
               />
             }
@@ -109,7 +128,7 @@ export default function Reseau() {
             <EmptyState
               titre="Aucun réseau privé"
               phrase={`Découpez la plage ${espace.cidr} en sous-réseaux par usage — front, données, cache — pour appliquer des politiques de filtrage distinctes.`}
-              action={{ libelle: 'Créer un réseau', href: '#' }}
+              action={{ libelle: 'Créer un réseau', onClick: () => setCreationReseauOuverte(true) }}
             />
           ) : (
             <div className="overflow-x-auto">
@@ -151,6 +170,14 @@ export default function Reseau() {
                             }}
                             operation={(v) => ({
                               titre: `Réseau ${v.nom} modifié`,
+                              appel: () =>
+                                modifierRessource('/reseaux', r.id, {
+                                  nom: String(v.nom),
+                                  cidr: String(v.cidr),
+                                  espaceId: espace.id,
+                                  dnsInterne: Boolean(v.dns),
+                                  vlan: Number(v.vlan),
+                                }),
                               effet: () =>
                                 lesReseaux.modifier(r.id, {
                                   nom: String(v.nom),
@@ -158,6 +185,7 @@ export default function Reseau() {
                                   vlan: Number(v.vlan),
                                   dnsInterne: Boolean(v.dns),
                                 }),
+                              effetFinal: () => lesReseaux.recharger(),
                             })}
                           />
                           <BoutonAction
@@ -168,7 +196,9 @@ export default function Reseau() {
                               action: 'network.manage',
                               ton: 'warn',
                               titre: `Réseau ${r.nom} supprimé`,
+                              appel: () => supprimerRessource('/reseaux', r.id, r.nom),
                               effet: () => lesReseaux.supprimer(r.id),
+                              effetFinal: () => lesReseaux.recharger(),
                             }}
                             confirmation={{
                               ressource: r.nom,
@@ -236,20 +266,32 @@ export default function Reseau() {
                   operation={(v) => ({
                     titre: 'IP publique attribuée',
                     detail: 'Facturée au prorata du mois en cours.',
+                    appel: () =>
+                      creerRessource('/ips', {
+                        espaceId: espace.id,
+                        site: espace.site,
+                        antiDdos: Boolean(v.ddos),
+                        ...(String(v.ptr) ? { ptr: String(v.ptr) } : {}),
+                      }),
                     job: {
                       type: 'network.ip.order',
                       label: `Attribution d’une IP publique · ${espace.code}`,
                       etapes: ['Réserver l’adresse dans le pool', 'Annoncer la route', 'Configurer le PTR'],
                       dureeEtapeMs: 900,
                     },
-                    effetFinal: () =>
+                    effetFinal: () => {
+                      if (estActif()) {
+                        lesIps.recharger()
+                        return
+                      }
                       lesIps.creer({
                         id: lesIps.identifiant('ip'),
                         espaceId: espace.id,
                         adresse: `102.176.20.${200 + ips.length}`,
                         ptr: String(v.ptr) || undefined,
                         antiDdos: Boolean(v.ddos),
-                      }),
+                      })
+                    },
                   })}
                 />
               }
@@ -298,17 +340,25 @@ export default function Reseau() {
                             <BoutonAction
                               libelle="Détacher"
                               variant="ghost"
-                              operation={{
-                                action: 'network.manage',
-                                ton: 'warn',
-                                titre: `${ip.adresse} détachée`,
-                                detail: 'L’adresse reste réservée et facturée.',
-                                effet: () =>
-                                  lesIps.modifier(ip.id, {
-                                    attachedTo: undefined,
-                                    attachedLabel: undefined,
-                                  }),
-                              }}
+                            operation={{
+                              action: 'network.manage',
+                              ton: 'warn',
+                              titre: `${ip.adresse} détachée`,
+                              detail: 'L’adresse reste réservée et facturée.',
+                              appel: () =>
+                                requete(`/ips/${encodeURIComponent(ip.id)}/attachement`, {
+                                  methode: 'DELETE',
+                                }),
+                              effet: () =>
+                                lesIps.modifier(ip.id, {
+                                  attachedTo: undefined,
+                                  attachedLabel: undefined,
+                                }),
+                              effetFinal: () => {
+                                parc.recharger()
+                                lesIps.recharger()
+                              },
+                            }}
                             />
                           ) : (
                             <BoutonFormulaire
@@ -329,6 +379,11 @@ export default function Reseau() {
                                 const cible = machines.find((m) => m.id === v.machine)
                                 return {
                                   titre: `${ip.adresse} attachée à ${cible?.nom ?? ''}`,
+                                  appel: () =>
+                                    requete(`/ips/${encodeURIComponent(ip.id)}/attachement`, {
+                                      methode: 'PUT',
+                                      corps: { cibleId: String(v.machine) },
+                                    }),
                                   effet: () => {
                                     lesIps.modifier(ip.id, {
                                       attachedTo: cible?.id,
@@ -341,6 +396,10 @@ export default function Reseau() {
                                           { adresse: ip.adresse, type: 'publique' as const, ptr: ip.ptr },
                                         ],
                                       }))
+                                  },
+                                  effetFinal: () => {
+                                    parc.recharger()
+                                    lesIps.recharger()
                                   },
                                 }
                               }}
@@ -359,7 +418,15 @@ export default function Reseau() {
                             operation={(v) => ({
                               titre: `PTR de ${ip.adresse} enregistré`,
                               detail: String(v.ptr),
+                              appel: () =>
+                                modifierRessource('/ips', ip.id, {
+                                  espaceId: ip.espaceId,
+                                  site: espace.site,
+                                  antiDdos: ip.antiDdos ?? false,
+                                  ...(String(v.ptr) ? { ptr: String(v.ptr) } : {}),
+                                }),
                               effet: () => lesIps.modifier(ip.id, { ptr: String(v.ptr) || undefined }),
+                              effetFinal: () => lesIps.recharger(),
                             })}
                           />
                           <IconButton
@@ -376,7 +443,9 @@ export default function Reseau() {
                                 ton: 'warn',
                                 titre: `${ip.adresse} libérée`,
                                 detail: 'L’adresse retourne au pool et n’est plus facturée. Elle ne pourra pas être reprise.',
+                                appel: () => supprimerRessource('/ips', ip.id, ip.adresse),
                                 effet: () => lesIps.supprimer(ip.id),
+                                effetFinal: () => lesIps.recharger(),
                               })
                             }
                           >
@@ -445,6 +514,16 @@ export default function Reseau() {
               operation={(v) => ({
                 titre: `Groupe ${v.nom} créé`,
                 detail: 'Aucune ressource ne lui est encore attachée.',
+                appel: () =>
+                  creerRessource('/groupes-securite', {
+                    espaceId: espace.id,
+                    nom: String(v.nom),
+                    ...(String(v.description) ? { description: String(v.description) } : {}),
+                    defaultPolicy: {
+                      ingress: v.entree as 'deny' | 'allow',
+                      egress: v.sortie as 'deny' | 'allow',
+                    },
+                  }),
                 effet: () =>
                   lesGroupes.creer({
                     id: lesGroupes.identifiant('sg'),
@@ -458,6 +537,7 @@ export default function Reseau() {
                     rules: [],
                     attaches: 0,
                   }),
+                effetFinal: () => lesGroupes.recharger(),
               })}
             />
           </div>
@@ -533,10 +613,16 @@ export default function Reseau() {
                                   ton: 'warn',
                                   titre: 'Règle supprimée',
                                   detail: `${sg.nom} · ${r.protocole.toUpperCase()} ${r.ports ?? ''} ${r.cible}`,
+                                  appel: () =>
+                                    requete(
+                                      `/groupes-securite/${encodeURIComponent(sg.id)}/regles/${encodeURIComponent(r.id)}`,
+                                      { methode: 'DELETE' },
+                                    ),
                                   effet: () =>
                                     lesGroupes.modifier(sg.id, (g) => ({
                                       rules: g.rules.filter((x) => x.id !== r.id),
                                     })),
+                                  effetFinal: () => lesGroupes.recharger(),
                                 })
                               }
                             >
@@ -586,24 +672,39 @@ export default function Reseau() {
                   ]}
                   valeursDepart={{ direction: 'in', protocole: 'tcp' }}
                   libelleValider="Ajouter la règle"
-                  operation={(v) => ({
-                    titre: 'Règle ajoutée',
-                    detail: `${sg.nom} · ${String(v.protocole).toUpperCase()} ${v.ports} ${v.cible}`,
-                    effet: () =>
-                      lesGroupes.modifier(sg.id, (g) => ({
-                        rules: [
-                          ...g.rules,
-                          {
-                            id: lesGroupes.identifiant('rule'),
-                            direction: v.direction as 'in' | 'out',
-                            protocole: v.protocole as 'tcp' | 'udp' | 'icmp' | 'any',
-                            ports: String(v.ports) || undefined,
-                            cible: String(v.cible),
-                            description: String(v.description) || undefined,
-                          },
-                        ],
-                      })),
-                  })}
+                  operation={(v) => {
+                    const idRegle = lesGroupes.identifiant('rule')
+                    return {
+                      titre: 'Règle ajoutée',
+                      detail: `${sg.nom} · ${String(v.protocole).toUpperCase()} ${v.ports} ${v.cible}`,
+                      appel: () =>
+                        creerRessource(`/groupes-securite/${encodeURIComponent(sg.id)}/regles`, {
+                          id: idRegle,
+                          direction: v.direction as 'in' | 'out',
+                          protocole: v.protocole as 'tcp' | 'udp' | 'icmp' | 'any',
+                          ...(String(v.ports) ? { ports: String(v.ports) } : {}),
+                          cible: String(v.cible),
+                          ...(String(v.description)
+                            ? { description: String(v.description) }
+                            : {}),
+                        }),
+                      effet: () =>
+                        lesGroupes.modifier(sg.id, (g) => ({
+                          rules: [
+                            ...g.rules,
+                            {
+                              id: idRegle,
+                              direction: v.direction as 'in' | 'out',
+                              protocole: v.protocole as 'tcp' | 'udp' | 'icmp' | 'any',
+                              ports: String(v.ports) || undefined,
+                              cible: String(v.cible),
+                              description: String(v.description) || undefined,
+                            },
+                          ],
+                        })),
+                      effetFinal: () => lesGroupes.recharger(),
+                    }
+                  }}
                 />
               </GatedAction>
             </Card>
@@ -635,6 +736,17 @@ export default function Reseau() {
                   operation={(v) => ({
                     titre: `Tunnel ${v.nom} créé`,
                     detail: 'La négociation démarre dès que la passerelle distante répond.',
+                    appel: () =>
+                      creerRessource('/vpn', {
+                        espaceId: espace.id,
+                        nom: String(v.nom),
+                        type: 'ipsec',
+                        passerelleDistante: String(v.passerelle),
+                        reseauxAnnonces: String(v.reseaux)
+                          .split(',')
+                          .map((r) => r.trim())
+                          .filter(Boolean),
+                      }),
                     job: {
                       type: 'network.vpn.create',
                       label: `Tunnel IPsec · ${v.nom}`,
@@ -654,11 +766,16 @@ export default function Reseau() {
                           .filter(Boolean),
                         statut: 'negociation',
                       }),
-                    effetFinal: () =>
+                    effetFinal: () => {
+                      if (estActif()) {
+                        lesTunnels.recharger()
+                        return
+                      }
                       lesTunnels.modifier(
                         lesTunnels.items.find((t) => t.nom === String(v.nom))?.id ?? '',
                         { statut: 'up', derniereNegociation: MAINTENANT },
-                      ),
+                      )
+                    },
                   })}
                 />
               }
@@ -754,6 +871,13 @@ export default function Reseau() {
                   operation={(v) => ({
                     titre: `Profil ${v.nom} généré`,
                     detail: 'Le fichier .ovpn est disponible pendant 24 heures.',
+                    appel: () => {
+                      const ssl = tunnels.find((t) => t.type === 'ssl')
+                      return creerRessource(
+                        `/vpn/${encodeURIComponent(ssl?.id ?? 'ssl')}/profils`,
+                        { nom: String(v.nom), utilisateur: String(v.utilisateur) },
+                      )
+                    },
                     effet: () =>
                       lesTunnels.modifier(
                         tunnels.find((t) => t.type === 'ssl')?.id ?? '',
@@ -768,6 +892,7 @@ export default function Reseau() {
                           ],
                         }),
                       ),
+                    effetFinal: () => lesTunnels.recharger(),
                   })}
                 />
               }
@@ -827,12 +952,18 @@ export default function Reseau() {
                                   ton: 'warn',
                                   titre: `Profil ${p.nom} révoqué`,
                                   detail: 'La révocation est immédiate : la session en cours est coupée.',
+                                  appel: () =>
+                                    requete(
+                                      `/vpn/${encodeURIComponent(t.id)}/profils/${encodeURIComponent(p.nom)}`,
+                                      { methode: 'DELETE' },
+                                    ),
                                   effet: () =>
                                     lesTunnels.modifier(t.id, (x) => ({
                                       profils: (x.profils ?? []).map((pr) =>
                                         pr.nom === p.nom ? { ...pr, revoque: true } : pr,
                                       ),
                                     })),
+                                  effetFinal: () => lesTunnels.recharger(),
                                 }}
                                 confirmation={{
                                   ressource: p.nom,

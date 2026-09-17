@@ -39793,75 +39793,6 @@
         }
       }
     },
-    "/web/smtp/webhooks/{webhookId}/test": {
-      "post": {
-        "tags": [
-          "Web Cloud — relais SMTP"
-        ],
-        "operationId": "testerWebhookSmtp",
-        "summary": "Envoyer un appel de test au webhook",
-        "x-rbac": "service.admin",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Organisation"
-          },
-          {
-            "$ref": "#/components/parameters/Langue"
-          },
-          {
-            "name": "webhookId",
-            "in": "path",
-            "required": true,
-            "description": "Identifiant du webhook.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Succès.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "envoye": {
-                      "type": "boolean"
-                    },
-                    "code": {
-                      "type": "integer",
-                      "format": "int32"
-                    }
-                  },
-                  "required": [
-                    "envoye"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Invalide"
-          },
-          "401": {
-            "$ref": "#/components/responses/NonAuthentifie"
-          },
-          "403": {
-            "$ref": "#/components/responses/Interdit"
-          },
-          "404": {
-            "$ref": "#/components/responses/Introuvable"
-          },
-          "429": {
-            "$ref": "#/components/responses/TropDeRequetes"
-          },
-          "500": {
-            "$ref": "#/components/responses/Serveur"
-          }
-        }
-      }
-    },
     "/web/ssl": {
       "get": {
         "tags": [
@@ -42285,6 +42216,10 @@
           "orgId": {
             "type": "string"
           },
+          "espaceId": {
+            "type": "string",
+            "description": "L'Espace Cloud auquel le bucket est rattaché — c'est lui qui borne les listes."
+          },
           "nom": {
             "type": "string"
           },
@@ -42358,6 +42293,7 @@
         "required": [
           "id",
           "orgId",
+          "espaceId",
           "nom",
           "region",
           "classe",
@@ -51320,6 +51256,10 @@
           "clusterId": {
             "type": "string",
             "description": "Le cluster Kubernetes qui héberge les services du projet — dédié ou partagé avec d'autres projets du même Espace."
+          },
+          "lbId": {
+            "type": "string",
+            "description": "Le load balancer L7 dédié provisionné avec le projet, quand il y en a un — la porte d’entrée de ses services."
           },
           "cible": {
             "type": "string",

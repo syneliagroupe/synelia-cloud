@@ -276,6 +276,9 @@ const projets = {
       clusterId: chaine(
         "Le cluster Kubernetes qui héberge les services du projet — dédié ou partagé avec d'autres projets du même Espace.",
       ),
+      lbId: chaine(
+        'Le load balancer L7 dédié provisionné avec le projet, quand il y en a un — la porte d’entrée de ses services.',
+      ),
       cible: liste(
         ['vm', 'k8s'],
         'Cible de calcul du projet : `k8s` (namespace sur le cluster PaaS partagé, par défaut) ou `vm` (une VM Nova dédiée, ses services en conteneurs Docker Compose). Fixée à la création.',

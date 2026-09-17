@@ -27,7 +27,6 @@ export const PROJETS: Projet[] = [
     lbId: 'lb-prj-metier',
     cree: '2025-03-11',
     etiquettes: ['production', 'critique'],
-    clusterId: 'k8s-prod',
     environnements: ['Production', 'Préproduction', 'Développement'],
     variables: [
       {
@@ -73,7 +72,6 @@ export const PROJETS: Projet[] = [
     lbId: 'lb-prj-vitrine',
     cree: '2025-06-02',
     etiquettes: ['production', 'public'],
-    clusterId: 'k8s-prod',
     environnements: ['Production', 'Préproduction'],
     variables: [
       {
@@ -102,7 +100,6 @@ export const PROJETS: Projet[] = [
     lbId: 'lb-prj-data',
     cree: '2025-09-24',
     etiquettes: ['production', 'analytique'],
-    clusterId: 'k8s-prod',
     environnements: ['Production', 'Développement'],
     variables: [
       {
@@ -130,7 +127,6 @@ export const PROJETS: Projet[] = [
     lbId: 'lb-prj-solutions',
     cree: '2026-02-04',
     etiquettes: ['production', 'catalogue'],
-    clusterId: 'k8s-prod',
     environnements: ['Production'],
     variables: [
       {
@@ -152,7 +148,6 @@ export const PROJETS: Projet[] = [
     lbId: 'lb-prj-outillage',
     cree: '2025-11-08',
     etiquettes: ['interne'],
-    clusterId: 'k8s-lab',
     environnements: ['Production'],
     variables: [
       {

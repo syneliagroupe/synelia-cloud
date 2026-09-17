@@ -141,7 +141,7 @@ export default function NouveauProjet() {
       cree: MAINTENANT.slice(0, 10),
       environnements: ['Production'],
       variables: [],
-      tags,
+      etiquettes: tags,
     })
 
     pousser({

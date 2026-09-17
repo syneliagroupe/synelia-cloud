@@ -1069,6 +1069,7 @@ const iaas = {
     {
       id: chaine(),
       orgId: chaine(),
+      espaceId: chaine("L'Espace Cloud auquel le bucket est rattaché — c'est lui qui borne les listes."),
       nom: chaine(),
       region: liste(SITES),
       classe: liste(['chaud', 'froid']),
@@ -1080,7 +1081,7 @@ const iaas = {
       accessLogs: booleen(),
       policy: liste(['prive', 'lecture_publique', 'json']),
     },
-    ['id', 'orgId', 'nom', 'region', 'classe', 'tailleGo', 'objets', 'versioning', 'accessLogs', 'policy'],
+    ['id', 'orgId', 'espaceId', 'nom', 'region', 'classe', 'tailleGo', 'objets', 'versioning', 'accessLogs', 'policy'],
   ),
 
   BucketCreation: objet(

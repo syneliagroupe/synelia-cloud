@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowRight, MoveRight, PlayCircle } from 'lucide-react'
+import { ArrowRight, CalendarClock, MoveRight, PlayCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, dateHeure, dureeMin, money, num, pct } from '@/lib/format'
 import { BACKENDS, TRAJECTOIRE_SORTIE, VMS } from '@/lib/mock'

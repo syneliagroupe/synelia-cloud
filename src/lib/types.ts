@@ -523,6 +523,12 @@ export interface Projet {
    * load balancer qui pointe dessus, qui sont facturés dès la création.
    */
   clusterId: string
+  /**
+   * Le load balancer L7 dédié, provisionné avec le projet — la porte d'entrée
+   * de ses services. Optionnel : un projet servi par le backend n'en déclare
+   * pas toujours un, et la vue ne doit pas s'y fier.
+   */
+  lbId?: string
   /** Un même projet se décline par environnement, chacun avec ses services. */
   environnements: string[]
   /**

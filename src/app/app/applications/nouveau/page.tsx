@@ -1,168 +1,283 @@
 'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useState } from 'react'
-import {
-  Boxes,
-  Check,
-  Container as ContainerIcon,
-  FolderPlus,
-  GitBranch,
-  Info,
-  LayoutTemplate,
-  TriangleAlert,
-} from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { MAINTENANT, money, num } from '@/lib/format'
-import { ANALYSE_DEPOT, ESPACES, PROJETS, SERVICES_PROJET } from '@/lib/mock'
-import { CATEGORIE_MODELE_LABEL, MODELES, modeleBySlug } from '@/lib/mock/modeles'
-import type { Projet, ServiceProjet } from '@/lib/types'
-import { Badge, MicroLabel } from '@/components/ui/badge'
+import { MAINTENANT, TVA_PCT } from '@/lib/format'
+import { ESPACES, K8S_CLUSTERS, PROJETS, ZONE_APPLICATIVE } from '@/lib/mock'
+import { SITE_LABEL, type EspaceCloud, type K8sCluster, type Projet } from '@/lib/types'
+import { MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox, Field, Input, Select, Switch } from '@/components/ui/field'
+import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
 import { CostPreview, WizardShell } from '@/components/composition/flow'
-import { EmptyState } from '@/components/composition/states'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useEspace } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
+import { creerRessource, estActif, estTravail, suivreTravail } from '@/lib/api/client'
 
-/**
- * Assistant de déploiement — pas de création de projet ici.
- *
- * Un projet est toujours un cluster Kubernetes dédié : il naît depuis
- * « Créer un projet » dans Projets, avec son Espace Cloud et son cluster
- * (neuf ou existant). Cet assistant part donc d'un projet déjà là, et
- * n'a plus jamais à demander Kubernetes ou des machines virtuelles — c'est
- * déjà tranché. Il ne déploie que dans **un seul** environnement à la fois :
- * dupliquer vers un autre environnement se fait en relançant l'assistant.
- */
-// L'étape « Architecture » (composition proposée du canvas) est désactivée pour
-// l'instant : le canvas prérempli n'apporte pas assez pour justifier l'étape.
 const ETAPES = [
   { numero: 1, titre: 'Projet' },
-  { numero: 2, titre: 'Source' },
-  { numero: 3, titre: 'Analyse du dépôt' },
-  { numero: 4, titre: 'Ressources' },
-  { numero: 5, titre: 'Environnement' },
+  { numero: 2, titre: 'Infrastructure' },
+  { numero: 3, titre: 'Récapitulatif' },
 ]
 
-const DEPOTS = [
-  { url: 'github.com/dba-africa/app-metier', branches: ['main', 'develop', 'release/2.8'] },
-  { url: 'github.com/dba-africa/batch-worker', branches: ['main', 'develop'] },
-  { url: 'git.dba.africa/data/analytics', branches: ['main', 'feature/streaming'] },
-  { url: 'github.com/dba-africa/portail-client', branches: ['main'] },
+/**
+ * Tailles prédéfinies du cluster dédié — le pendant simplifié des pools de
+ * `/app/kubernetes/new` : au moment de créer un projet, on choisit un gabarit,
+ * pas un plan de pools. Ce niveau de détail reste accessible plus tard depuis
+ * la fiche du cluster.
+ */
+const TAILLES_CLUSTER = [
+  {
+    id: 'petit',
+    nom: 'Petit',
+    modeCp: 'single' as const,
+    noeuds: 1,
+    flavor: '4 vCPU · 8 Go',
+    vcpu: 4,
+    ramGo: 8,
+    diskGo: 60,
+    prixNoeud: 7800,
+  },
+  {
+    id: 'moyen',
+    nom: 'Moyen',
+    modeCp: 'ha' as const,
+    noeuds: 3,
+    flavor: '8 vCPU · 16 Go',
+    vcpu: 8,
+    ramGo: 16,
+    diskGo: 100,
+    prixNoeud: 15600,
+  },
+  {
+    id: 'grand',
+    nom: 'Grand',
+    modeCp: 'ha' as const,
+    noeuds: 5,
+    flavor: '16 vCPU · 32 Go',
+    vcpu: 16,
+    ramGo: 32,
+    diskGo: 150,
+    prixNoeud: 27000,
+  },
 ]
 
-/** Composition de départ du canvas, ajustable à l'étape « Ressources ». */
-const COMPOSANTS_CANVAS = [
-  { nom: 'traefik', role: 'Proxy d’entrée', cpu: 1, ram: 512, disk: 5, rep: 2 },
-  { nom: 'api', role: 'Service applicatif', cpu: 2, ram: 2048, disk: 20, rep: 2 },
-  { nom: 'postgres', role: 'Base de données managée', cpu: 4, ram: 16384, disk: 500, rep: 1 },
-  { nom: 'redis', role: 'Cache', cpu: 1, ram: 4096, disk: 10, rep: 1 },
-]
+const COUT_LB = 18000
 
-export default function NouvelleApplication() {
-  return (
-    <Suspense fallback={null}>
-      <NouvelleApplicationInterne />
-    </Suspense>
-  )
-}
-
-/** Isolé pour `useSearchParams`, qui exige un contour de Suspense. */
-function NouvelleApplicationInterne() {
+export default function NouveauProjet() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const { pousser } = useApp()
+  const espaceCourant = useEspace()
   const projets = useCollection<Projet>('projets', PROJETS)
-  const services = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
-  const { lancerJob } = useAtelier()
+  const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
+  const { lancerJob, integrerTravail } = useAtelier()
 
-  const [projetId, setProjetId] = useState(searchParams.get('projet') ?? projets.items[0]?.id ?? '')
   const [etape, setEtape] = useState(1)
-  const [source, setSource] = useState<'git' | 'image' | 'canvas' | 'modele'>('git')
-  const [modeleSlug, setModeleSlug] = useState(MODELES[0].slug)
-  const [depot, setDepot] = useState(DEPOTS[0].url)
-  const [branche, setBranche] = useState('main')
-  const [nomApp, setNomApp] = useState('portail-client')
-  const [image, setImage] = useState('registry.synelia.cloud/dba/portail-client')
-  const [etiquette, setEtiquette] = useState('v1.0.0')
-  const [builder, setBuilder] = useState<'nixpacks' | 'dockerfile' | 'image'>('nixpacks')
-  const [previewPr, setPreviewPr] = useState(true)
+  const [nom, setNom] = useState('')
+  const [description, setDescription] = useState('')
+  const [etiquettes, setEtiquettes] = useState<string[]>([])
+
+  const [espaceId, setEspaceId] = useState(espaceCourant.id)
+  const [clusterMode, setClusterMode] = useState<'nouveau' | 'existant'>('nouveau')
+  const [tailleClusterId, setTailleClusterId] = useState('moyen')
+  const clustersDisponiblesInitial = grappes.items.filter((c) => c.espaceId === espaceCourant.id)
+  const [clusterExistantId, setClusterExistantId] = useState(clustersDisponiblesInitial[0]?.id ?? '')
+
   const [conditions, setConditions] = useState(false)
-  const [composants, setComposants] = useState(COMPOSANTS_CANVAS)
-  const [env, setEnv] = useState(searchParams.get('env') ?? '')
 
-  const projet = projets.items.find((p) => p.id === projetId)
-  const envActif = env && projet?.environnements.includes(env) ? env : (projet?.environnements[0] ?? '')
-  const depotChoisi = DEPOTS.find((d) => d.url === depot)!
-  const modeleChoisi = modeleBySlug(modeleSlug)!
-  const espace = ESPACES.find((e) => e.id === projet?.espaceId)
+  const espace = espacesCol.items.find((e) => e.id === espaceId) ?? espaceCourant
+  const clustersDisponibles = grappes.items.filter((c) => c.espaceId === espaceId)
+  const clusterExistantChoisi = clustersDisponibles.find((c) => c.id === clusterExistantId)
+  const tailleChoisie = TAILLES_CLUSTER.find((t) => t.id === tailleClusterId)!
 
-  const lignesCout = [
-    {
-      libelle: 'Composants Kubernetes',
-      detail: `Environnement ${envActif || '—'} · ${composants.length} composants`,
-      montant: 14000,
-    },
-    { libelle: 'Base managée PostgreSQL 16', detail: 'Palier Flex, détectée dans le dépôt', montant: 28000 },
-    { libelle: 'Cache Redis 7.2', detail: 'Palier Flex', montant: 9000 },
-    ...(envActif === 'Production'
-      ? [{ libelle: 'Load balancer L7 + certificat', detail: 'Exposition publique', montant: 18000 }]
-      : []),
-  ]
+  const lignesCout =
+    clusterMode === 'nouveau'
+      ? [
+          {
+            libelle: `Control plane ${tailleChoisie.modeCp === 'ha' ? 'haute disponibilité' : 'mono-master'}`,
+            detail:
+              tailleChoisie.modeCp === 'ha'
+                ? '3 masters répartis · SLA 99,95 %'
+                : '1 master · SLA 99,5 %',
+            montant: tailleChoisie.modeCp === 'ha' ? 42000 : 14000,
+          },
+          {
+            libelle: `Nœuds workers · ${tailleChoisie.noeuds} nœuds`,
+            detail: `${tailleChoisie.noeuds} nœuds · ${tailleChoisie.vcpu} vCPU · ${tailleChoisie.ramGo} Go`,
+            montant: tailleChoisie.noeuds * tailleChoisie.prixNoeud,
+          },
+          {
+            libelle: 'Load balancer L7 dédié',
+            detail: 'Provisionné automatiquement — porte d’entrée du projet',
+            montant: COUT_LB,
+          },
+        ]
+      : [
+          {
+            libelle: 'Load balancer L7 dédié',
+            detail: `Provisionné automatiquement sur ${clusterExistantChoisi?.nom ?? 'le cluster partagé'} — porte d’entrée du projet`,
+            montant: COUT_LB,
+          },
+        ]
 
-  const suivant = (n: number) => (n === 2 ? (source === 'git' ? 3 : 4) : n + 1)
-  const precedent = (n: number) => (n === 4 ? (source === 'git' ? 3 : 2) : n - 1)
+  const peutContinuer =
+    etape === 1
+      ? nom.trim().length > 0
+      : etape === 2
+        ? clusterMode === 'nouveau' || Boolean(clusterExistantChoisi)
+        : conditions
 
-  const etapesVisibles = ETAPES.filter((e) => e.numero !== 3 || source === 'git')
-  const peutContinuer = etape === 1 ? Boolean(projet) : etape === 5 ? conditions && Boolean(envActif) : true
+  const creerLeProjet = () => {
+    const idProjetMock = projets.identifiant('prj')
+    const nomCluster = `k8s-${nom.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`
 
-  if (!projet) {
-    return (
-      <EmptyState
-        titre="Aucun projet pour l’instant"
-        phrase="Une application se déploie toujours dans un projet — le contenant qui porte l’Espace Cloud et le cluster Kubernetes. Créez-en un d’abord, ça ne facture rien tant qu’aucun service n’y tourne."
-        icone={<FolderPlus size={22} />}
-        action={{ libelle: 'Créer un projet', href: '/app/applications/projets/nouveau' }}
-      />
-    )
+    if (estActif()) {
+      // Le cluster part en premier quand il est nouveau : la création du
+      // projet le référence, que son provisioning soit déjà terminé ou
+      // encore suivi à part (`202`).
+      const rattacherProjet = (clusterId: string) => {
+        creerRessource('/projets', {
+          nom,
+          description,
+          etiquettes,
+          espaceId: espace.id,
+          clusterId,
+          environnements: ['Production'],
+        }).then((r) => {
+          if (estTravail(r)) {
+            const suivi = integrerTravail(r)
+            suivreTravail(suivi, (t) => integrerTravail(t))
+          }
+          projets.recharger()
+        })
+      }
+
+      if (clusterMode === 'nouveau') {
+        creerRessource('/kubernetes', {
+          espaceId: espace.id,
+          nom: nomCluster,
+          version: '1.31.2',
+          site: espace.site,
+          controlPlane: {
+            mode: tailleChoisie.modeCp,
+            nodes: tailleChoisie.modeCp === 'ha' ? 3 : 1,
+          },
+          pools: [
+            {
+              nom: 'pool-standard',
+              nodes: tailleChoisie.noeuds,
+              flavor: tailleChoisie.flavor,
+              diskGo: tailleChoisie.diskGo,
+            },
+          ],
+        }).then((c) => {
+          grappes.recharger()
+          rattacherProjet((c as { id: string }).id)
+        })
+      } else {
+        rattacherProjet(clusterExistantChoisi!.id)
+      }
+
+      pousser({
+        ton: 'info',
+        titre: `Création de ${nom} lancée`,
+        detail:
+          clusterMode === 'nouveau'
+            ? 'Le cluster est provisionné, puis le load balancer et la zone applicative. Suivi dans le centre de tâches.'
+            : 'Le load balancer et la zone applicative sont en cours de provisionnement. Suivi dans le centre de tâches.',
+      })
+      router.push('/app/applications/projets')
+      return
+    }
+
+    let clusterId = clusterExistantChoisi?.id ?? ''
+    if (clusterMode === 'nouveau') {
+      const idCluster = grappes.identifiant('k8s')
+      grappes.creer({
+        id: idCluster,
+        espaceId: espace.id,
+        nom: nomCluster,
+        version: '1.31.2',
+        controlPlane: { mode: tailleChoisie.modeCp, nodes: tailleChoisie.modeCp === 'ha' ? 3 : 1 },
+        pools: [
+          {
+            nom: 'pool-standard',
+            nodes: tailleChoisie.noeuds,
+            flavor: tailleChoisie.flavor,
+            diskGo: tailleChoisie.diskGo,
+            type: 'standard',
+          },
+        ],
+        modules: ['ingress-nginx 1.11.2', 'cert-manager 1.15.3'],
+        statut: 'provisioning',
+        site: espace.site,
+      })
+      lancerJob({
+        workflow: 'k8s.create',
+        cible: `${nomCluster} · ${SITE_LABEL[espace.site]}`,
+        alFin: () => grappes.modifier(idCluster, { statut: 'running' }),
+      })
+      clusterId = idCluster
+    }
+
+    projets.creer({
+      id: idProjetMock,
+      nom,
+      description,
+      espaceId: espace.id,
+      cree: MAINTENANT.slice(0, 10),
+      etiquettes,
+      clusterId,
+      environnements: ['Production'],
+      variables: [],
+    })
+    pousser({
+      ton: 'info',
+      titre: `Création de ${nom} lancée`,
+      detail:
+        clusterMode === 'nouveau'
+          ? 'Le cluster est provisionné, puis le load balancer et la zone applicative.'
+          : 'Le load balancer et la zone applicative sont en cours de provisionnement.',
+    })
+    lancerJob({
+      workflow: 'projet.create',
+      cible: nom,
+      alFin: () => {
+        pousser({
+          ton: 'ok',
+          titre: `${nom} est prêt`,
+          detail: 'Vous pouvez déployer votre premier service.',
+        })
+      },
+    })
+    router.push(`/app/applications/projets/${idProjetMock}`)
   }
 
   return (
     <WizardShell
-      etapes={etapesVisibles}
+      etapes={ETAPES}
       courante={etape}
       onChange={setEtape}
       titre={ETAPES[etape - 1].titre}
       panneau={
         <>
           <Card>
-            <MicroLabel>Application</MicroLabel>
+            <MicroLabel>Projet</MicroLabel>
             <dl className="mt-2.5 space-y-1.5">
-              <Petit cle="Projet" valeur={projet.nom} />
-              <Petit cle="Nom" valeur={nomApp} mono />
+              <Petit cle="Nom" valeur={nom || '—'} mono />
+              <Petit cle="Étiquettes" valeur={String(etiquettes.length)} />
+              <Petit cle="Espace Cloud" valeur={espace.code} mono />
               <Petit
-                cle="Source"
+                cle="Cluster"
                 valeur={
-                  {
-                    git: 'Dépôt Git',
-                    image: 'Image Docker',
-                    canvas: 'Canvas',
-                    modele: 'Solution du catalogue',
-                  }[source]
+                  clusterMode === 'nouveau' ? `Nouveau · ${tailleChoisie.nom}` : 'Existant'
                 }
               />
-              {source === 'git' && <Petit cle="Branche" valeur={branche} mono />}
-              {source === 'modele' && (
-                <Petit
-                  cle="Solution"
-                  valeur={`${modeleChoisi.solution} ${modeleChoisi.version}`}
-                />
-              )}
-              <Petit cle="Constructeur" valeur={builder} />
-              <Petit cle="Espace Cloud" valeur={espace?.code ?? ''} mono />
-              <Petit cle="Environnement" valeur={envActif || '—'} />
+              <Petit cle="Load balancer" valeur="Automatique" />
+              <Petit cle="Environnement" valeur="Production" />
             </dl>
           </Card>
           <CostPreview lignes={lignesCout} />
@@ -172,63 +287,19 @@ function NouvelleApplicationInterne() {
         <>
           <Button
             variant="ghost"
-            onClick={() => {
-              if (etape === 1) return router.push(`/app/applications/projets/${projet.id}`)
-              setEtape(precedent(etape))
-            }}
+            onClick={() =>
+              etape === 1 ? router.push('/app/applications/projets') : setEtape(etape - 1)
+            }
           >
             {etape === 1 ? 'Annuler' : 'Précédent'}
           </Button>
-          {etape < 5 ? (
-            <Button onClick={() => setEtape(suivant(etape))}>Continuer</Button>
+          {etape < 3 ? (
+            <Button disabled={!peutContinuer} onClick={() => setEtape(etape + 1)}>
+              Continuer
+            </Button>
           ) : (
-            <Button
-              disabled={!peutContinuer}
-              onClick={() => {
-                const idService = services.identifiant('svc')
-                services.creer({
-                  id: idService,
-                  projetId: projet.id,
-                  nom: nomApp,
-                  type: 'application',
-                  environnement: envActif,
-                  statut: 'building',
-                  ressources: { cpu: 1, ramMo: 1024, diskGo: 20 },
-                  emplacement: {
-                    site: espace?.site ?? 'ABJ',
-                    backend: 'OpenStack Magnum',
-                    namespace: `${projet.id}-${envActif.toLowerCase()}`,
-                  },
-                  derniereMaj: MAINTENANT,
-                  coutMensuel: 8600,
-                  appId: nomApp,
-                  source:
-                    source === 'image'
-                      ? { type: 'image' as const, ref: `${image}:${etiquette}` }
-                      : { type: 'git' as const, ref: depot, branche },
-                  portConteneur: 3000,
-                })
-                pousser({
-                  ton: 'info',
-                  titre: `Déploiement de ${nomApp} lancé`,
-                  detail: `Build, analyse DevSecOps puis déploiement dans ${envActif}. Suivi dans le centre de tâches.`,
-                })
-                lancerJob({
-                  workflow: 'app.deploy',
-                  cible: `${nomApp} · ${envActif}`,
-                  alFin: () => {
-                    services.modifier(idService, { statut: 'running' })
-                    pousser({
-                      ton: 'ok',
-                      titre: `${nomApp} est déployé`,
-                      detail: `En ligne dans ${envActif}.`,
-                    })
-                  },
-                })
-                router.push(`/app/applications/projets/${projet.id}`)
-              }}
-            >
-              Déployer
+            <Button disabled={!peutContinuer} onClick={creerLeProjet}>
+              Créer le projet
             </Button>
           )}
         </>
@@ -237,509 +308,171 @@ function NouvelleApplicationInterne() {
       {/* Étape 1 — Projet */}
       {etape === 1 && (
         <div className="space-y-4">
+          <Callout ton="violet" titre="Un projet ne consomme rien par lui-même">
+            Créer un projet ne facture rien pour ses services : c’est un contenant. La
+            facturation des services commence au premier déploiement, au prorata journalier. Le
+            cluster et le load balancer dédiés, eux, sont provisionnés — et facturés — dès la
+            création.
+          </Callout>
+
           <Field
-            label="Projet"
+            label="Nom du projet"
             required
-            hint="L’Espace Cloud et le cluster Kubernetes du projet sont hérités — rien à choisir ici."
+            hint="Visible par tous les membres qui ont accès au projet."
           >
-            <Select value={projetId} onChange={(e) => setProjetId(e.target.value)}>
-              {projets.items.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nom} · {ESPACES.find((e) => e.id === p.espaceId)?.code ?? p.espaceId}
+            <Input
+              value={nom}
+              onChange={(e) => setNom(e.target.value)}
+              className="font-mono"
+              placeholder="portail-client"
+            />
+          </Field>
+
+          <Field
+            label="Description"
+            hint="Une phrase suffit. Elle répond à « à quoi sert ce système ? » pour la personne qui prendra l’astreinte."
+          >
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+            />
+          </Field>
+
+          <Field
+            label="Étiquettes"
+            hint="Entrée ou virgule pour ajouter, Retour arrière pour retirer la dernière. Servent à ventiler la dépense et à retrouver le projet dans la recherche."
+          >
+            <ChampEtiquettes valeurs={etiquettes} onChange={setEtiquettes} />
+          </Field>
+        </div>
+      )}
+
+      {/* Étape 2 — Infrastructure */}
+      {etape === 2 && (
+        <div className="space-y-4">
+          <Field label="Espace Cloud">
+            <Select
+              value={espaceId}
+              onChange={(e) => {
+                const id = e.target.value
+                setEspaceId(id)
+                const dispo = grappes.items.filter((c) => c.espaceId === id)
+                setClusterExistantId(dispo[0]?.id ?? '')
+                if (dispo.length === 0) setClusterMode('nouveau')
+              }}
+            >
+              {espacesCol.items.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.code} · {SITE_LABEL[e.site]} · {e.quota.vcpu - e.usage.vcpu} vCPU libres
                 </option>
               ))}
             </Select>
           </Field>
-          <Callout ton="violet" titre="Pas de choix d’infrastructure">
-            Ce projet tourne sur son propre cluster Kubernetes : chaque composant devient un
-            déploiement dans un namespace dédié, avec autoscaling horizontal et isolation réseau par
-            NetworkPolicy. Rien à choisir entre Kubernetes et des machines virtuelles — c’est tranché
-            à la création du projet.
-          </Callout>
-        </div>
-      )}
 
-      {/* Étape 2 — Source */}
-      {etape === 2 && (
-        <div className="space-y-4">
-          <Field label="Nom de l’application" required>
-            <Input value={nomApp} onChange={(e) => setNomApp(e.target.value)} className="font-mono" />
-          </Field>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {(
-              [
-                {
-                  id: 'git' as const,
-                  icone: <GitBranch size={18} />,
-                  titre: 'Dépôt Git',
-                  texte:
-                    'Connectez GitHub ou GitLab. Nous lisons votre code pour détecter le langage, le gestionnaire de paquets, la source de données et les variables attendues.',
-                },
-                {
-                  id: 'image' as const,
-                  icone: <ContainerIcon size={18} />,
-                  titre: 'Image Docker',
-                  texte:
-                    'Vous construisez ailleurs, nous déployons. Indiquez le registre, l’image et l’étiquette — le pipeline démarre directement à l’analyse de sécurité.',
-                },
-                {
-                  id: 'canvas' as const,
-                  icone: <LayoutTemplate size={18} />,
-                  titre: 'Canvas',
-                  texte:
-                    'Composez librement depuis le catalogue de briques : serveurs web, bases, caches, proxys, observabilité. Utile pour une architecture sans code applicatif propre.',
-                },
-                {
-                  id: 'modele' as const,
-                  icone: <Boxes size={18} />,
-                  titre: 'Solution du catalogue',
-                  texte:
-                    'Une solution prête à l’emploi — messagerie, ERP, GED — déployée dans une instance qui n’appartient qu’à vous, avec sa version qualifiée et son plan de sauvegarde.',
-                },
-              ] as const
-            ).map((s) => (
+          <div>
+            <MicroLabel className="mb-1.5">Cluster Kubernetes</MicroLabel>
+            <p className="mb-2.5 text-[12.5px] leading-relaxed text-g-700">
+              Un projet est toujours servi par un cluster Kubernetes dédié — jamais par des
+              machines virtuelles choisies à la main.
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button
-                key={s.id}
                 type="button"
-                onClick={() => {
-                  setSource(s.id)
-                  if (s.id === 'image' || s.id === 'modele') setBuilder('image')
-                  if (s.id === 'git') setBuilder('nixpacks')
-                  if (s.id === 'modele') setNomApp(modeleChoisi.sousDomaine)
-                }}
+                onClick={() => setClusterMode('nouveau')}
                 className={cn(
                   'flex flex-col rounded-[10px] border-2 bg-white p-4 text-left transition-colors',
-                  source === s.id ? 'border-p-700' : 'border-g-300 hover:border-p-400',
+                  clusterMode === 'nouveau' ? 'border-p-700' : 'border-g-300 hover:border-p-400',
                 )}
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-p-700">{s.icone}</span>
-                  <span className="type-h3">{s.titre}</span>
+                <span className="type-h3">Nouveau cluster</span>
+                <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">
+                  Provisionné à la création, rien que pour ce projet.
                 </span>
-                <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">{s.texte}</span>
               </button>
-            ))}
-          </div>
-
-          {source === 'git' && (
-            <Card>
-              <CardHeader titre="Dépôt et branche" />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Dépôt">
-                  <Select
-                    value={depot}
-                    onChange={(e) => {
-                      setDepot(e.target.value)
-                      const d = DEPOTS.find((x) => x.url === e.target.value)
-                      if (d) setBranche(d.branches[0])
-                    }}
-                  >
-                    {DEPOTS.map((d) => (
-                      <option key={d.url} value={d.url}>
-                        {d.url}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Branche">
-                  <Select value={branche} onChange={(e) => setBranche(e.target.value)}>
-                    {depotChoisi.branches.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-              <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-g-100 pt-3.5">
-                <Badge tone="ok" dot size="sm">
-                  Connexion GitHub active
-                </Badge>
-                <span className="text-[11.5px] text-g-500">
-                  Accès en lecture aux dépôts de l’organisation dba-africa · révocable depuis les
-                  paramètres
+              <button
+                type="button"
+                disabled={clustersDisponibles.length === 0}
+                onClick={() => setClusterMode('existant')}
+                className={cn(
+                  'flex flex-col rounded-[10px] border-2 bg-white p-4 text-left transition-colors',
+                  clusterMode === 'existant' ? 'border-p-700' : 'border-g-300 hover:border-p-400',
+                  clustersDisponibles.length === 0 && 'cursor-not-allowed opacity-55 hover:border-g-300',
+                )}
+              >
+                <span className="type-h3">Cluster existant</span>
+                <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">
+                  {clustersDisponibles.length === 0
+                    ? 'Aucun cluster dans cet Espace.'
+                    : 'Partagé avec d’autres projets de cet Espace.'}
                 </span>
-              </div>
-            </Card>
-          )}
-
-          {source === 'image' && (
-            <Card>
-              <CardHeader titre="Image du registre" />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Image">
-                  <Input value={image} onChange={(e) => setImage(e.target.value)} className="font-mono" />
-                </Field>
-                <Field label="Étiquette">
-                  <Input
-                    value={etiquette}
-                    onChange={(e) => setEtiquette(e.target.value)}
-                    className="font-mono"
-                  />
-                </Field>
-              </div>
-              <Callout ton="warn" className="mt-3.5" titre="Épinglez toujours l’étiquette">
-                Déployer <span className="font-mono text-[12px]">latest</span> rend vos déploiements
-                non reproductibles : deux déploiements successifs peuvent donner deux résultats
-                différents. L’analyse DevSecOps signale les images non épinglées.
-              </Callout>
-            </Card>
-          )}
-
-          {source === 'modele' && (
-            <Card>
-              <CardHeader
-                titre="Solutions qualifiées"
-                sousTitre="Chaque solution est figée sur une version que nous suivons — jamais « latest ». Elle arrive avec ses dépendances, ses volumes et son plan de sauvegarde."
-              />
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-                {MODELES.map((m) => (
-                  <button
-                    key={m.slug}
-                    type="button"
-                    onClick={() => {
-                      setModeleSlug(m.slug)
-                      setNomApp(m.sousDomaine)
-                    }}
-                    className={cn(
-                      'flex items-start gap-2.5 rounded-[8px] border-2 bg-white p-3 text-left transition-colors',
-                      modeleSlug === m.slug ? 'border-p-700' : 'border-g-300 hover:border-p-400',
-                    )}
-                  >
-                    <span
-                      aria-hidden
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
-                      style={{ background: m.logoTeinte }}
-                    >
-                      {m.logoInitiales}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-bold text-ink">{m.nom}</span>
-                      <span className="block truncate text-[11.5px] text-g-500">
-                        {m.solution} {m.version} · {CATEGORIE_MODELE_LABEL[m.categorie]}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-4 border-t border-g-100 pt-4">
-                <p className="text-[13px] font-bold text-ink">{modeleChoisi.nom}</p>
-                <p className="mt-1 text-[12.5px] leading-relaxed text-g-700">
-                  {modeleChoisi.description}
-                </p>
-                <KeyValueList
-                  className="mt-3"
-                  items={[
-                    {
-                      cle: 'Version qualifiée',
-                      valeur: <span className="font-mono text-[12.5px]">{modeleChoisi.version}</span>,
-                    },
-                    {
-                      cle: 'Chart',
-                      valeur: <span className="font-mono text-[12.5px]">{modeleChoisi.chart}</span>,
-                    },
-                    {
-                      cle: 'Ressources',
-                      valeur: `${modeleChoisi.ressources.cpu} vCPU · ${modeleChoisi.ressources.ramMo / 1024} Gio · ${modeleChoisi.ressources.diskGo} Go`,
-                    },
-                    {
-                      cle: 'Sauvegarde',
-                      valeur: `${modeleChoisi.sauvegardeParDefaut.frequence} · ${modeleChoisi.sauvegardeParDefaut.retentionJours} jours`,
-                    },
-                    {
-                      cle: 'Amène avec lui',
-                      valeur:
-                        modeleChoisi.dependances.map((d) => d.nom).join(', ') || 'Rien de plus',
-                    },
-                    { cle: 'Prix indicatif', valeur: `${money(modeleChoisi.prixIndicatif)}/mois` },
-                  ]}
-                />
-                <Callout ton="info" className="mt-3" titre="Ce que le portail ne fera pas">
-                  {modeleChoisi.horsPerimetre} Le portail provisionne, dimensionne, sauvegarde,
-                  supervise et ouvre la porte — l’écran métier reste celui du produit.
-                </Callout>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Étape 3 — Analyse du dépôt */}
-      {etape === 3 && source === 'git' && (
-        <div className="space-y-4">
-          <Card>
-            <CardHeader
-              titre="Lecture automatique du dépôt"
-              sousTitre={`${ANALYSE_DEPOT.depot} · branche ${ANALYSE_DEPOT.branche} · commit ${ANALYSE_DEPOT.commit}`}
-              actions={<Badge tone="ok" dot>Analyse terminée</Badge>}
-            />
-            <div className="space-y-3">
-              {ANALYSE_DEPOT.constats.map((c) => (
-                <div
-                  key={`${c.fichier}-${c.titre}`}
-                  className={cn(
-                    'flex items-start gap-3 rounded-[8px] border-l-4 px-3.5 py-3',
-                    c.niveau === 'ok'
-                      ? 'border-ok bg-ok-bg'
-                      : c.niveau === 'attention'
-                        ? 'border-warn bg-warn-bg'
-                        : 'border-info bg-info-bg',
-                  )}
-                >
-                  <span className="mt-0.5 shrink-0">
-                    {c.niveau === 'ok' ? (
-                      <Check size={15} className="text-ok" />
-                    ) : c.niveau === 'attention' ? (
-                      <TriangleAlert size={15} className="text-warn" />
-                    ) : (
-                      <Info size={15} className="text-info" />
-                    )}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2">
-                      <span className="text-[13px] font-semibold text-ink">{c.titre}</span>
-                      <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[10.5px] text-g-700">
-                        {c.fichier}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-[12.5px] leading-relaxed text-g-700">{c.detail}</p>
-                  </div>
-                </div>
-              ))}
+              </button>
             </div>
-          </Card>
-
-          <Card>
-            <CardHeader titre="Constructeur" sousTitre="Déduit de l’analyse, modifiable." />
-            <div className="space-y-2">
-              {(
-                [
-                  ['nixpacks', 'Nixpacks (recommandé)', 'Détecte automatiquement le runtime et le gestionnaire de paquets. Aucun Dockerfile à maintenir, cache de build partagé entre déploiements.'],
-                  ['dockerfile', 'Dockerfile', 'Votre Dockerfile, votre contrôle. Aucun Dockerfile n’a été détecté à la racine de ce dépôt.'],
-                ] as const
-              ).map(([v, t, d]) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setBuilder(v)}
-                  disabled={v === 'dockerfile'}
-                  className={cn(
-                    'w-full rounded-[8px] border-2 p-3.5 text-left transition-colors',
-                    builder === v ? 'border-p-700 bg-p-050' : 'border-g-300',
-                    v === 'dockerfile' && 'cursor-not-allowed opacity-55',
-                  )}
-                >
-                  <span className="block text-[13px] font-semibold text-ink">{t}</span>
-                  <span className="mt-0.5 block text-[12px] leading-snug text-g-700">{d}</span>
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          <Card>
-            <CardHeader
-              titre="Variables d’environnement attendues"
-              sousTitre="Lues dans .env.example. Les valeurs seront à renseigner pour cet environnement."
-            />
-            <div className="space-y-2">
-              {[
-                { cle: 'DATABASE_URL', secret: true, source: 'Base managée provisionnée automatiquement' },
-                { cle: 'REDIS_URL', secret: true, source: 'Cache provisionné automatiquement' },
-                { cle: 'JWT_SECRET', secret: true, source: 'À générer — coffre de secrets' },
-                { cle: 'SENTRY_DSN', secret: true, source: 'À renseigner' },
-                { cle: 'API_BASE_URL', secret: false, source: 'Déduit du domaine de l’environnement' },
-                { cle: 'SMTP_URL', secret: true, source: 'Relais SMTP Synelia' },
-              ].map((v) => (
-                <div
-                  key={v.cle}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="font-mono text-[12.5px] font-semibold text-ink">{v.cle}</span>
-                    {v.secret && (
-                      <Badge tone="warn" size="sm">
-                        Secret
-                      </Badge>
-                    )}
-                  </span>
-                  <span className="text-[11.5px] text-g-500">{v.source}</span>
-                </div>
-              ))}
-            </div>
-            <Callout ton="violet" className="mt-3.5" titre="Trois variables sont provisionnées pour vous">
-              <span className="font-mono text-[12px]">DATABASE_URL</span>,{' '}
-              <span className="font-mono text-[12px]">REDIS_URL</span> et{' '}
-              <span className="font-mono text-[12px]">SMTP_URL</span> pointeront vers les ressources
-              managées créées à l’étape suivante. Elles sont injectées au démarrage depuis le coffre
-              de secrets, jamais écrites dans l’image.
-            </Callout>
-          </Card>
-        </div>
-      )}
-
-      {/* Étape 4 — Ressources */}
-      {etape === 4 && (
-        <div className="space-y-4">
-          <Card>
-            <CardHeader
-              titre="Ressources par composant"
-              sousTitre="Valeurs de départ, ajustables après le premier déploiement en fonction des métriques réelles."
-            />
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-max border-collapse">
-                <thead>
-                  <tr className="border-b border-g-300 bg-g-050">
-                    {['Composant', 'Rôle', 'vCPU', 'Mémoire (Mo)', 'Disque (Go)', 'Réplicas'].map(
-                      (h) => (
-                        <th key={h} className="type-micro px-3 py-2 text-left text-g-500">
-                          {h}
-                        </th>
-                      ),
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {composants.map((c, ligne) => (
-                    <tr key={c.nom} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2 font-mono text-[12.5px] text-ink">{c.nom}</td>
-                      <td className="px-3 py-2 text-[12px] text-g-700">{c.role}</td>
-                      {(['cpu', 'ram', 'disk', 'rep'] as const).map((champ) => (
-                        <td key={champ} className="px-3 py-2">
-                          <Input
-                            type="number"
-                            min={champ === 'rep' ? 1 : 0}
-                            value={c[champ]}
-                            className="w-24"
-                            aria-label={`${c.nom} — ${
-                              { cpu: 'vCPU', ram: 'mémoire en Mo', disk: 'disque en Go', rep: 'réplicas' }[
-                                champ
-                              ]
-                            }`}
-                            onChange={(e) =>
-                              setComposants((prev) =>
-                                prev.map((x, j) =>
-                                  j === ligne ? { ...x, [champ]: Number(e.target.value) } : x,
-                                ),
-                              )
-                            }
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-g-300 bg-g-050">
-                    <td className="px-3 py-2 text-[12px] font-semibold text-ink" colSpan={2}>
-                      Total demandé
-                    </td>
-                    <td className="tnum px-3 py-2 text-[12px] font-semibold text-ink">
-                      {composants.reduce((a, c) => a + c.cpu * c.rep, 0)}
-                    </td>
-                    <td className="tnum px-3 py-2 text-[12px] font-semibold text-ink">
-                      {num(composants.reduce((a, c) => a + c.ram * c.rep, 0))}
-                    </td>
-                    <td className="tnum px-3 py-2 text-[12px] font-semibold text-ink">
-                      {num(composants.reduce((a, c) => a + c.disk * c.rep, 0))}
-                    </td>
-                    <td className="px-3 py-2" />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </Card>
-          <Callout ton="violet" titre={`Namespace ${projet.id}-${envActif.toLowerCase() || '<env>'}`}>
-            Déployé sur le cluster de <span className="font-mono text-[12px]">{projet.nom}</span>, dans
-            l’Espace Cloud <span className="font-mono text-[12px]">{espace?.code}</span>. Aucune autre
-            décision d’emplacement à prendre : c’est celle du projet.
-          </Callout>
-        </div>
-      )}
-
-      {/* Étape 5 — Environnement */}
-      {etape === 5 && (
-        <div className="space-y-4">
-          <Card>
-            <CardHeader
-              titre="Environnement de déploiement"
-              sousTitre="Une application se déploie dans un seul environnement à la fois. Pour la retrouver ailleurs, relancez l’assistant."
-            />
-            <div className="space-y-2">
-              {projet.environnements.map((e) => (
-                <label
-                  key={e}
-                  className={cn(
-                    'flex cursor-pointer items-center gap-2.5 rounded-[8px] border px-3.5 py-3 transition-colors',
-                    e === envActif ? 'border-p-700 bg-p-050' : 'border-g-300 hover:border-p-400',
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="environnement"
-                    checked={e === envActif}
-                    onChange={() => setEnv(e)}
-                    className="h-3.5 w-3.5 accent-[#4B2882]"
-                  />
-                  <span className="text-[13px] font-semibold text-ink">{e}</span>
-                </label>
-              ))}
-            </div>
-          </Card>
-
-          <div className="rounded-[8px] border border-g-300 bg-g-050 p-3">
-            <MicroLabel>Adresse attribuée automatiquement</MicroLabel>
-            <p className="mt-1.5 font-mono text-[12px] text-g-700">
-              {nomApp || '<service>'}-{envActif.toLowerCase().slice(0, 7) || '<env>'}.dba.synelia.app
-            </p>
-            <p className="mt-2 text-[11.5px] leading-relaxed text-g-500">
-              Certificat émis dès le premier déploiement. Vous pourrez brancher votre propre domaine
-              ensuite, sans changer cette adresse.
-            </p>
           </div>
 
-          {source === 'git' && (
-            <Card>
-              <CardHeader titre="Déploiements de prévisualisation" />
-              <Switch
-                checked={previewPr}
-                onChange={setPreviewPr}
-                label="Créer un environnement éphémère par pull request"
-                description="Chaque pull request obtient sa propre URL de prévisualisation, détruite à la fermeture. Le coût est facturé à la durée de vie effective de l’environnement."
-              />
-              {previewPr && (
-                <div className="mt-3 rounded-[6px] bg-g-050 px-3 py-2.5">
-                  <p className="font-mono text-[11.5px] text-g-700">
-                    https://pr-&lt;numéro&gt;-{nomApp}.preview.synelia.cloud
-                  </p>
-                </div>
-              )}
-            </Card>
+          {clusterMode === 'nouveau' ? (
+            <Field
+              label="Taille du cluster"
+              hint="Ajustable ensuite — pools, autoscaling — depuis Kubernetes."
+            >
+              <Select value={tailleClusterId} onChange={(e) => setTailleClusterId(e.target.value)}>
+                {TAILLES_CLUSTER.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.nom} · {t.noeuds} nœuds · {t.vcpu} vCPU · {t.ramGo} Go
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <Field label="Cluster à rejoindre">
+              <Select
+                value={clusterExistantId}
+                onChange={(e) => setClusterExistantId(e.target.value)}
+              >
+                {clustersDisponibles.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nom} · v{c.version}
+                  </option>
+                ))}
+              </Select>
+            </Field>
           )}
 
           <Card>
-            <CardHeader titre="Récapitulatif" />
+            <CardHeader titre="Load balancer L7 dédié — automatique" />
+            <p className="text-[12.5px] leading-relaxed text-g-700">
+              Un load balancer public, avec certificat automatique, est provisionné en même temps
+              que le projet et pointé sur l’ingress du cluster. C’est la porte d’entrée par
+              laquelle tous les services du projet seront joignables — rien à configurer.
+            </p>
+          </Card>
+        </div>
+      )}
+
+      {/* Étape 3 — Récapitulatif */}
+      {etape === 3 && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader titre="Ce qui va être créé" />
             <KeyValueList
               colonnes={2}
               items={[
-                { cle: 'Projet', valeur: projet.nom },
-                { cle: 'Application', valeur: <span className="font-mono">{nomApp}</span> },
+                { cle: 'Nom', valeur: <span className="font-mono">{nom}</span> },
+                { cle: 'Description', valeur: description || '—' },
+                { cle: 'Étiquettes', valeur: etiquettes.join(', ') || 'Aucune' },
+                { cle: 'Espace Cloud', valeur: espace.code },
                 {
-                  cle: 'Source',
+                  cle: 'Cluster Kubernetes',
                   valeur:
-                    source === 'git'
-                      ? `${depot} · ${branche}`
-                      : source === 'image'
-                        ? `${image}:${etiquette}`
-                        : 'Composition depuis le canvas',
+                    clusterMode === 'nouveau'
+                      ? `Nouveau (${tailleChoisie.nom} · ${tailleChoisie.noeuds} nœuds · ${tailleChoisie.vcpu} vCPU · ${tailleChoisie.ramGo} Go)`
+                      : `${clusterExistantChoisi?.nom ?? '—'} · v${clusterExistantChoisi?.version ?? ''}`,
                 },
-                { cle: 'Constructeur', valeur: builder },
-                { cle: 'Espace Cloud', valeur: espace?.code ?? '' },
-                { cle: 'Environnement', valeur: envActif || 'Aucun' },
+                { cle: 'Load balancer', valeur: 'L7 public, dédié, certificat automatique' },
+                { cle: 'Environnement de départ', valeur: 'Production' },
                 {
-                  cle: 'Prévisualisation par PR',
-                  valeur: previewPr && source === 'git' ? 'Activée' : 'Désactivée',
+                  cle: 'Zone applicative',
+                  valeur: <span className="font-mono">{ZONE_APPLICATIVE.wildcard}</span>,
                 },
               ]}
             />
@@ -751,13 +484,69 @@ function NouvelleApplicationInterne() {
             <Checkbox
               checked={conditions}
               onChange={(e) => setConditions(e.target.checked)}
-              label="Je confirme le déploiement de cette application"
-              description="Le pipeline démarre immédiatement : build, analyse DevSecOps, provisioning des ressources, puis déploiement sans coupure. Montants hors taxes, TVA 18 % appliquée à la facturation."
+              label="Je confirme la création de ce projet"
+              description={`${
+                clusterMode === 'nouveau'
+                  ? 'Le cluster et le load balancer démarrent leur provisionnement immédiatement.'
+                  : 'Le load balancer démarre son provisionnement immédiatement.'
+              } Montants hors taxes, TVA ${TVA_PCT} % appliquée à la facturation.`}
             />
           </Card>
         </div>
       )}
     </WizardShell>
+  )
+}
+
+function ChampEtiquettes({
+  valeurs,
+  onChange,
+}: {
+  valeurs: string[]
+  onChange: (v: string[]) => void
+}) {
+  const [saisie, setSaisie] = useState('')
+
+  const ajouter = (brut: string) => {
+    const v = brut.trim()
+    if (!v || valeurs.includes(v)) return
+    onChange([...valeurs, v])
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-[6px] border border-g-300 bg-white px-2 py-1.5 focus-within:border-p-600 focus-within:ring-2 focus-within:ring-p-100">
+      {valeurs.map((v) => (
+        <span
+          key={v}
+          className="flex items-center gap-1 rounded-full bg-g-100 px-2 py-0.5 text-[12px] font-semibold text-g-700"
+        >
+          {v}
+          <button
+            type="button"
+            aria-label={`Retirer l’étiquette ${v}`}
+            onClick={() => onChange(valeurs.filter((x) => x !== v))}
+            className="text-g-500 hover:text-ink"
+          >
+            <X size={11} />
+          </button>
+        </span>
+      ))}
+      <input
+        value={saisie}
+        onChange={(e) => setSaisie(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault()
+            ajouter(saisie)
+            setSaisie('')
+          } else if (e.key === 'Backspace' && saisie === '' && valeurs.length > 0) {
+            onChange(valeurs.slice(0, -1))
+          }
+        }}
+        className="h-6 min-w-[100px] flex-1 border-0 bg-transparent text-[13px] text-ink outline-none placeholder:text-g-500"
+        placeholder={valeurs.length === 0 ? 'production, interne…' : undefined}
+      />
+    </div>
   )
 }
 

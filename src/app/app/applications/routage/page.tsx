@@ -22,9 +22,10 @@ import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/component
 import { StatTile } from '@/components/composition/metrics'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { Drawer } from '@/components/ui/overlay'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
 
 const ETAT_VERIF = {
   ok: { ton: 'ok' as const, label: 'Vérifié' },
@@ -40,6 +41,7 @@ const ETAT_CERT = {
 }
 
 export default function Routage() {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const domaines = useCollection<DomaineApplicatif>('domaines-applicatifs', DOMAINES_APPLICATIFS)
   const [ajout, setAjout] = useState(false)
@@ -124,7 +126,7 @@ export default function Routage() {
             </Badge>
             {d.verification.verifieLe && (
               <span className="mt-0.5 block text-[11px] text-g-500">
-                {relatif(d.verification.verifieLe)}
+                {relatif(d.verification.verifieLe, maintenant)}
               </span>
             )}
           </span>
@@ -324,19 +326,29 @@ export default function Routage() {
                       ton: 'info',
                       titre: `Vérification DNS de ${d.hote}`,
                       detail: 'Nos résolveurs sont interrogés directement, sans cache.',
+                      appel: () =>
+                        requete(`/domaines-applicatifs/${encodeURIComponent(d.id)}/verification`, {
+                          methode: 'POST',
+                          corps: {},
+                        }),
                       job: { workflow: 'domaine.verify', cible: d.hote },
-                      effetFinal: () =>
+                      effetFinal: () => {
+                        if (estActif()) {
+                          domaines.recharger()
+                          return
+                        }
                         domaines.modifier(d.id, (x) => ({
                           verification: x.verification
                             ? { ...x.verification, etat: 'ok', verifieLe: MAINTENANT, detail: undefined }
                             : undefined,
                           certificat: { etat: 'actif', emetteur: 'Let’s Encrypt', expire: '2026-11-17' },
-                        })),
+                        }))
+                      },
                     }}
                   />
                   {d.verification!.verifieLe && (
                     <span className="text-[11px] text-g-500">
-                      dernière tentative {relatif(d.verification!.verifieLe)}
+                      dernière tentative {relatif(d.verification!.verifieLe, maintenant)}
                     </span>
                   )}
                   {d.verification!.correlationId && (
@@ -495,6 +507,14 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                   ton: 'info',
                   titre: `${hote} branché sur ${service.nom}`,
                   detail: 'La vérification DNS démarre. L’adresse offerte du service continue de répondre.',
+                  appel: () =>
+                    creerRessource('/domaines-applicatifs', {
+                      hote,
+                      serviceId,
+                      chemin,
+                      portConteneur: port ?? service.portConteneur ?? 80,
+                      https: redirection,
+                    }),
                   effet: () =>
                     domaines.creer({
                       id,
@@ -525,7 +545,11 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                     ],
                     dureeEtapeMs: 1100,
                   },
-                  effetFinal: () =>
+                  effetFinal: () => {
+                    if (estActif()) {
+                      domaines.recharger()
+                      return
+                    }
                     domaines.modifier(id, {
                       verification: {
                         etat: 'ok',
@@ -541,7 +565,8 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                         emetteur: certificat === 'acme' ? 'Let’s Encrypt' : 'Certificat fourni',
                         expire: '2026-11-17',
                       },
-                    }),
+                    })
+                  },
                 })
                 setHote('')
                 setEtape('saisie')

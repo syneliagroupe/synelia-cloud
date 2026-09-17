@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { relatif } from '@/lib/format'
 import type { Projet, ServiceProjet } from '@/lib/types'
@@ -24,7 +24,9 @@ import {
 } from '@/components/business/observabilite'
 import { AnomalieCard } from '@/components/business/paas'
 import { useCollection } from '@/components/app/atelier'
+import { useServicesProjet } from '@/lib/api/services-projet'
 import { EnteteProjet, StatutServiceBadge, couleurStatut, ProjetIntrouvable } from '@/components/business/projets'
+import { useMaintenant } from '@/components/app/contexte'
 
 /**
  * Observabilité d'un projet — les quatre formats autorisés, et rien de plus.
@@ -35,11 +37,18 @@ import { EnteteProjet, StatutServiceBadge, couleurStatut, ProjetIntrouvable } fr
  * portail répond à « est-ce que ça va, et depuis quand ? » puis ouvre la porte.
  */
 export function VueObservabilite({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
 
   const projet = lesProjets.items.find((p) => p.id === id)
-  const services = lesServices.items.filter((x) => x.projetId === id)
+  // Avec l’API, la liste vient de `GET /projets/{id}/services` (route nichée,
+  // hors registre) ; en maquette, du filtre local.
+  const { distants: servicesDistants } = useServicesProjet(id)
+  const services = useMemo(
+    () => servicesDistants ?? lesServices.items.filter((x) => x.projetId === id),
+    [servicesDistants, lesServices.items, id],
+  )
 
   const [env, setEnv] = useState(projet?.environnements[0] ?? '')
 
@@ -205,7 +214,7 @@ export function VueObservabilite({ id }: { id: string }) {
                     <span className="block truncate text-[11px] text-g-500">
                       {s.emplacement.site} · {s.emplacement.backend}
                       {s.emplacement.namespace && ` · ${s.emplacement.namespace}`} · maj{' '}
-                      {relatif(s.derniereMaj)}
+                      {relatif(s.derniereMaj, maintenant)}
                     </span>
                   </span>
                   <StatutServiceBadge statut={s.statut} />

@@ -1,21 +1,23 @@
 'use client'
 
-import { useState } from 'react'
-import { Download, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Download, Plus, ShieldAlert, Trash2 } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
 import { dateCourte, num, pct } from '@/lib/format'
-import { K8S_CLUSTERS, LOAD_BALANCERS, LOGS_EXECUTION, VMS, espaceById } from '@/lib/mock'
-import type { K8sCluster, LoadBalancer, VM } from '@/lib/types'
+import { ESPACES, LOAD_BALANCERS, LOGS_EXECUTION, VMS } from '@/lib/mock'
+import type { EspaceCloud, LoadBalancer, VM } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Input, Select, Slider, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { DegradedState, EmptyState } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { ApiError, estActif, requete } from '@/lib/api/client'
 
 interface Exception {
   id: string
@@ -49,24 +51,110 @@ const ONGLETS = [
 ]
 
 export function VueLb({ id }: { id: string }) {
-  const { autorise, refus } = useApp()
+  const { autorise, refus, pousser } = useApp()
   const executer = useOperation()
   const lbs = useCollection<LoadBalancer>('load-balancers', LOAD_BALANCERS)
   const parc = useCollection<VM>('vms', VMS)
-  const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const exceptions = useCollection<Exception>(`waf-exceptions-${id}`, EXCEPTIONS_GRAINE)
   const [onglet, setOnglet] = useState('apercu')
+  /**
+   * `GET /load-balancers/{id}/metriques` : un `424` nomme l’intégration en
+   * défaut (et la date des dernières données) à la place des courbes.
+   */
+  const [metriquesDegradees, setMetriquesDegradees] = useState<{
+    integration?: string
+    dateDonnees?: string
+  } | null>(null)
+  useEffect(() => {
+    if (!estActif()) return
+    let annule = false
+    requete(`/load-balancers/${encodeURIComponent(id)}/metriques`).then(
+      () => {
+        if (!annule) setMetriquesDegradees(null)
+      },
+      (e: unknown) => {
+        if (annule) return
+        if (e instanceof ApiError && e.statut === 424)
+          setMetriquesDegradees({ integration: e.integration, dateDonnees: e.dateDonnees })
+      },
+    )
+    return () => {
+      annule = true
+    }
+  }, [id])
 
-  const lb = lbs.items.find((l) => l.id === id)!
-  const espace = espaceById(lb.espaceId)
-  const candidats = [
-    ...parc.items
-      .filter((v) => v.espaceId === lb.espaceId)
-      .map((v) => ({ id: v.id, label: v.nom })),
-    ...grappes.items
-      .filter((k) => k.espaceId === lb.espaceId)
-      .map((k) => ({ id: `${k.id}/ingress`, label: `k8s · ${k.nom}` })),
-  ].filter((c) => !lb.pool.some((p) => p.targetId === c.id))
+  const lb = lbs.items.find((l) => l.id === id)
+  const espace = lb ? espaces.items.find((e) => e.id === lb.espaceId) : undefined
+
+  if (!lb) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          fil={[
+            { label: 'Espace client', href: '/app' },
+            { label: 'Load balancers', href: '/app/reseau/lb' },
+            { label: 'Introuvable' },
+          ]}
+          titre="Load balancer introuvable"
+        />
+        <EmptyState
+          titre="Ce load balancer n’existe pas ou plus"
+          phrase="Il a peut-être été supprimé, ou vous avez suivi un lien vers une autre organisation."
+          action={{ libelle: 'Retour au réseau', href: '/app/reseau' }}
+        />
+      </div>
+    )
+  }
+  const candidats = parc.items.filter(
+    (v) => v.espaceId === lb.espaceId && !lb.pool.some((p) => p.targetId === v.id),
+  )
+
+  /**
+   * PUT /load-balancers/{id}/pool — remplacement complet du pool (poids et
+   * drain compris). Utilisé sans `useOperation` par les réglages continus
+   * (poids, drain) : un toast par frappe serait du bruit, le rechargement
+   * suffit à confirmer.
+   */
+  const publierPool = (pool: LoadBalancer['pool']) => {
+    if (!estActif()) {
+      lbs.modifier(lb.id, { pool })
+      return
+    }
+    requete(`/load-balancers/${encodeURIComponent(lb.id)}/pool`, {
+      methode: 'PUT',
+      corps: {
+        cibles: pool.map((p) => ({
+          targetId: p.targetId,
+          poids: p.poids,
+          drain: p.sante === 'drain',
+        })),
+      },
+    }).then(
+      () => lbs.recharger(),
+      (e: unknown) => {
+        pousser({
+          ton: 'err',
+          titre: 'Pool non mis à jour',
+          detail: e instanceof ApiError ? e.message : 'Le backend ne répond pas.',
+        })
+        lbs.recharger()
+      },
+    )
+  }
+
+  /** Même remplacement, sous forme d’`appel` pour les actions discrètes. */
+  const appelPool = (pool: LoadBalancer['pool']) => () =>
+    requete(`/load-balancers/${encodeURIComponent(lb.id)}/pool`, {
+      methode: 'PUT',
+      corps: {
+        cibles: pool.map((p) => ({
+          targetId: p.targetId,
+          poids: p.poids,
+          drain: p.sante === 'drain',
+        })),
+      },
+    })
 
   const onglets = lb.layer === 'l7' ? ONGLETS : ONGLETS.filter((o) => o.id !== 'regles' && o.id !== 'waf')
 
@@ -111,7 +199,7 @@ export function VueLb({ id }: { id: string }) {
             <StatTile
               libelle="Requêtes / s"
               valeur={num(lb.metriques.rps)}
-              ton="accent"
+              ton="violet"
               serie={seededSeries(`${id}-rps`, 24, lb.metriques.rps * 0.6, lb.metriques.rps * 1.3)}
             />
             <StatTile
@@ -145,6 +233,13 @@ export function VueLb({ id }: { id: string }) {
             />
           </div>
 
+          {metriquesDegradees ? (
+            <DegradedState
+              source="métriques du load balancer"
+              integration={metriquesDegradees.integration}
+              dateDonnees={metriquesDegradees.dateDonnees}
+            />
+          ) : (
           <GrilleSparkCharts
             seed={`lb-${id}`}
             metriques={[
@@ -154,6 +249,7 @@ export function VueLb({ id }: { id: string }) {
               { titre: 'Connexions actives', unite: '', min: lb.metriques.connexions * 0.6, max: lb.metriques.connexions * 1.3 },
             ]}
           />
+          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
@@ -204,7 +300,7 @@ export function VueLb({ id }: { id: string }) {
                 )}
               </div>
               {lb.rateLimit && (
-                <p className="mt-3 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
+                <p className="mt-3 border-t border-g-100 pt-3 text-[11.5px] leading-relaxed text-g-500">
                   Limitation de débit active : {num(lb.rateLimit.requetesParMin)} requêtes par minute
                   et par adresse IP. Au-delà, le load balancer répond 429 sans solliciter les
                   backends.
@@ -242,9 +338,9 @@ export function VueLb({ id }: { id: string }) {
                   champs={[
                     {
                       id: 'cible',
-                      label: 'Machine ou cluster Kubernetes',
+                      label: 'Machine',
                       type: 'select',
-                      options: candidats.map((c) => ({ value: c.id, label: c.label })),
+                      options: candidats.map((v) => ({ value: v.id, label: v.nom })),
                     },
                     { id: 'poids', label: 'Poids', type: 'nombre', demi: true, min: 1, max: 100 },
                   ]}
@@ -252,9 +348,21 @@ export function VueLb({ id }: { id: string }) {
                   libelleValider="Ajouter"
                   operation={(v) => {
                     const cible = candidats.find((c) => c.id === v.cible)
+                    const pool = cible
+                      ? [
+                          ...lb.pool,
+                          {
+                            targetId: cible.id,
+                            targetLabel: cible.nom,
+                            poids: Number(v.poids),
+                            sante: 'drain' as const,
+                          },
+                        ]
+                      : lb.pool
                     return {
-                      titre: cible ? `${cible.label} ajoutée au pool` : 'Cible ajoutée',
+                      titre: cible ? `${cible.nom} ajoutée au pool` : 'Cible ajoutée',
                       detail: 'En attente de deux health checks consécutifs réussis.',
+                      appel: appelPool(pool),
                       effet: () =>
                         cible
                           ? lbs.modifier(lb.id, (l) => ({
@@ -262,7 +370,7 @@ export function VueLb({ id }: { id: string }) {
                                 ...l.pool,
                                 {
                                   targetId: cible.id,
-                                  targetLabel: cible.label,
+                                  targetLabel: cible.nom,
                                   poids: Number(v.poids),
                                   sante: 'drain' as const,
                                 },
@@ -275,14 +383,15 @@ export function VueLb({ id }: { id: string }) {
                         etapes: ['Déclarer la cible', 'Attendre deux health checks réussis'],
                         dureeEtapeMs: 1100,
                       },
-                      effetFinal: () =>
-                        cible
-                          ? lbs.modifier(lb.id, (l) => ({
-                              pool: l.pool.map((p) =>
-                                p.targetId === cible.id ? { ...p, sante: 'ok' as const } : p,
-                              ),
-                            }))
-                          : undefined,
+                      effetFinal: () => {
+                        if (!estActif() && cible)
+                          lbs.modifier(lb.id, (l) => ({
+                            pool: l.pool.map((p) =>
+                              p.targetId === cible.id ? { ...p, sante: 'ok' as const } : p,
+                            ),
+                          }))
+                        lbs.recharger()
+                      },
                     }
                   }}
                 />
@@ -312,7 +421,7 @@ export function VueLb({ id }: { id: string }) {
                         )}
                       >
                         <td className="px-3 py-2.5">
-                          <span className="block font-mono text-[13px] font-medium text-ink">
+                          <span className="block font-mono text-[12.5px] font-medium text-ink">
                             {p.targetLabel}
                           </span>
                           <span className="block text-[11px] text-g-500">{p.targetId}</span>
@@ -324,13 +433,13 @@ export function VueLb({ id }: { id: string }) {
                             className="w-20"
                             aria-label="Poids"
                             onChange={(e) =>
-                              lbs.modifier(lb.id, (l) => ({
-                                pool: l.pool.map((x) =>
+                              publierPool(
+                                lb.pool.map((x) =>
                                   x.targetId === p.targetId
                                     ? { ...x, poids: Number(e.target.value) }
                                     : x,
                                 ),
-                              }))
+                              )
                             }
                           />
                         </td>
@@ -345,7 +454,7 @@ export function VueLb({ id }: { id: string }) {
                             {enDrain ? 'En drain' : p.sante === 'ok' ? 'Sain' : 'Défaillant'}
                           </Badge>
                         </td>
-                        <td className="tnum px-3 py-2.5 text-[13px] text-g-700">
+                        <td className="tnum px-3 py-2.5 text-[12.5px] text-g-700">
                           {enDrain || p.sante !== 'ok'
                             ? '0'
                             : num(Math.round((lb.metriques.rps * p.poids) / poidsTotal))}
@@ -364,6 +473,13 @@ export function VueLb({ id }: { id: string }) {
                                 detail: v
                                   ? 'Aucune nouvelle requête ne lui est envoyée ; les connexions en cours se terminent normalement.'
                                   : 'Réintégration après validation du health check.',
+                                appel: appelPool(
+                                  lb.pool.map((x) =>
+                                    x.targetId === p.targetId
+                                      ? { ...x, sante: v ? ('drain' as const) : ('ok' as const) }
+                                      : x,
+                                  ),
+                                ),
                                 effet: () =>
                                   lbs.modifier(lb.id, (l) => ({
                                     pool: l.pool.map((x) =>
@@ -372,6 +488,7 @@ export function VueLb({ id }: { id: string }) {
                                         : x,
                                     ),
                                   })),
+                                effetFinal: () => lbs.recharger(),
                               })
                             }
                           />
@@ -387,10 +504,14 @@ export function VueLb({ id }: { id: string }) {
                                 titre: `${p.targetLabel} retirée du pool`,
                                 detail:
                                   'Les connexions en cours sont coupées. Le mode drain évite cela.',
+                                appel: appelPool(
+                                  lb.pool.filter((x) => x.targetId !== p.targetId),
+                                ),
                                 effet: () =>
                                   lbs.modifier(lb.id, (l) => ({
                                     pool: l.pool.filter((x) => x.targetId !== p.targetId),
                                   })),
+                                effetFinal: () => lbs.recharger(),
                               })
                             }
                           >
@@ -441,7 +562,7 @@ export function VueLb({ id }: { id: string }) {
                 <Input type="number" defaultValue={lb.healthCheck.seuilOk} />
               </Field>
             </div>
-            <p className="mt-3 text-[12px] text-g-500">
+            <p className="mt-3 text-[11.5px] text-g-500">
               Une cible défaillante est retirée du pool en{' '}
               {lb.healthCheck.intervalleS * lb.healthCheck.seuilKo} secondes au pire.
             </p>
@@ -490,6 +611,35 @@ export function VueLb({ id }: { id: string }) {
                   libelleValider="Ajouter"
                   operation={(v) => ({
                     titre: `Écouteur ${v.protocole}:${v.port} ajouté`,
+                    appel: () =>
+                      requete(`/load-balancers/${encodeURIComponent(lb.id)}`, {
+                        methode: 'PATCH',
+                        corps: {
+                          espaceId: lb.espaceId,
+                          nom: lb.nom,
+                          layer: lb.layer,
+                          exposure: lb.exposure,
+                          listeners: [
+                            ...lb.listeners.map((x) => ({
+                              protocole: x.protocole,
+                              port: x.port,
+                              ...(x.certId ? { certId: x.certId } : {}),
+                              ...(x.tlsMin ? { tlsMin: x.tlsMin } : {}),
+                            })),
+                            {
+                              protocole: String(v.protocole),
+                              port: Number(v.port),
+                              ...(String(v.protocole) === 'HTTPS'
+                                ? {
+                                    certId:
+                                      lb.listeners.find((x) => x.certId)?.certId ?? 'cert-auto',
+                                    tlsMin: String(v.tls),
+                                  }
+                                : {}),
+                            },
+                          ],
+                        },
+                      }),
                     effet: () =>
                       lbs.modifier(lb.id, (l) => ({
                         listeners: [
@@ -505,6 +655,7 @@ export function VueLb({ id }: { id: string }) {
                           },
                         ],
                       })),
+                    effetFinal: () => lbs.recharger(),
                   })}
                 />
               }
@@ -523,12 +674,12 @@ export function VueLb({ id }: { id: string }) {
                 <tbody>
                   {lb.listeners.map((l) => (
                     <tr key={`${l.protocole}-${l.port}`} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2.5 font-mono text-[13px] text-ink">{l.protocole}</td>
-                      <td className="tnum px-3 py-2.5 text-[13px] text-ink">{l.port}</td>
-                      <td className="px-3 py-2.5 font-mono text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{l.protocole}</td>
+                      <td className="tnum px-3 py-2.5 text-[12.5px] text-ink">{l.port}</td>
+                      <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
                         {l.certId ?? <span className="text-g-500">aucun</span>}
                       </td>
-                      <td className="px-3 py-2.5 text-[13px] text-g-700">{l.tlsMin ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-[12.5px] text-g-700">{l.tlsMin ?? '—'}</td>
                       <td className="px-3 py-2.5">
                         <Badge tone="ok" dot size="sm">
                           Actif
@@ -636,6 +787,26 @@ export function VueLb({ id }: { id: string }) {
                   operation={(v) => ({
                     titre: 'Règle de routage ajoutée',
                     detail: `${v.hote || '*'}${v.chemin || '/*'} → ${v.cible}`,
+                    appel: () =>
+                      requete(`/load-balancers/${encodeURIComponent(lb.id)}/regles-l7`, {
+                        methode: 'PUT',
+                        corps: {
+                          regles: [
+                            ...(lb.reglesL7 ?? []).map((x) => ({
+                              ...(x.hote ? { hote: x.hote } : {}),
+                              ...(x.chemin ? { chemin: x.chemin } : {}),
+                              ...(x.entete ? { entete: x.entete } : {}),
+                              cible: x.cible,
+                            })),
+                            {
+                              ...(String(v.hote) ? { hote: String(v.hote) } : {}),
+                              ...(String(v.chemin) ? { chemin: String(v.chemin) } : {}),
+                              ...(String(v.entete) ? { entete: String(v.entete) } : {}),
+                              cible: String(v.cible),
+                            },
+                          ],
+                        },
+                      }),
                     effet: () =>
                       lbs.modifier(lb.id, (l) => ({
                         reglesL7: [
@@ -648,6 +819,7 @@ export function VueLb({ id }: { id: string }) {
                           },
                         ],
                       })),
+                    effetFinal: () => lbs.recharger(),
                   })}
                 />
               }
@@ -678,7 +850,7 @@ export function VueLb({ id }: { id: string }) {
                         <td className="px-3 py-2.5 font-mono text-[12px] text-ink">
                           {r.chemin ?? '/*'}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 font-mono text-[11.5px] text-g-700">
                           {r.entete ?? '—'}
                         </td>
                         <td className="px-3 py-2.5">
@@ -699,10 +871,28 @@ export function VueLb({ id }: { id: string }) {
                                 ton: 'warn',
                                 titre: 'Règle de routage supprimée',
                                 detail: `${r.hote ?? '*'}${r.chemin ?? '/*'} → ${r.cible}`,
+                                appel: () =>
+                                  requete(
+                                    `/load-balancers/${encodeURIComponent(lb.id)}/regles-l7`,
+                                    {
+                                      methode: 'PUT',
+                                      corps: {
+                                        regles: (lb.reglesL7 ?? [])
+                                          .filter((_, j) => j !== i)
+                                          .map((x) => ({
+                                            ...(x.hote ? { hote: x.hote } : {}),
+                                            ...(x.chemin ? { chemin: x.chemin } : {}),
+                                            ...(x.entete ? { entete: x.entete } : {}),
+                                            cible: x.cible,
+                                          })),
+                                      },
+                                    },
+                                  ),
                                 effet: () =>
                                   lbs.modifier(lb.id, (l) => ({
                                     reglesL7: (l.reglesL7 ?? []).filter((_, j) => j !== i),
                                   })),
+                                effetFinal: () => lbs.recharger(),
                               })
                             }
                           >
@@ -728,7 +918,7 @@ export function VueLb({ id }: { id: string }) {
                   <Input defaultValue="/v1/$1" className="font-mono" />
                 </Field>
               </div>
-              <p className="mt-2.5 text-[12px] leading-relaxed text-g-500">
+              <p className="mt-2.5 text-[11.5px] leading-relaxed text-g-500">
                 La réécriture s’applique après le routage : la règle de destination est choisie sur
                 l’URL d’origine, puis l’URL est réécrite avant transmission au backend.
               </p>
@@ -757,7 +947,7 @@ export function VueLb({ id }: { id: string }) {
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-[12px] leading-relaxed text-g-500">
+              <p className="mt-3 text-[11.5px] leading-relaxed text-g-500">
                 Sans page personnalisée, le load balancer sert une page neutre aux couleurs Synelia
                 plutôt qu’une réponse vide — ce qui reste préférable à un écran blanc pour vos
                 utilisateurs.
@@ -782,6 +972,8 @@ export function VueLb({ id }: { id: string }) {
             <div className="space-y-3.5">
               <Switch
                 checked={lb.waf?.actif ?? false}
+                // `PATCH /load-balancers/{id}` refuse `waf` et `rateLimit`
+                // (`422 non_porte`) : le pare-feu reste un réglage d’écran.
                 onChange={(v) =>
                   executer({
                     action: 'lb.create',
@@ -891,7 +1083,7 @@ export function VueLb({ id }: { id: string }) {
               step={60}
               unite="req/min"
             />
-            <p className="mt-2.5 text-[12px] leading-relaxed text-g-500">
+            <p className="mt-2.5 text-[11.5px] leading-relaxed text-g-500">
               Au-delà du seuil, le load balancer répond 429 sans solliciter les backends. Attention
               derrière un NAT d’entreprise : plusieurs centaines d’utilisateurs peuvent partager une
               même adresse source. Prévoyez une liste d’adresses exemptées pour vos sites clients

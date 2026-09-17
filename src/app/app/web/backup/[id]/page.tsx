@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
 import { sauvegardeWebById } from '@/lib/mock'
 import { VueSauvegarde } from './vue'
 
@@ -13,8 +12,12 @@ export async function generateMetadata({
   return { title: s ? `${s.nomServi} · Sauvegardes` : 'Plan introuvable' }
 }
 
+/**
+ * Pas de `notFound()` : une ressource créée pendant la session n'existe pas
+ * dans le jeu figé, et un 404 du serveur ferait croire à une panne. C'est la
+ * vue cliente qui sait ce qu'elle trouve, et qui le dit.
+ */
 export default async function PageSauvegarde({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!sauvegardeWebById(id)) notFound()
   return <VueSauvegarde id={id} />
 }

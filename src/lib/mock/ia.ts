@@ -20,7 +20,6 @@ import type {
   LigneLog,
   ModeleIA,
   OutilAgent,
-  PointInference,
   RegleRoutage,
 } from '../types'
 
@@ -706,93 +705,6 @@ export const BASES_CONNAISSANCE: BaseConnaissance[] = [
   },
 ]
 
-// ─── Points d'inférence dédiés ────────────────────────────────────────
-
-export const POINTS_INFERENCE: PointInference[] = [
-  {
-    id: 'inf-llama-prod',
-    nom: 'llama70b-prod',
-    modeleId: 'm-llama-70b',
-    espaceId: 'ec-dba-01',
-    site: 'ABJ',
-    gpu: 'H100',
-    gpuParReplica: 2,
-    replicas: 3,
-    replicasMin: 2,
-    replicasMax: 6,
-    veilleAutorisee: false,
-    demarrageAFroidS: 220,
-    utilisationGpuPct: 72,
-    latenceP50Ms: 288,
-    debitJetonsSec: 214,
-    coutHeure: 24_800,
-    statut: 'en_ligne',
-    creeLe: '2026-03-11T10:00:00Z',
-  },
-  {
-    id: 'inf-whisper',
-    nom: 'whisper-appels',
-    modeleId: 'm-whisper',
-    espaceId: 'ec-dba-01',
-    site: 'ABJ',
-    gpu: 'L40S',
-    gpuParReplica: 1,
-    replicas: 1,
-    replicasMin: 0,
-    replicasMax: 4,
-    veilleAutorisee: true,
-    demarrageAFroidS: 65,
-    utilisationGpuPct: 18,
-    latenceP50Ms: 2_100,
-    debitJetonsSec: 0,
-    coutHeure: 5_400,
-    statut: 'en_veille',
-    creeLe: '2026-06-09T08:30:00Z',
-  },
-  {
-    id: 'inf-codestral',
-    nom: 'codestral-equipes',
-    modeleId: 'm-codestral',
-    espaceId: 'ec-dba-01',
-    site: 'ABJ',
-    gpu: 'L40S',
-    gpuParReplica: 2,
-    replicas: 2,
-    replicasMin: 1,
-    replicasMax: 4,
-    veilleAutorisee: true,
-    demarrageAFroidS: 90,
-    utilisationGpuPct: 46,
-    latenceP50Ms: 176,
-    debitJetonsSec: 268,
-    coutHeure: 10_800,
-    statut: 'en_ligne',
-    creeLe: '2026-05-02T15:40:00Z',
-  },
-]
-
-/** Grille des GPU réservables — sert à l'aperçu de coût avant déploiement. */
-export const GRILLE_GPU = [
-  {
-    gpu: 'L40S' as const,
-    vram: '48 Go',
-    coutHeure: 5_400,
-    convient: 'Modèles jusqu’à 32 milliards de paramètres, vectorisation, transcription',
-  },
-  {
-    gpu: 'A100' as const,
-    vram: '80 Go',
-    coutHeure: 9_600,
-    convient: 'Modèles jusqu’à 70 milliards en précision réduite',
-  },
-  {
-    gpu: 'H100' as const,
-    vram: '80 Go',
-    coutHeure: 12_400,
-    convient: 'Modèles de 70 milliards et plus, débit élevé, contextes longs',
-  },
-]
-
 // ─── Consommation ─────────────────────────────────────────────────────
 
 /** Dix-neuf jours du mois en cours, comme la consommation d'infrastructure. */
@@ -889,9 +801,9 @@ export const EVENEMENTS_IA: EvenementSupervision[] = [
   {
     id: 'eia-6',
     ts: '2026-08-18T22:10:00Z',
-    gravite: 'info',
-    ressource: 'llama70b-prod',
-    message: 'Passage de 2 à 3 réplicas — file d’attente au-delà de 400 ms pendant 6 minutes',
+    gravite: 'mineure',
+    ressource: 'llama-3.3-70b-instruct',
+    message: 'File d’attente au-delà de 400 ms pendant 6 minutes — repli automatique vers Qwen3 32B (GBM)',
     site: 'ABJ',
   },
   {
@@ -925,87 +837,26 @@ export const JOURNAL_PASSERELLE: LigneLog[] = [
 ]
 
 // ─── Vue fournisseur ──────────────────────────────────────────────────
+//
+// Pas de parc GPU ni de contrats d'achat de capacité : la plateforme n'héberge
+// aucun modèle elle-même, tout passe par la passerelle LiteLLM devant
+// OpenRouter (§ décision « Inférence dédiée » dans CLAUDE.md).
 
-/** Parc GPU installé, par site et par modèle de carte (§ espace fournisseur). */
-export const PARC_GPU = [
-  { site: 'ABJ' as const, gpu: 'H100', total: 32, allouees: 24, libres: 6, indisponibles: 2, vram: '80 Go' },
-  { site: 'ABJ' as const, gpu: 'L40S', total: 48, allouees: 31, libres: 17, indisponibles: 0, vram: '48 Go' },
-  { site: 'ABJ' as const, gpu: 'A100', total: 16, allouees: 11, libres: 4, indisponibles: 1, vram: '80 Go' },
-  { site: 'GBM' as const, gpu: 'L40S', total: 24, allouees: 9, libres: 15, indisponibles: 0, vram: '48 Go' },
-  { site: 'GBM' as const, gpu: 'A100', total: 8, allouees: 5, libres: 3, indisponibles: 0, vram: '80 Go' },
-]
-
-/** Contrats d'achat chez les fournisseurs externes, et marge à la revente. */
-export const CONTRATS_FOURNISSEURS = [
-  {
-    id: 'ct-openai',
-    fournisseur: 'OpenAI',
-    residence: 'États-Unis',
-    engagementMensuel: 4_800_000,
-    consommeMois: 3_120_000,
-    prixAchatMoyen: 980,
-    prixReventeMoyen: 1_520,
-    margePct: 35.5,
-    statut: 'actif' as const,
-    echeance: '2027-03-31',
-  },
-  {
-    id: 'ct-anthropic',
-    fournisseur: 'Anthropic',
-    residence: 'Union européenne',
-    engagementMensuel: 3_200_000,
-    consommeMois: 2_940_000,
-    prixAchatMoyen: 1_240,
-    prixReventeMoyen: 1_820,
-    margePct: 31.9,
-    statut: 'actif' as const,
-    echeance: '2027-01-31',
-  },
-  {
-    id: 'ct-mistral',
-    fournisseur: 'Mistral AI',
-    residence: 'France',
-    engagementMensuel: 2_400_000,
-    consommeMois: 2_610_000,
-    prixAchatMoyen: 810,
-    prixReventeMoyen: 1_210,
-    margePct: 33.1,
-    statut: 'depassement' as const,
-    echeance: '2027-06-30',
-  },
-  {
-    id: 'ct-google',
-    fournisseur: 'Google Cloud',
-    residence: 'États-Unis',
-    engagementMensuel: 1_600_000,
-    consommeMois: 640_000,
-    prixAchatMoyen: 520,
-    prixReventeMoyen: 760,
-    margePct: 31.6,
-    statut: 'renegociation' as const,
-    echeance: '2026-11-30',
-  },
-]
-
-/** Modèles souverains servis à l'échelle de la plateforme. */
+/** Modèles appelés à l'échelle de la plateforme, tous clients confondus. */
 export const FLOTTE_MODELES = [
-  { slug: 'synelia/mistral-small-3.2-24b', replicas: 12, gpu: 'L40S ×12', orgs: 34, jetons30j: 4_180_000_000, utilisationPct: 68 },
-  { slug: 'synelia/llama-3.3-70b-instruct', replicas: 8, gpu: 'H100 ×16', orgs: 21, jetons30j: 2_640_000_000, utilisationPct: 74 },
-  { slug: 'synelia/bge-m3', replicas: 6, gpu: 'L40S ×6', orgs: 29, jetons30j: 3_910_000_000, utilisationPct: 41 },
-  { slug: 'synelia/qwen3-32b', replicas: 4, gpu: 'A100 ×8', orgs: 11, jetons30j: 820_000_000, utilisationPct: 52 },
-  { slug: 'synelia/codestral-25.08', replicas: 4, gpu: 'L40S ×8', orgs: 9, jetons30j: 640_000_000, utilisationPct: 46 },
-  { slug: 'synelia/whisper-large-v3', replicas: 3, gpu: 'L40S ×3', orgs: 14, jetons30j: 0, utilisationPct: 22 },
-  { slug: 'synelia/pixtral-12b', replicas: 1, gpu: 'L40S ×1', orgs: 3, jetons30j: 96_000_000, utilisationPct: 88 },
+  { slug: 'synelia/mistral-small-3.2-24b', orgs: 34, jetons30j: 4_180_000_000, utilisationPct: 68 },
+  { slug: 'synelia/llama-3.3-70b-instruct', orgs: 21, jetons30j: 2_640_000_000, utilisationPct: 74 },
+  { slug: 'synelia/bge-m3', orgs: 29, jetons30j: 3_910_000_000, utilisationPct: 41 },
+  { slug: 'synelia/qwen3-32b', orgs: 11, jetons30j: 820_000_000, utilisationPct: 52 },
+  { slug: 'synelia/codestral-25.08', orgs: 9, jetons30j: 640_000_000, utilisationPct: 46 },
+  { slug: 'synelia/whisper-large-v3', orgs: 14, jetons30j: 0, utilisationPct: 22 },
+  { slug: 'synelia/pixtral-12b', orgs: 3, jetons30j: 96_000_000, utilisationPct: 88 },
 ]
 
 export const SYNTHESE_IA_PLATEFORME = {
-  gpuTotal: PARC_GPU.reduce((a, g) => a + g.total, 0),
-  gpuAllouees: PARC_GPU.reduce((a, g) => a + g.allouees, 0),
-  gpuIndisponibles: PARC_GPU.reduce((a, g) => a + g.indisponibles, 0),
   orgsActives: 41,
   jetons30j: FLOTTE_MODELES.reduce((a, m) => a + m.jetons30j, 0),
   caIaMensuel: 18_420_000,
-  coutAchatExterne: CONTRATS_FOURNISSEURS.reduce((a, c) => a + c.consommeMois, 0),
   partSouverainePct: 81.2,
 }
 
@@ -2451,7 +2302,7 @@ export const AGENTS_PLATEFORME = [
   { org: 'Digital Business Africa', agents: 6, publies: 5, flux: 2, executions30j: 486_000, canaux: 'Widget, WhatsApp, SMS, Telegram, REST' },
   { org: 'AMUGA', agents: 4, publies: 4, flux: 1, executions30j: 214_800, canaux: 'WhatsApp, SMS, REST' },
   { org: 'BICICI Lab', agents: 3, publies: 1, flux: 0, executions30j: 42_100, canaux: 'REST' },
-  { org: 'OC²S (revendeur)', agents: 11, publies: 8, flux: 4, executions30j: 612_400, canaux: 'Tous canaux' },
+  { org: 'OC²S', agents: 11, publies: 8, flux: 4, executions30j: 612_400, canaux: 'Tous canaux' },
   { org: 'Autres organisations', agents: 19, publies: 12, flux: 3, executions30j: 328_900, canaux: 'Widget, REST' },
 ]
 

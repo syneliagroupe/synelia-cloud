@@ -118,7 +118,7 @@ const servicesManages = fusion(
         ok: ref('TravailProvisioning'),
         code: 202,
         rbac: 'marketplace.subscribe',
-        erreurs: [409, 402],
+        erreurs: [409, 402, 404],
       }),
     },
     '/services/{serviceManageId}': {

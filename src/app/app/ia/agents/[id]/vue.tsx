@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   BookOpen,
   Check,
@@ -33,6 +34,7 @@ import {
   modeleParSlug,
   outilParId,
 } from '@/lib/mock'
+import { ApiError, creerRessource, estActif, modifierRessource, supprimerRessource } from '@/lib/api/client'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, SolutionLogo, Tabs } from '@/components/ui/display'
@@ -41,7 +43,9 @@ import { ConfirmDialog } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
-import { useApp, useEspace } from '@/components/app/contexte'
+import { useApp, useEspace, useMaintenant } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
+import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
 
 const ONGLETS = [
   { id: 'consigne', label: 'Rôle & consigne' },
@@ -85,22 +89,45 @@ function ConsigneAnnotee({ texte }: { texte: string }) {
 }
 
 export function VueAgent({ agentId }: { agentId: string }) {
+  const maintenant = useMaintenant()
   const espace = useEspace()
+  const router = useRouter()
   const { autorise, refus, pousser } = useApp()
   const [onglet, setOnglet] = useState('consigne')
   const [aRestaurer, setARestaurer] = useState<string | null>(null)
+  const [messageTest, setMessageTest] = useState('')
+  const [testEnCours, setTestEnCours] = useState(false)
+  const [erreurTest, setErreurTest] = useState<string | null>(null)
+  const [resultatTest, setResultatTest] = useState<{
+    reponse: string
+    jetonsEntree: number
+    jetonsSortie: number
+    coutFcfa: number
+    latenceMs: number
+  } | null>(null)
 
   // L'agent est relu dans la collection à chaque rendu : un agent créé pendant
   // la session doit s'ouvrir, et une fiche ne doit pas montrer l'état d'avant.
-  const agents = AGENTS_IA.filter((a) => a.espaceId === espace.id)
+  const agentsCol = useCollection<AgentIA>('agents-ia', AGENTS_IA)
+  const agents = estActif()
+    ? agentsCol.items
+    : agentsCol.items.filter((a) => a.espaceId === espace.id)
   const agent: AgentIA | undefined = agents.find((a) => a.id === agentId)
 
   const peutEcrire = autorise('ia.agent.write')
   const peutPublier = autorise('ia.agent.publish')
 
+  // Rôle, description, slug, outils, versions, mémoire, canaux, métriques et
+  // épreuves n'existent que côté maquette (`AgentIA` réel n'a que dix champs :
+  // id, nom, consigne, espaceId, modele, temperature, topP, jetonsMax, statut,
+  // createdAt). `type` ne fait jamais partie de la réponse réelle : sa
+  // présence sert de marqueur pour distinguer un agent de démonstration d'un
+  // agent effectivement créé via l'API.
+  const demo = Boolean(agent?.type)
+
   const modele = agent ? modeleParSlug(agent.modele) : undefined
-  const versionPubliee = agent?.versions.find((v) => v.statut === 'publiee')
-  const annotations = agent ? ANNOTATIONS_IA.filter((a) => a.agentId === agent.id) : []
+  const versionPubliee = demo ? agent?.versions.find((v) => v.statut === 'publiee') : undefined
+  const annotations = demo && agent ? ANNOTATIONS_IA.filter((a) => a.agentId === agent.id) : []
 
   // La garde vient après tous les crochets, et la vue dit ce qu'elle ne trouve
   // pas plutôt que de rendre un 404 serveur : un agent créé pendant la session
@@ -113,6 +140,26 @@ export function VueAgent({ agentId }: { agentId: string }) {
         action={{ libelle: 'Créer un agent', href: '/app/ia/nouveau' }}
       />
     )
+  }
+
+  const tester = async () => {
+    if (!messageTest.trim() || testEnCours) return
+    setTestEnCours(true)
+    setErreurTest(null)
+    try {
+      const r = await creerRessource<{
+        reponse: string
+        jetonsEntree: number
+        jetonsSortie: number
+        coutFcfa: number
+        latenceMs: number
+      }>(`/ia/agents/${agent.id}/invoquer`, { message: messageTest })
+      setResultatTest(r as typeof resultatTest)
+    } catch (e) {
+      setErreurTest(e instanceof ApiError ? e.message : 'Le backend ne répond pas.')
+    } finally {
+      setTestEnCours(false)
+    }
   }
 
   return (
@@ -128,7 +175,7 @@ export function VueAgent({ agentId }: { agentId: string }) {
         sousTitre={agent.role}
         actions={
           <span className="flex flex-wrap items-center gap-2">
-            {agent.statut === 'publie' && agent.canaux.includes('cx-widget') && (
+            {agent.statut === 'publie' && agent.canaux?.includes('cx-widget') && (
               <ButtonLink href="https://assistant.dba.africa" external variant="accent" size="sm">
                 Ouvrir
                 <ExternalLink size={13} />
@@ -145,7 +192,127 @@ export function VueAgent({ agentId }: { agentId: string }) {
       />
 
 
-      {agent && (
+      {agent && !demo && (
+        <Card>
+          <CardHeader
+            titre="Champs réels de cet agent"
+            sousTitre="Créé via l’API, cet agent n’a que les dix champs que la passerelle LiteLLM connaît aujourd’hui — pas encore d’outils, de mémoire, de canaux publiés, de versions ni de jeu d’épreuves : cette richesse reste propre aux agents de démonstration."
+            actions={
+              <span className="flex flex-wrap gap-2">
+                {agent.statut !== 'publie' && (
+                  <GatedAction autorise={peutPublier} message={refus('ia.agent.publish')}>
+                    <Button
+                      size="sm"
+                      onClick={() => agentsCol.modifier(agent.id, { statut: 'publie' })}
+                    >
+                      Publier
+                    </Button>
+                  </GatedAction>
+                )}
+                {agent.statut === 'publie' && (
+                  <GatedAction autorise={peutEcrire} message={refus('ia.agent.write')}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => agentsCol.modifier(agent.id, { statut: 'suspendu' })}
+                    >
+                      Suspendre
+                    </Button>
+                  </GatedAction>
+                )}
+                <BoutonAction
+                  libelle="Supprimer"
+                  variant="ghost"
+                  operation={{
+                    action: 'ia.agent.write',
+                    ton: 'warn',
+                    titre: `Agent « ${agent.nom} » supprimé`,
+                    appel: () => supprimerRessource('/ia/agents', agent.id, agent.nom),
+                    effet: () => agentsCol.supprimer(agent.id),
+                    effetFinal: () => {
+                      agentsCol.recharger()
+                      router.push('/app/ia/agents')
+                    },
+                  }}
+                  confirmation={{
+                    ressource: agent.nom,
+                    pertes: [
+                      'La consigne et les réglages de cet agent sont détruits, sans retour possible',
+                      'Tout appel à /ia/agents/{id}/invoquer sur cet agent échoue ensuite',
+                    ],
+                  }}
+                />
+              </span>
+            }
+          />
+          <KeyValueList
+            colonnes={2}
+            items={[
+              { cle: 'Modèle', valeur: modele?.nom ?? agent.modele },
+              { cle: 'Statut', valeur: LIBELLE_STATUT[agent.statut] },
+              { cle: 'Température', valeur: agent.temperature },
+              { cle: 'Top-P', valeur: agent.topP },
+              { cle: 'Jetons générés au plus', valeur: num(agent.jetonsMax) },
+              { cle: 'Créé le', valeur: agent.createdAt ? dateHeure(agent.createdAt) : '—' },
+            ]}
+          />
+          <div className="mt-4 border-t border-g-100 pt-4">
+            <MicroLabel className="mb-2">Consigne</MicroLabel>
+            <div className="rounded-[8px] border border-g-300 bg-g-050 p-3.5">
+              <ConsigneAnnotee texte={agent.consigne} />
+            </div>
+          </div>
+          <div className="mt-4 border-t border-g-100 pt-4">
+            <MicroLabel className="mb-2">Appel direct (réel)</MicroLabel>
+            <CodeBlock
+              langue="bash"
+              code={`curl -X POST {API}/ia/agents/${agent.id}/invoquer \\
+  -H "Authorization: Bearer $SYNELIA_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"message": "Bonjour"}'`}
+            />
+          </div>
+          <div className="mt-4 border-t border-g-100 pt-4">
+            <MicroLabel className="mb-2">Tester cet agent</MicroLabel>
+            <p className="mb-2 text-[11.5px] text-g-500">
+              Un vrai appel à la passerelle, sans clé d’accès IA : rien n’est compté sur un quota
+              ni sur une dépense de clé — seule une trace d’audit est écrite, comme pour tout appel.
+            </p>
+            <MonoTextarea
+              value={messageTest}
+              placeholder="Bonjour, peux-tu te présenter ?"
+              onChange={(e) => setMessageTest(e.target.value)}
+            />
+            <Button
+              className="mt-2"
+              size="sm"
+              disabled={!messageTest.trim() || testEnCours}
+              onClick={tester}
+            >
+              {testEnCours ? 'Appel en cours…' : 'Tester'}
+            </Button>
+            {erreurTest && <p className="mt-2 text-[12px] text-err">{erreurTest}</p>}
+            {resultatTest && (
+              <div className="mt-3 rounded-[8px] border border-g-300 bg-g-050 p-3.5">
+                <p className="whitespace-pre-wrap text-[12.5px] text-ink">{resultatTest.reponse}</p>
+                <p className="mt-2 text-[11px] text-g-500">
+                  {modele?.nom ?? agent.modele} · {num(resultatTest.jetonsEntree)} +{' '}
+                  {num(resultatTest.jetonsSortie)} jetons · {money(resultatTest.coutFcfa)} ·{' '}
+                  {num(resultatTest.latenceMs)} ms
+                </p>
+              </div>
+            )}
+          </div>
+          <Callout ton="info" className="mt-4" titre="Publier ici, ce n’est pas publier une fiche de démonstration">
+            « Publier » change le statut de cet agent auprès de la passerelle, immédiatement — il n’y
+            a pas encore de jeu d’épreuves ni de bascule progressive sur 10 % du trafic côté backend :
+            cette gouvernance existe pour les agents de démonstration de cette maquette, pas encore
+            pour un agent créé via l’API.
+          </Callout>
+        </Card>
+      )}
+
+      {agent && demo && (
         <>
           <Card>
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -180,11 +347,28 @@ export function VueAgent({ agentId }: { agentId: string }) {
                     titre="Consigne"
                     sousTitre="Le rôle, le ton, les contraintes et ce que l’agent doit refuser de faire. Les variables entre doubles accolades sont remplacées à chaque appel."
                     actions={
-                      <GatedAction autorise={peutEcrire} message={refus('ia.agent.write')}>
-                        <Button size="sm" variant="secondary">
-                          Enregistrer une version
-                        </Button>
-                      </GatedAction>
+                      <BoutonFormulaire
+                        libelle="Enregistrer une version"
+                        variant="secondary"
+                        size="sm"
+                        action="ia.agent.write"
+                        titre="Enregistrer une nouvelle consigne"
+                        description="La consigne est réécrite immédiatement sur cet agent — pas encore de versionnement distinct côté backend pour un agent créé via l’API."
+                        champs={[
+                          { id: 'consigne', label: 'Consigne', type: 'mono', obligatoire: true },
+                        ]}
+                        valeursDepart={{ consigne: agent.consigne }}
+                        libelleValider="Enregistrer"
+                        operation={(v) => ({
+                          titre: 'Consigne enregistrée',
+                          appel: () =>
+                            modifierRessource('/ia/agents', agent.id, {
+                              consigne: String(v.consigne),
+                            }),
+                          effet: () => agentsCol.modifier(agent.id, { consigne: String(v.consigne) }),
+                          effetFinal: () => agentsCol.recharger(),
+                        })}
+                      />
                     }
                   />
                   <div className="rounded-[8px] border border-g-300 bg-g-050 p-3.5">
@@ -468,7 +652,7 @@ export function VueAgent({ agentId }: { agentId: string }) {
                               {b.nom}
                             </span>
                             <span className="block text-[11px] text-g-500">
-                              {num(b.documents)} documents · indexée {relatif(b.derniereIndexation)}
+                              {num(b.documents)} documents · indexée {relatif(b.derniereIndexation, maintenant)}
                             </span>
                           </span>
                           <Badge
@@ -833,7 +1017,7 @@ export function VueAgent({ agentId }: { agentId: string }) {
                     formateur={(v) => `${v} cas`}
                   />
                   <p className="mt-3 text-[12px] text-g-500">
-                    Dernier passage {relatif(agent.epreuves.dernierPassage)} ·{' '}
+                    Dernier passage {relatif(agent.epreuves.dernierPassage, maintenant)} ·{' '}
                     {pct((agent.epreuves.reussis / agent.epreuves.cas) * 100)} de réussite
                   </p>
                   {agent.epreuves.reussis / agent.epreuves.cas < 0.8 ? (
@@ -978,7 +1162,7 @@ export function VueAgent({ agentId }: { agentId: string }) {
                         </p>
                         <p className="mt-1 text-[12px] text-ink">{a.correction}</p>
                         <p className="mt-1.5 text-[11px] text-g-500">
-                          {a.auteur} · {relatif(a.date)} · réutilisée {num(a.reutilisations)} fois
+                          {a.auteur} · {relatif(a.date, maintenant)} · réutilisée {num(a.reutilisations)} fois
                         </p>
                       </div>
                     ))}

@@ -189,6 +189,7 @@ export interface BoiteMail {
   utiliseGo: number
   statut: 'active' | 'suspendue' | 'archivee'
   derniereConnexion?: string
+  mfa: boolean
 }
 
 export interface MessagerieDomaine {
@@ -218,14 +219,14 @@ export const MESSAGERIES: MessagerieDomaine[] = [
     hoteWebmail: 'mail.dba.africa',
     boitesIncluses: 20,
     boites: [
-      { adresse: 'lea.konan@dba.africa', nom: 'Léa Konan', quotaGo: 50, utiliseGo: 18.4, statut: 'active', derniereConnexion: '2026-08-19T15:14:00Z' },
-      { adresse: 'fatou.diallo@dba.africa', nom: 'Fatou Diallo', quotaGo: 50, utiliseGo: 34.1, statut: 'active', derniereConnexion: '2026-08-19T15:08:00Z' },
-      { adresse: 'yao.kouassi@dba.africa', nom: 'Yao Kouassi', quotaGo: 25, utiliseGo: 11.2, statut: 'active', derniereConnexion: '2026-08-19T09:34:00Z' },
-      { adresse: 'aicha.kone@dba.africa', nom: 'Aïcha Koné', quotaGo: 50, utiliseGo: 47.8, statut: 'active', derniereConnexion: '2026-08-19T14:58:00Z' },
-      { adresse: 'adama.sangare@dba.africa', nom: 'Adama Sangaré', quotaGo: 25, utiliseGo: 4.6, statut: 'active', derniereConnexion: '2026-08-15T17:04:00Z' },
-      { adresse: 'nadia.traore@dba.africa', nom: 'Nadia Traoré', quotaGo: 25, utiliseGo: 1.2, statut: 'suspendue', derniereConnexion: '2026-07-28T10:22:00Z' },
-      { adresse: 'compta@dba.africa', nom: 'Comptabilité', quotaGo: 25, utiliseGo: 9.8, statut: 'active', derniereConnexion: '2026-08-19T11:02:00Z' },
-      { adresse: 'contact@dba.africa', nom: 'Contact général', quotaGo: 25, utiliseGo: 14.2, statut: 'active', derniereConnexion: '2026-08-19T13:41:00Z' },
+      { adresse: 'lea.konan@dba.africa', nom: 'Léa Konan', quotaGo: 50, utiliseGo: 18.4, statut: 'active', derniereConnexion: '2026-08-19T15:14:00Z', mfa: true },
+      { adresse: 'fatou.diallo@dba.africa', nom: 'Fatou Diallo', quotaGo: 50, utiliseGo: 34.1, statut: 'active', derniereConnexion: '2026-08-19T15:08:00Z', mfa: true },
+      { adresse: 'yao.kouassi@dba.africa', nom: 'Yao Kouassi', quotaGo: 25, utiliseGo: 11.2, statut: 'active', derniereConnexion: '2026-08-19T09:34:00Z', mfa: false },
+      { adresse: 'aicha.kone@dba.africa', nom: 'Aïcha Koné', quotaGo: 50, utiliseGo: 47.8, statut: 'active', derniereConnexion: '2026-08-19T14:58:00Z', mfa: true },
+      { adresse: 'adama.sangare@dba.africa', nom: 'Adama Sangaré', quotaGo: 25, utiliseGo: 4.6, statut: 'active', derniereConnexion: '2026-08-15T17:04:00Z', mfa: false },
+      { adresse: 'nadia.traore@dba.africa', nom: 'Nadia Traoré', quotaGo: 25, utiliseGo: 1.2, statut: 'suspendue', derniereConnexion: '2026-07-28T10:22:00Z', mfa: false },
+      { adresse: 'compta@dba.africa', nom: 'Comptabilité', quotaGo: 25, utiliseGo: 9.8, statut: 'active', derniereConnexion: '2026-08-19T11:02:00Z', mfa: true },
+      { adresse: 'contact@dba.africa', nom: 'Contact général', quotaGo: 25, utiliseGo: 14.2, statut: 'active', derniereConnexion: '2026-08-19T13:41:00Z', mfa: false },
     ],
     alias: [
       { de: 'info@dba.africa', vers: ['contact@dba.africa'] },
@@ -250,8 +251,8 @@ export const MESSAGERIES: MessagerieDomaine[] = [
     hoteWebmail: 'mail.digitalbusinessafrica.ci',
     boitesIncluses: 5,
     boites: [
-      { adresse: 'contact@digitalbusinessafrica.ci', nom: 'Contact', quotaGo: 10, utiliseGo: 2.1, statut: 'active', derniereConnexion: '2026-08-18T16:22:00Z' },
-      { adresse: 'ci@digitalbusinessafrica.ci', nom: 'Bureau Côte d’Ivoire', quotaGo: 10, utiliseGo: 5.4, statut: 'active', derniereConnexion: '2026-08-19T08:11:00Z' },
+      { adresse: 'contact@digitalbusinessafrica.ci', nom: 'Contact', quotaGo: 10, utiliseGo: 2.1, statut: 'active', derniereConnexion: '2026-08-18T16:22:00Z', mfa: false },
+      { adresse: 'ci@digitalbusinessafrica.ci', nom: 'Bureau Côte d’Ivoire', quotaGo: 10, utiliseGo: 5.4, statut: 'active', derniereConnexion: '2026-08-19T08:11:00Z', mfa: true },
     ],
     alias: [{ de: 'info@digitalbusinessafrica.ci', vers: ['contact@digitalbusinessafrica.ci'] }],
     redirections: [],
@@ -635,7 +636,7 @@ export const SAUVEGARDES_WEB: SauvegardeWeb[] = [
 const hebergementsDeLOrg = (orgId: string = ORG_COURANTE.id) =>
   HEBERGEMENTS.filter((h) => h.orgId === orgId)
 
-const domainesDeLOrg = (orgId: string = ORG_COURANTE.id) =>
+export const domainesDeLOrg = (orgId: string = ORG_COURANTE.id) =>
   DOMAINES.filter((d) => d.orgId === orgId)
 
 export const serveursBasesDeLOrg = (orgId?: string) => {

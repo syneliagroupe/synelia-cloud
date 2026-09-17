@@ -1,12 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, num } from '@/lib/format'
-import { CLASSE_DONNEES_LABEL, TYPE_AGENT_LABEL, type TypeAgent } from '@/lib/types'
-import { BASES_CONNAISSANCE, CANAUX_AGENT, MODELES_IA, OUTILS_AGENT } from '@/lib/mock'
+import {
+  CLASSE_DONNEES_LABEL,
+  TYPE_AGENT_LABEL,
+  type AgentIA,
+  type ModeleIA,
+  type TypeAgent,
+} from '@/lib/types'
+import { AGENTS_IA, BASES_CONNAISSANCE, CANAUX_AGENT, MODELES_IA, OUTILS_AGENT } from '@/lib/mock'
+import { creerRessource, estActif } from '@/lib/api/client'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -14,6 +21,7 @@ import { Checkbox, Field, Input, MonoTextarea, Select, Slider, Switch } from '@/
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { CostPreview, WizardShell } from '@/components/composition/flow'
 import { useApp, useEspace } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
 const ETAPES = [
   { numero: 1, titre: 'Identité' },
@@ -70,11 +78,14 @@ export default function NouvelAgent() {
   const router = useRouter()
   const espace = useEspace()
   const { autorise, refus, pousser } = useApp()
+  const agentsCol = useCollection<AgentIA>('agents-ia', AGENTS_IA)
+  const modelesCol = useCollection<ModeleIA>('modeles-ia', MODELES_IA)
 
   const [etape, setEtape] = useState(1)
   const [nom, setNom] = useState('')
   const [role, setRole] = useState('')
   const [type, setType] = useState<TypeAgent>('conversationnel')
+  const [consigne, setConsigne] = useState(CONSIGNE_TYPE.conversationnel)
   const [modele, setModele] = useState('synelia/mistral-small-3.2-24b')
   const [temperature, setTemperature] = useState(0.2)
   const [jetonsMax, setJetonsMax] = useState(1_024)
@@ -86,9 +97,26 @@ export default function NouvelAgent() {
   const [canaux, setCanaux] = useState<string[]>(['cx-rest'])
 
   const peutEcrire = autorise('ia.agent.write')
-  const m = MODELES_IA.find((x) => x.slug === modele)
+  // En mode API, `modelesCol` sert le vrai catalogue (slugs OpenRouter réels) au
+  // lieu de la graine de démonstration — sans quoi le choix par défaut ne
+  // correspondrait à aucun modèle connu de la passerelle et `POST /ia/agents`
+  // rejetterait la création. `invocable === false` écarte les familles
+  // hors périmètre de la passerelle chat (embedding, reranker, transcription).
+  const modelesTexte = modelesCol.items.filter(
+    (x) => (x.famille === 'texte' || x.famille === 'vision') && x.invocable !== false,
+  )
+  const m = modelesTexte.find((x) => x.slug === modele)
   const basesEspace = BASES_CONNAISSANCE.filter((b) => b.espaceId === espace.id)
   const outilsEcrivains = outils.filter((id) => OUTILS_AGENT.find((o) => o.id === id)?.effet === 'ecriture')
+
+  // Rattrape le choix par défaut une fois le vrai catalogue chargé (l'état
+  // initial part de la graine, affichée le temps du premier aller-retour).
+  useEffect(() => {
+    if (modelesTexte.length > 0 && !modelesTexte.some((x) => x.slug === modele)) {
+      setModele(modelesTexte[0].slug)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelesTexte])
 
   // Hypothèse de charge affichée avec le devis, pour que le chiffre soit lisible.
   const APPELS_JOUR = 500
@@ -100,6 +128,48 @@ export default function NouvelAgent() {
 
   const bascule = (liste: string[], set: (v: string[]) => void, id: string) =>
     set(liste.includes(id) ? liste.filter((x) => x !== id) : [...liste, id])
+
+  // Le backend réel (`POST /ia/agents`) ne connaît que six champs — nom,
+  // consigne, espaceId, modèle, température, jetons au plus. Le reste de
+  // cet assistant (outils, connaissances, garde-fous, canaux) n'a pas de
+  // contrepartie serveur aujourd'hui : ces choix restent cosmétiques tant que
+  // l'agent créé est un agent réel, et n'affectent que le devis affiché ici.
+  const creerAgent = () => {
+    if (estActif()) {
+      creerRessource<AgentIA>('/ia/agents', {
+        nom,
+        consigne,
+        espaceId: espace.id,
+        modele,
+        temperature,
+        jetonsMax,
+      }).then(
+        () => {
+          agentsCol.recharger()
+          pousser({
+            ton: 'ok',
+            titre: 'Agent créé en brouillon',
+            detail: `${nom || 'Nouvel agent'} — publiez-le depuis sa fiche quand vous êtes prêt.`,
+          })
+          router.push('/app/ia/agents')
+        },
+        (e: unknown) => {
+          pousser({
+            ton: 'err',
+            titre: 'Création impossible',
+            detail: e instanceof Error ? e.message : 'La passerelle IA n’a pas répondu.',
+          })
+        },
+      )
+      return
+    }
+    pousser({
+      ton: 'ok',
+      titre: 'Agent créé en brouillon',
+      detail: `${nom || 'Nouvel agent'} — constituez son jeu d’épreuves avant de publier.`,
+    })
+    router.push('/app/ia/agents')
+  }
 
   const panneau = (
     <>
@@ -138,9 +208,9 @@ export default function NouvelAgent() {
         />
       </Card>
       <Callout ton="info" titre="Créé en brouillon">
-        Un agent n’est jamais publié à la création. Il faut d’abord constituer son jeu d’épreuves et
-        obtenir 80 % de réussite — c’est la plateforme qui bloque la publication en dessous, pas une
-        recommandation.
+        {estActif()
+          ? 'Un agent créé via l’API n’est jamais publié à la création. Sa fiche permet de le publier ensuite d’un clic — mais cette passerelle ne tient pas encore de jeu d’épreuves : rien ne bloque la publication d’un agent qui n’a jamais été testé, contrairement aux agents de démonstration.'
+          : 'Un agent n’est jamais publié à la création. Il faut d’abord constituer son jeu d’épreuves et obtenir 80 % de réussite — c’est la plateforme qui bloque la publication en dessous, pas une recommandation.'}
       </Callout>
     </>
   )
@@ -179,17 +249,7 @@ export default function NouvelAgent() {
               </Button>
             ) : (
               <GatedAction autorise={peutEcrire} message={refus('ia.agent.write')}>
-                <Button
-                  iconBefore={<Check size={14} />}
-                  onClick={() => {
-                    pousser({
-                      ton: 'ok',
-                      titre: 'Agent créé en brouillon',
-                      detail: `${nom || 'Nouvel agent'} — constituez son jeu d’épreuves avant de publier.`,
-                    })
-                    router.push('/app/ia/agents')
-                  }}
-                >
+                <Button iconBefore={<Check size={14} />} onClick={creerAgent}>
                   Créer en brouillon
                 </Button>
               </GatedAction>
@@ -238,6 +298,7 @@ export default function NouvelAgent() {
                     type="button"
                     onClick={() => {
                       setType(t.value)
+                      setConsigne(CONSIGNE_TYPE[t.value])
                       if (t.value === 'flux' || t.value === 'extraction') setTemperature(0)
                     }}
                     className={cn(
@@ -269,7 +330,7 @@ export default function NouvelAgent() {
                 sousTitre="Le tarif et la résidence comptent autant que la qualité. Un modèle souverain traite toutes les classes de données ; un modèle externe en refuse certaines."
               />
               <div className="space-y-2">
-                {MODELES_IA.filter((x) => x.famille === 'texte' || x.famille === 'vision').map((x) => (
+                {modelesTexte.map((x) => (
                   <button
                     key={x.id}
                     type="button"
@@ -284,6 +345,15 @@ export default function NouvelAgent() {
                         {x.nom}
                       </span>
                       <span className="block truncate text-[11px] text-g-500">{x.residence}</span>
+                      {/* Le catalogue porte la vérité sur ce qui répond réellement aujourd'hui
+                          (ex. le garde-fou OpenRouter du 2026-09-07) dans sa description — pas de
+                          badge « vérifié » figé côté interface, qui se périmerait en silence dès
+                          que le garde-fou serait corrigé côté fournisseur. */}
+                      {x.description && (
+                        <span className="mt-0.5 block truncate text-[11px] text-g-500">
+                          {x.description}
+                        </span>
+                      )}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       <span className="tnum text-[12px] text-g-500">
@@ -303,7 +373,11 @@ export default function NouvelAgent() {
                 titre="Consigne"
                 sousTitre="Un canevas adapté à la nature choisie. Écrivez ce que l’agent doit refuser autant que ce qu’il doit faire."
               />
-              <MonoTextarea rows={12} defaultValue={CONSIGNE_TYPE[type]} key={type} />
+              <MonoTextarea
+                rows={12}
+                value={consigne}
+                onChange={(e) => setConsigne(e.target.value)}
+              />
               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Slider
                   label="Température"

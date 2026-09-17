@@ -9,6 +9,7 @@ import { SearchInput, SegmentedControl } from '@/components/ui/field'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardHeader } from '@/components/composition/card'
 import { DegradedState } from '@/components/composition/states'
+import { useMaintenant } from '@/components/app/contexte'
 
 export type Periode = '24h' | '7j' | '30j'
 
@@ -182,21 +183,28 @@ export function GrilleSparkCharts({
   )
 }
 
+/** URL réelle du Grafana déployé sur le cluster workload dev01 (victoria-metrics-k8s-stack).
+ * `hrefGrafana` permet à un écran qui a lu `liens.grafana` depuis le backend (dégradable,
+ * donc parfois absent) de la préciser ; sans backend actif, cette constante reste correcte. */
+const GRAFANA_URL_DEFAUT = 'https://grafana.synelia.dev01.ovh.smile.ci'
+
 /** Les trois liens de sortie autorisés (§4.9). */
 export function LiensSortie({
   centreon = true,
   grafana = true,
   logs = true,
+  hrefGrafana,
   className,
 }: {
   centreon?: boolean
   grafana?: boolean
   logs?: boolean
+  hrefGrafana?: string
   className?: string
 }) {
   const liens = [
     centreon && { libelle: 'Ouvrir dans Centreon', href: 'https://centreon.synelia.tech' },
-    grafana && { libelle: 'Ouvrir dans Grafana', href: 'https://grafana.synelia.cloud' },
+    grafana && { libelle: 'Ouvrir dans Grafana', href: hrefGrafana || GRAFANA_URL_DEFAUT },
     logs && { libelle: 'Ouvrir dans VictoriaLogs', href: 'https://vlogs.synelia.cloud' },
   ].filter(Boolean) as Array<{ libelle: string; href: string }>
 
@@ -232,6 +240,7 @@ export function EventList({
   hrefSortie?: string
   className?: string
 }) {
+  const maintenant = useMaintenant()
   const tons = {
     critique: 'err',
     majeure: 'warn',
@@ -257,7 +266,7 @@ export function EventList({
               <p className="text-[13px] leading-snug text-ink">{e.message}</p>
               <p className="mt-0.5 text-[12px] text-g-500">
                 {e.ressource}
-                {e.site && ` · ${e.site}`} · {relatif(e.ts)}
+                {e.site && ` · ${e.site}`} · {relatif(e.ts, maintenant)}
               </p>
             </div>
           </li>

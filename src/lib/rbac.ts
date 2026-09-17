@@ -99,8 +99,6 @@ export const MATRICE_RBAC: ActionRbac[] = [
         '●●●●●—————'),
   ligne('ia.routing.update', 'Modifier le routage et les garde-fous', 'Intelligence artificielle',
         '●—●●——————'),
-  ligne('ia.endpoint.deploy', "Déployer un point d'inférence dédié", 'Intelligence artificielle',
-        '●●●●——————'),
   ligne('ia.knowledge.write', 'Créer / réindexer une base de connaissances', 'Intelligence artificielle',
         '●—●●●—————'),
   ligne('ia.budget.update', 'Modifier le plafond de dépense IA', 'Intelligence artificielle',

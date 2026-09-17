@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Download, FileCheck2, KeyRound, ShieldAlert } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
-import { dateHeure, num, pct, relatif } from '@/lib/format'
+import { MAINTENANT, dateHeure, num, pct, relatif } from '@/lib/format'
 import { telechargerCsv, telechargerTexte } from '@/lib/export'
 import { EQUIPE_SYNELIA, ORGANISATIONS } from '@/lib/mock'
 import type { MembreEquipe } from '@/lib/mock'
@@ -17,10 +17,30 @@ import { Drawer } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
+import { useLectureDegradable } from '@/lib/api/degradable'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
 import type { AuditEvent } from '@/lib/types'
+
+/** `GET /audit/integrite` : rejoue la chaîne de hachage et confirme qu'elle est intacte, ou
+ * signale la première ligne en rupture. Pas de forme mock équivalente — l'atelier ne modifie
+ * jamais le hash d'une entrée, donc la démonstration reste toujours intacte hors API réelle. */
+interface IntegriteAudit {
+  intacte: boolean
+  entreesVerifiees: number
+  totalEntrees: number
+  ruptureId?: string | null
+  ruptureDate?: string | null
+  raison?: string | null
+  empreinteFinale?: string
+}
+
+const INTEGRITE_DEMO: IntegriteAudit = {
+  intacte: true,
+  entreesVerifiees: 1_284_912,
+  totalEntrees: 1_284_912,
+}
 
 const ONGLETS = [
   { id: 'journal', label: 'Journal complet' },
@@ -30,9 +50,18 @@ const ONGLETS = [
 ]
 
 export default function AuditAdmin() {
-  // Le journal vit dans l'atelier : les actions faites pendant la session s'y
-  // ajoutent, refus compris. Sans atelier touché, il retombe sur la graine.
-  const { journal: AUDIT } = useAtelier()
+  const maintenant = useMaintenant()
+  // Journal réel plateforme (`GET /admin/audit`, toutes organisations) quand le backend est
+  // joignable ; sinon l'atelier — les actions faites pendant la session s'y ajoutent, refus
+  // compris, et sans atelier touché il retombe sur la graine.
+  const { journal: journalLocal } = useAtelier()
+  const { donnees: journalDistant } = useLectureDegradable<{ donnees: AuditEvent[] }>(
+    '/admin/audit',
+    { parPage: '200' },
+  )
+  const AUDIT = journalDistant?.donnees ?? journalLocal
+  const { donnees: integriteDistante } = useLectureDegradable<IntegriteAudit>('/audit/integrite')
+  const integrite = integriteDistante ?? INTEGRITE_DEMO
 
   const { autorise, refus, pousser } = useApp()
   const equipe = useCollection<MembreEquipe>('equipe-synelia', EQUIPE_SYNELIA)
@@ -131,6 +160,7 @@ export default function AuditAdmin() {
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Audit' }]}
         titre="Journal d’audit de la plateforme"
         sousTitre="Toutes les actions, y compris celles de nos propres équipes et celles qui ont été refusées. Les lignes concernant une organisation apparaissent aussi dans son journal à elle : nous ne tenons pas un registre séparé que le client ne verrait pas."
         actions={
@@ -187,8 +217,8 @@ export default function AuditAdmin() {
                 `${m.nom} jusqu’à ${m.elevation?.jusqua ? dateHeure(m.elevation.jusqua) : '—'} — ${m.elevation?.justification ?? ''}`,
             )
             .join(' · ')}
-          . Chaque élévation est visible ici et dans le journal de l’organisation concernée, et expire
-          d’elle-même.
+          . Chaque élévation active est visible ici et dans le journal de l’organisation concernée. Elle
+          expire d’elle-même : personne n’a d’accès permanent aux ressources d’un client.
         </Callout>
       )}
 
@@ -284,7 +314,7 @@ export default function AuditAdmin() {
                   rendu: (a) => (
                     <span className="block">
                       <span className="block text-[11px] text-ink">{dateHeure(a.ts)}</span>
-                      <span className="block text-[11px] text-g-500">{relatif(a.ts)}</span>
+                      <span className="block text-[10px] text-g-500">{relatif(a.ts, maintenant)}</span>
                     </span>
                   ),
                 },
@@ -295,7 +325,7 @@ export default function AuditAdmin() {
                   rendu: (a) => (
                     <span className="block min-w-0">
                       <span className="flex items-center gap-1.5">
-                        <span className="truncate text-[12px] font-semibold text-ink">
+                        <span className="truncate text-[11.5px] font-semibold text-ink">
                           {a.actor.nom}
                         </span>
                         {equipe.items.some((m) => m.nom === a.actor.nom) && (
@@ -304,7 +334,7 @@ export default function AuditAdmin() {
                           </Badge>
                         )}
                       </span>
-                      <span className="block text-[11px] text-g-500">
+                      <span className="block text-[10px] text-g-500">
                         {ROLE_LABEL[a.role] ?? a.role}
                       </span>
                     </span>
@@ -318,7 +348,7 @@ export default function AuditAdmin() {
                     a.orgId ? (
                       <Link
                         href={`/admin/organisations/${a.orgId}`}
-                        className="text-[12px] text-ink hover:text-p-700"
+                        className="text-[11.5px] text-ink hover:text-p-700"
                       >
                         {a.orgNom ?? orgNom(a.orgId)}
                       </Link>
@@ -352,7 +382,7 @@ export default function AuditAdmin() {
                   cle: (a) => a.scope.label,
                   masquable: true,
                   rendu: (a) => (
-                    <span className="text-[11px] text-g-500">{a.scope.label}</span>
+                    <span className="text-[10.5px] text-g-500">{a.scope.label}</span>
                   ),
                 },
                 {
@@ -376,7 +406,7 @@ export default function AuditAdmin() {
                   masquable: true,
                   masqueeParDefaut: true,
                   rendu: (a) => (
-                    <span className="font-mono text-[11px] text-g-500">{a.ip ?? '—'}</span>
+                    <span className="font-mono text-[10px] text-g-500">{a.ip ?? '—'}</span>
                   ),
                 },
                 {
@@ -402,8 +432,10 @@ export default function AuditAdmin() {
       {onglet === 'elevations' && (
         <div className="space-y-4">
           <Callout ton="violet" titre="Aucun accès permanent aux données d’un client">
-            Voir le contenu des données d’une organisation exige une élévation nominative, motivée,
-            bornée dans le temps, et inscrite au journal d’audit du client.
+            Un membre de nos équipes ne voit pas le contenu des données d’une organisation sans une
+            élévation nominative, motivée, bornée dans le temps, et visible dans le journal d’audit du
+            client. Ce n’est pas une politique interne que nous demandons de croire : c’est le
+            mécanisme technique, et le client le constate lui-même.
           </Callout>
 
           <Card>
@@ -412,7 +444,7 @@ export default function AuditAdmin() {
               sousTitre="Elles expirent automatiquement. Une révocation immédiate est possible à tout moment."
             />
             {elevationsActives.length === 0 ? (
-              <p className="rounded-[6px] border border-dashed border-g-300 px-4 py-8 text-center text-[13px] text-g-500">
+              <p className="rounded-[6px] border border-dashed border-g-300 px-4 py-8 text-center text-[12.5px] text-g-500">
                 Aucune élévation active en ce moment.
               </p>
             ) : (
@@ -420,7 +452,7 @@ export default function AuditAdmin() {
                 {elevationsActives.map((m) => (
                   <div
                     key={m.id}
-                    className="rounded-[8px] border border-warn/40 px-3.5 py-3"
+                    className="rounded-[8px] border border-warn/40 bg-warn-bg px-3.5 py-3"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <span className="min-w-0">
@@ -459,7 +491,7 @@ export default function AuditAdmin() {
                         </GatedAction>
                       </span>
                     </div>
-                    <p className="mt-2 rounded-[5px] bg-white px-2.5 py-1.5 text-[12px] leading-relaxed text-ink">
+                    <p className="mt-2 rounded-[5px] bg-white px-2.5 py-1.5 text-[11.5px] leading-relaxed text-ink">
                       Motif : {m.elevation!.justification}
                     </p>
                   </div>
@@ -511,7 +543,7 @@ export default function AuditAdmin() {
                 ].map((e) => (
                   <div key={e.q} className="rounded-[6px] border border-g-300 px-3 py-2.5">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="min-w-0 text-[13px] font-semibold text-ink">{e.qui}</span>
+                      <span className="min-w-0 text-[12.5px] font-semibold text-ink">{e.qui}</span>
                       <span className="flex shrink-0 items-center gap-1.5">
                         <Badge
                           tone={e.p === 'Intervention' ? 'warn' : 'neutral'}
@@ -519,11 +551,11 @@ export default function AuditAdmin() {
                         >
                           {e.p}
                         </Badge>
-                        <span className="text-[11px] text-g-500">{e.d}</span>
+                        <span className="text-[10.5px] text-g-500">{e.d}</span>
                       </span>
                     </div>
-                    <p className="mt-0.5 text-[12px] text-g-700">{e.m}</p>
-                    <p className="mt-0.5 text-[11px] text-g-500">
+                    <p className="mt-0.5 text-[11.5px] text-g-700">{e.m}</p>
+                    <p className="mt-0.5 text-[10.5px] text-g-500">
                       {e.org} · {dateHeure(e.q)}
                     </p>
                   </div>
@@ -563,9 +595,9 @@ export default function AuditAdmin() {
                     d: 'Le système refuse une élévation sans date de fin. Il n’existe pas d’exception, pas même pour la direction.',
                   },
                 ].map((x) => (
-                  <div key={x.r} className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                    <p className="text-[13px] font-semibold text-ink">{x.r}</p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">{x.d}</p>
+                  <div key={x.r} className="rounded-[6px] border border-p-300 bg-p-050 px-3 py-2.5">
+                    <p className="text-[12.5px] font-semibold text-ink">{x.r}</p>
+                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">{x.d}</p>
                   </div>
                 ))}
               </div>
@@ -590,7 +622,7 @@ export default function AuditAdmin() {
                 sousTitre="Chaque ligne porte l’action visée, le rôle de l’acteur et le rôle qui aurait été requis."
               />
               {refuses.length === 0 ? (
-                <p className="rounded-[6px] border border-dashed border-g-300 px-4 py-8 text-center text-[13px] text-g-500">
+                <p className="rounded-[6px] border border-dashed border-g-300 px-4 py-8 text-center text-[12.5px] text-g-500">
                   Aucune action refusée sur la période.
                 </p>
               ) : (
@@ -598,30 +630,30 @@ export default function AuditAdmin() {
                   {refuses.map((a) => (
                     <div
                       key={a.id}
-                      className="rounded-[6px] border border-g-300 px-3 py-2.5"
+                      className="rounded-[6px] border border-warn/40 bg-warn-bg px-3 py-2.5"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <span className="min-w-0">
-                          <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                          <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                             <ShieldAlert size={12} className="shrink-0 text-warn" />
                             {a.actor.nom}
                           </span>
                           <span className="mt-0.5 block font-mono text-[11px] text-p-700">
                             {a.action}
                           </span>
-                          <span className="block text-[11px] text-g-700">
+                          <span className="block text-[10.5px] text-g-700">
                             sur <span className="font-mono">{a.target}</span> · {a.scope.label}
                           </span>
                         </span>
                         <span className="shrink-0 text-right">
-                          <span className="block text-[11px] text-g-500">{dateHeure(a.ts)}</span>
+                          <span className="block text-[10.5px] text-g-500">{dateHeure(a.ts)}</span>
                           <Badge tone="neutral" size="sm">
                             {ROLE_LABEL[a.role] ?? a.role}
                           </Badge>
                         </span>
                       </div>
                       {a.detail && (
-                        <p className="mt-1.5 rounded-[5px] bg-white px-2.5 py-1.5 text-[12px] leading-relaxed text-ink">
+                        <p className="mt-1.5 rounded-[5px] bg-white px-2.5 py-1.5 text-[11.5px] leading-relaxed text-ink">
                           {a.detail}
                         </p>
                       )}
@@ -660,7 +692,7 @@ export default function AuditAdmin() {
                     />
                   ))}
                 </div>
-                <div className="mt-2 flex justify-between text-[11px] text-g-500">
+                <div className="mt-2 flex justify-between text-[10.5px] text-g-500">
                   <span>Il y a 30 jours</span>
                   <span>Aujourd’hui</span>
                 </div>
@@ -697,10 +729,10 @@ export default function AuditAdmin() {
                       className={cn(
                         'rounded-[6px] border px-3 py-2.5',
                         x.t === 'err'
-                          ? 'border-err/40'
+                          ? 'border-err/40 bg-err-bg'
                           : x.t === 'warn'
-                            ? 'border-warn/40'
-                            : 'border-g-300',
+                            ? 'border-warn/40 bg-warn-bg'
+                            : 'border-info/40 bg-info-bg',
                       )}
                     >
                       <p className="text-[12px] font-bold text-ink">{x.c}</p>
@@ -722,8 +754,8 @@ export default function AuditAdmin() {
               titre="Intégrité du journal"
               sousTitre="Chaque entrée porte une empreinte cryptographique chaînée à la précédente. Modifier ou supprimer une ligne casserait la chaîne, et serait immédiatement détectable."
               actions={
-                <Badge tone="ok" dot size="sm">
-                  Chaîne intacte
+                <Badge tone={integrite.intacte ? 'ok' : 'err'} dot size="sm">
+                  {integrite.intacte ? 'Chaîne intacte' : 'Rupture détectée'}
                 </Badge>
               }
             />
@@ -731,19 +763,36 @@ export default function AuditAdmin() {
               colonnes={2}
               items={[
                 { cle: 'Algorithme', valeur: 'SHA-256, chaînage séquentiel' },
-                { cle: 'Dernière vérification complète', valeur: dateHeure('2026-08-19T06:00:00Z') },
-                { cle: 'Entrées vérifiées', valeur: num(1_284_912) },
-                { cle: 'Ruptures détectées', valeur: '0' },
+                {
+                  cle: 'Dernière vérification complète',
+                  valeur: integriteDistante ? dateHeure(MAINTENANT) : dateHeure('2026-08-19T06:00:00Z'),
+                },
+                { cle: 'Entrées vérifiées', valeur: `${num(integrite.entreesVerifiees)} / ${num(integrite.totalEntrees)}` },
+                {
+                  cle: 'Ruptures détectées',
+                  valeur: integrite.intacte ? '0' : `1 — ${integrite.raison ?? 'voir détail'}`,
+                },
                 { cle: 'Rétention en ligne', valeur: '24 mois' },
                 { cle: 'Archivage froid', valeur: '5 ans supplémentaires' },
                 { cle: 'Suppression possible', valeur: 'Non — y compris par nous' },
                 { cle: 'Réplication', valeur: 'Abidjan et Grand-Bassam, en écriture synchrone' },
               ]}
             />
-            <Callout ton="violet" className="mt-4" titre="Le journal est en ajout seul">
-              Aucune entrée ne peut être modifiée ni supprimée après écriture — pas davantage avec un
-              compte d’administration de la plateforme qu’avec nos accès les plus élevés.
-            </Callout>
+            {integrite.intacte ? (
+              <Callout ton="violet" className="mt-4" titre="Personne ne peut réécrire l’histoire">
+                Ni un administrateur de la plateforme, ni la direction, ni un attaquant qui aurait obtenu
+                nos accès les plus élevés. C’est la seule façon de rendre un journal d’audit utile pour
+                une certification, un litige, ou simplement pour répondre honnêtement à la question
+                « qu’est-ce qui s’est passé le 12 mars à 14 h ? ».
+              </Callout>
+            ) : (
+              <Callout ton="err" className="mt-4" titre="La chaîne est rompue">
+                Première entrée en rupture : <span className="font-mono">{integrite.ruptureId}</span>
+                {integrite.ruptureDate ? ` (${dateHeure(integrite.ruptureDate)})` : ''}. {integrite.raison}
+                . À traiter en priorité — c’est le signe qu’une ligne a été insérée, modifiée ou
+                supprimée hors du chemin normal d’écriture.
+              </Callout>
+            )}
           </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -795,7 +844,7 @@ export default function AuditAdmin() {
                     description="Remplace les noms par des identifiants stables. Utile pour une remise à un tiers qui n’a pas besoin de l’identité des personnes."
                   />
                 </div>
-                <p className="text-[12px] text-g-500">
+                <p className="text-[11.5px] text-g-500">
                   {lignesExport().length} entrée{lignesExport().length > 1 ? 's' : ''} dans la
                   sélection, sur {AUDIT.length} au journal.
                 </p>
@@ -815,7 +864,7 @@ export default function AuditAdmin() {
             <Card>
               <CardHeader
                 titre="Vérifier un export hors de la plateforme"
-                sousTitre="L’outil est libre et son code est publié."
+                sousTitre="L’outil est libre et son code est publié : l’auditeur n’a pas à nous croire."
               />
               <CodeBlock
                 langue="bash"
@@ -829,9 +878,10 @@ synelia-audit verify audit-plateforme-2026-07-19_2026-08-19.csv \\
 # aucune insertion, modification ni suppression détectée
 # empreinte finale : 8f2a91c4d7b0e5443a17c96e2f0d8b41`}
               />
-              <Callout ton="info" className="mt-4" titre="Vérification possible sans nous">
-                L’outil et le format sont publiés : un client, un auditeur ou un juge peut vérifier la
-                chaîne d’intégrité sans passer par nos équipes.
+              <Callout ton="info" className="mt-4" titre="Pourquoi publier l’outil de vérification">
+                Un journal d’audit dont seul le fournisseur peut vérifier l’intégrité ne prouve rien.
+                En publiant l’outil et le format, nous rendons la vérification possible sans nous, ce
+                qui est la seule façon de rendre la garantie crédible.
               </Callout>
               <MicroLabel className="mt-4 mb-1.5">Ce que nous ne pouvons pas faire</MicroLabel>
               <ul className="space-y-1">
@@ -842,7 +892,7 @@ synelia-audit verify audit-plateforme-2026-07-19_2026-08-19.csv \\
                   'Masquer une action de nos propres équipes',
                   'Empêcher un client de voir les lignes qui le concernent',
                 ].map((x) => (
-                  <li key={x} className="text-[12px] leading-relaxed text-g-700">
+                  <li key={x} className="text-[11.5px] leading-relaxed text-g-700">
                     · {x}
                   </li>
                 ))}
@@ -884,7 +934,7 @@ synelia-audit verify audit-plateforme-2026-07-19_2026-08-19.csv \\
             <KeyValueList
               colonnes={1}
               items={[
-                { cle: 'Horodatage', valeur: `${dateHeure(detail.ts)} (${relatif(detail.ts)})` },
+                { cle: 'Horodatage', valeur: `${dateHeure(detail.ts)} (${relatif(detail.ts, maintenant)})` },
                 {
                   cle: 'Acteur',
                   valeur: `${detail.actor.nom} — ${detail.actor.email} (${detail.actor.type})`,

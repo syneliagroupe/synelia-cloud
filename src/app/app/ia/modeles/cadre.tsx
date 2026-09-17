@@ -2,8 +2,9 @@
 
 import { MODELES_IA } from '@/lib/mock'
 import type { Tone } from '@/components/ui/badge'
-import { FAMILLE_MODELE_LABEL } from '@/lib/types'
+import { FAMILLE_MODELE_LABEL, type ModeleIA } from '@/lib/types'
 import { CadreSection } from '@/components/app/cadre-section'
+import { useCollection } from '@/components/app/atelier'
 
 const TON: Record<string, Tone> = {
   disponible: 'ok',
@@ -24,7 +25,8 @@ const ETAT: Record<string, string> = {
  * L'ordre n'est pas neutre : c'est celui qu'on veut voir choisi par défaut.
  */
 export function CadreModeles({ children }: { children: React.ReactNode }) {
-  const entrees = [...MODELES_IA]
+  const modelesCol = useCollection<ModeleIA>('modeles-ia', MODELES_IA)
+  const entrees = [...modelesCol.items]
     .sort((a, b) => Number(b.hebergement === 'souverain') - Number(a.hebergement === 'souverain'))
     .map((m) => ({
       id: m.id,

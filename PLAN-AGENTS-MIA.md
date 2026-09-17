@@ -23,14 +23,13 @@ L'univers **IA & Agents** compte dix sections côté client et une côté fourni
 | `/app/ia/agents` | Liste et fiche à six onglets : consigne annotée, outils et connaissances, garde-fous et mémoire, publication, versions et épreuves, traces et annotations |
 | `/app/ia/agents/new` | Assistant en quatre étapes, aperçu de coût, création en brouillon |
 | `/app/ia/orchestration` | Studio de flux au patron d'Activepieces, exécutions, réglages |
-| `/app/ia/outils` | Catalogue des outils et des canaux, routeur omnicanal |
+| `/app/ia/integrations` | Catalogue des outils et des canaux, routeur omnicanal |
 | `/app/ia/modeles` | Douze modèles, résidence, tarif, performance, appel |
 | `/app/ia/passerelle` | Point d'entrée, clés, coffre-fort des clés fournisseurs |
 | `/app/ia/routage` | Règles de routage, garde-fous, matrice de résidence |
 | `/app/ia/connaissances` | Bases vectorielles, connecteurs, découpage, filtres de métadonnées |
-| `/app/ia/inference` | GPU réservés, mise en veille, aperçu de coût |
 | `/app/ia/consommation` | Coûts, plafond, alertes de seuil, quotas par direction |
-| `/admin/ia` | Parc GPU, flotte de modèles, contrats fournisseurs, agents de la plateforme |
+| `/admin/ia` | Modèles appelés, agents et orchestration par organisation |
 
 Jeu de données dans `src/lib/mock/ia.ts` : 12 modèles, 6 agents, 13 outils,
 8 canaux, 3 flux, 5 bases de connaissances, 3 points d'inférence, une trace
@@ -39,6 +38,26 @@ d'exécution en dix étapes, annotations, alertes, quotas, coffre de clés.
 RBAC : `ia.agent.write`, `ia.agent.publish`, `ia.flow.write`, `ia.tool.register`,
 `ia.key.manage`, `ia.routing.update`, `ia.endpoint.deploy`, `ia.knowledge.write`,
 `ia.budget.update`.
+
+**Inférence dédiée supprimée.** `/app/ia/inference` (GPU réservés) et le parc
+GPU / les contrats fournisseurs d'`/admin/ia` ont été retirés : il n'y a pas de
+GPU sur cette plateforme, le calcul passe entièrement par LiteLLM devant
+OpenRouter en pay-per-token — voir la décision « Inférence dédiée » dans
+`CLAUDE.md`.
+
+**Ce qui est réellement câblé, au-delà de la maquette.** Modèles, Agents
+(création, modification, statut, invocation), Connaissances (Docling → BGE-M3 →
+Qdrant), Orchestration (exécution de flux via LiteLLM) et Consommation lisent un
+vrai backend (`/ia/modeles`, `/ia/agents`, `/ia/connaissances`, `/ia/flux`,
+`/ia/cles`). Un agent créé via l'API n'a que dix champs — pas d'outils, de
+connaissances attribuées, de mémoire, de canaux, de versions ni de jeu
+d'épreuves côté serveur : la fiche d'agent le montre en clair (carte réduite au
+lieu des six onglets), avec publication/suspension réelles (`PATCH statut`, sans
+gate de réussite ni bascule progressive — cette gouvernance n'existe que pour les
+agents de démonstration) et l'appel direct `POST /ia/agents/{id}/invoquer`.
+**Intégrations reste entièrement maquette** : ni `OutilAgent` ni un canal n'ont
+de contrepartie dans le contrat backend, aucun endpoint `/ia/outils` ou
+`/ia/canaux` n'existe — vérifié à nouveau, pas seulement supposé.
 
 ---
 
@@ -97,7 +116,12 @@ ce qui rend l'export YAML lisible.
 | 01.4 | Variables dynamiques `{{…}}` | Fiche d'agent, table des variables | ✓ |
 | 01.5 | Versioning et retour arrière | Fiche d'agent, onglet *Versions* | ✓ |
 | 01.6 | Hyperparamètres | Température, Top-P, jetons, stratégie, itérations | ✓ |
-| 01.7 | Attribution des outils | Fiche d'agent + `/app/ia/outils` | ✓ |
+| 01.7 | Attribution des outils | Fiche d'agent + `/app/ia/integrations` | ✓ |
+
+01.1, 01.2, 01.3 et 01.6 sont réels pour un agent créé via l'API (`POST`/`PATCH
+/ia/agents`) ; 01.4, 01.5 et 01.7 restent construits uniquement pour les agents
+de démonstration — le contrat backend ne porte ni variables, ni versions, ni
+outils attribués à ce jour.
 
 ### FONC-02 — Moteur d'orchestration et multi-agents
 
@@ -146,14 +170,14 @@ ce qui rend l'export YAML lisible.
 
 | Code | Fonction | Où | État |
 |---|---|---|---|
-| 06.1 | WhatsApp Business | `/app/ia/outils`, onglet *Canaux* | ✓ |
+| 06.1 | WhatsApp Business | `/app/ia/integrations`, onglet *Canaux* | ✓ |
 | 06.2 | Telegram | idem | ✓ |
 | 06.3 | SMS bidirectionnel | idem, découpage à 160 caractères | ✓ |
 | 06.4 | Transcription vocale | idem — Whisper souverain, à Abidjan | ✓ |
 | 06.5 | Synthèse vocale | idem | ✓ |
 | 06.6 | Couplage téléphonique | idem — état *à configurer*, plan de numérotation | ✓ |
 | 06.7 | API REST synchrone | Fiche d'agent, onglet *Publication* | ✓ |
-| 06.8 | WebSocket | `/app/ia/outils`, onglet *Canaux* | ✓ |
+| 06.8 | WebSocket | `/app/ia/integrations`, onglet *Canaux* | ✓ |
 | 06.9 | Routeur de contexte omnicanal | idem, carte dédiée | ✓ |
 
 **39 fonctions sur 39.** 38 construites dans l'univers, 1 couverte par un écran

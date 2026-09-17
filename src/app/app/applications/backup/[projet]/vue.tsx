@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { HardDrive, RotateCcw, ShieldAlert } from 'lucide-react'
 import { dateHeure, MAINTENANT, relatif } from '@/lib/format'
 import type { Projet, ServiceProjet } from '@/lib/types'
@@ -18,8 +18,9 @@ import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { ConfirmDialog } from '@/components/ui/overlay'
 import { EnteteProjet, ICONE_TYPE, ProjetIntrouvable } from '@/components/business/projets'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { useServicesProjet } from '@/lib/api/services-projet'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 
 /**
@@ -31,6 +32,7 @@ import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/a
  * qu'est-ce que je récupère si je restaure maintenant ?
  */
 export function VueBackup({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
   const executer = useOperation()
@@ -38,10 +40,16 @@ export function VueBackup({ id }: { id: string }) {
   const [restaurationId, setRestaurationId] = useState<string | null>(null)
 
   const projet = lesProjets.items.find((p) => p.id === id)
-  const services = lesServices.items.filter((x) => x.projetId === id)
+  // Avec l’API, la liste vient de `GET /projets/{id}/services` (route nichée,
+  // hors registre) ; en maquette, du filtre local.
+  const { distants: servicesDistants } = useServicesProjet(id)
+  const services = useMemo(
+    () => servicesDistants ?? lesServices.items.filter((x) => x.projetId === id),
+    [servicesDistants, lesServices.items, id],
+  )
   const restauration = services.find((x) => x.id === restaurationId) ?? null
 
-  if (!projet) return <ProjetIntrouvable section="Backup" />
+  if (!projet) return <ProjetIntrouvable section="Sauvegardes" />
 
   const proteges = services.filter((s) => s.sauvegarde)
   const nus = services.filter((s) => !s.sauvegarde)
@@ -63,7 +71,7 @@ export function VueBackup({ id }: { id: string }) {
     <div className="space-y-5">
       <EnteteProjet
         projet={projet}
-        section="Backup"
+        section="Sauvegardes"
         titre="Sauvegardes du projet"
         sousTitre="Ce qui est protégé dans ce projet, à quelle fréquence, et jusqu’à quand on peut revenir en arrière. Les plans réutilisables et le tableau de conformité 3-2-1 vivent dans Infrastructure."
         meta={
@@ -231,7 +239,7 @@ export function VueBackup({ id }: { id: string }) {
                   actions={
                     <span className="flex items-center gap-2">
                       <Badge tone="ok" size="sm" dot>
-                        {relatif(plan.dernier)}
+                        {relatif(plan.dernier, maintenant)}
                       </Badge>
                       <GatedAction
                         autorise={autorise('backup.restore')}

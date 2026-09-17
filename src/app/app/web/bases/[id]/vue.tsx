@@ -20,11 +20,21 @@ import { Drawer } from '@/components/ui/overlay'
 import { PageHeader, Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, modifierRessource, requete } from '@/lib/api/client'
+
+/** Mot de passe fort généré côté client — affiché une seule fois, jamais stocké ici. */
+function genererMotDePasse(longueur = 20): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!#%+-_'
+  const octets = new Uint8Array(longueur)
+  crypto.getRandomValues(octets)
+  return Array.from(octets, (o) => alphabet[o % alphabet.length]).join('')
+}
 
 export function VueServeurBases({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const serveurs = useCollection<ServeurBases>('serveurs-bases', SERVEURS_BASES)
@@ -36,6 +46,8 @@ export function VueServeurBases({ id }: { id: string }) {
   const [baseRestauree, setBaseRestauree] = useState<string | null>(null)
   const [pointRestauration, setPointRestauration] = useState('hier')
   const [nomCopie, setNomCopie] = useState<string | null>(null)
+  /** Mot de passe réinitialisé d’un utilisateur — montré une fois. */
+  const [secretUtilisateur, setSecretUtilisateur] = useState<{ nom: string; motDePasse: string } | null>(null)
 
   const s = serveurs.items.find((x) => x.id === id)
   if (!s) return null
@@ -55,7 +67,7 @@ export function VueServeurBases({ id }: { id: string }) {
       <PageHeader
         fil={[
           { label: 'Espace client', href: '/app' },
-          { label: 'Databases', href: '/app/web/bases' },
+          { label: 'Bases de données', href: '/app/web/bases' },
           { label: MOTEUR_WEB_LABEL[s.moteur] },
         ]}
         titre={
@@ -99,8 +111,15 @@ export function VueServeurBases({ id }: { id: string }) {
                 action: 'service.admin',
                 titre: 'Activation demandée',
                 detail: `${MOTEUR_WEB_LABEL[s.moteur]} sera installé sur ${s.serveur} dans quelques minutes.`,
+                appel: () => modifierRessource('/web/bases', s.id, { actif: true }),
                 job: { workflow: 'web.db.enable', cible: `${MOTEUR_WEB_LABEL[s.moteur]} · ${s.serveur}` },
-                effetFinal: () => serveurs.modifier(s.id, { actif: true }),
+                effetFinal: () => {
+                  if (estActif()) {
+                    serveurs.recharger()
+                    return
+                  }
+                  serveurs.modifier(s.id, { actif: true })
+                },
               }}
             />
           )
@@ -135,7 +154,7 @@ export function VueServeurBases({ id }: { id: string }) {
             />
             <StatTile
               libelle="Dernière sauvegarde"
-              valeur={s.sauvegarde.derniere === '—' ? '—' : relatif(s.sauvegarde.derniere)}
+              valeur={s.sauvegarde.derniere === '—' ? '—' : relatif(s.sauvegarde.derniere, maintenant)}
               detail={s.sauvegarde.frequence}
               ton={s.sauvegarde.derniere === '—' ? 'neutral' : 'ok'}
             />
@@ -159,6 +178,19 @@ export function VueServeurBases({ id }: { id: string }) {
                       action: 'service.admin',
                       titre: `Export de ${s.bases.length} ${cle}(s) préparé`,
                       detail: `${(s.utiliseMo / 1024).toFixed(2)} Go · lien signé valable une heure`,
+                      // Un export par base (`POST …/bases/{nom}/export`, `202` chacun).
+                      appel:
+                        s.bases.length > 0
+                          ? () =>
+                              Promise.all(
+                                s.bases.map((b) =>
+                                  requete(
+                                    `/web/bases/${encodeURIComponent(s.id)}/bases/${encodeURIComponent(b.nom)}/export`,
+                                    { methode: 'POST', corps: { format: 'sql_gz' } },
+                                  ),
+                                ),
+                              )
+                          : undefined,
                       job: {
                         type: 'base.dump',
                         label: `Export ${MOTEUR_WEB_LABEL[s.moteur]} · ${s.serveur}`,
@@ -271,11 +303,17 @@ export function VueServeurBases({ id }: { id: string }) {
                                   ton: 'warn',
                                   titre: `${b.nom} supprimée`,
                                   detail: `Les sauvegardes restent disponibles ${s.sauvegarde.retentionJours} jours.`,
+                                  appel: () =>
+                                    requete(
+                                      `/web/bases/${encodeURIComponent(s.id)}/bases/${encodeURIComponent(b.nom)}`,
+                                      { methode: 'DELETE', query: { confirmation: b.nom } },
+                                    ),
                                   effet: () =>
                                     serveurs.modifier(s.id, (x) => ({
                                       bases: x.bases.filter((y) => y.nom !== b.nom),
                                       utiliseMo: Math.max(0, x.utiliseMo - b.tailleMo),
                                     })),
+                                  effetFinal: () => serveurs.recharger(),
                                 })
                               }
                             >
@@ -372,14 +410,22 @@ export function VueServeurBases({ id }: { id: string }) {
                       <IconButton
                         label={`Réinitialiser le mot de passe de ${u.nom}`}
                         size="sm"
-                        onClick={() =>
+                        onClick={() => {
+                          const motDePasse = genererMotDePasse()
                           executer({
                             action: 'service.admin',
                             titre: `Mot de passe de ${u.nom} réinitialisé`,
                             detail:
-                              'Affiché une seule fois. Mettez à jour la configuration du site avant de quitter cette page.',
+                              'Affiché une seule fois ci-dessous. Mettez à jour la configuration du site avant de quitter cette page.',
+                            // `PATCH /web/bases/{id}/utilisateurs/{nom} { motDePasse }`.
+                            appel: () =>
+                              requete(
+                                `/web/bases/${encodeURIComponent(s.id)}/utilisateurs/${encodeURIComponent(u.nom)}`,
+                                { methode: 'PATCH', corps: { motDePasse } },
+                              ),
+                            effetFinal: () => setSecretUtilisateur({ nom: u.nom, motDePasse }),
                           })
-                        }
+                        }}
                       >
                         <RotateCcw size={13} />
                       </IconButton>
@@ -387,6 +433,15 @@ export function VueServeurBases({ id }: { id: string }) {
                   </li>
                 ))}
               </ul>
+              {secretUtilisateur && (
+                <Callout
+                  ton="warn"
+                  className="mt-4"
+                  titre={`Nouveau mot de passe de ${secretUtilisateur.nom} — affiché une seule fois`}
+                >
+                  <CopyField className="mt-2" value={secretUtilisateur.motDePasse} masque mono />
+                </Callout>
+              )}
             </Card>
           )}
 
@@ -555,10 +610,24 @@ export function VueServeurBases({ id }: { id: string }) {
             <Button
               disabled={!nomBase.trim()}
               onClick={() => {
+                // Le contrat exige un mot de passe pour créer le compte dédié en même temps
+                // que la base (`POST …/bases { utilisateur: { motDePasse } }`) : ce tiroir ne
+                // le demande pas à l’opérateur, donc on le génère côté client — même motif que
+                // la réinitialisation de mot de passe de l’onglet Utilisateurs, affiché une
+                // seule fois juste après.
+                const motDePasseCompte = compteDedie ? genererMotDePasse() : null
                 executer({
                   action: 'service.admin',
                   titre: `${cle === 'base' ? 'Base' : 'Index'} ${nomBase} créé`,
                   detail: `Disponible immédiatement sur ${s.hoteInterne}:${s.port}.`,
+                  appel: () =>
+                    creerRessource(`/web/bases/${encodeURIComponent(s.id)}/bases`, {
+                      nom: nomBase,
+                      ...(s.moteur === 'redis' ? {} : { jeuCaracteres: collation }),
+                      ...(compteDedie
+                        ? { utilisateur: { nom: compteDedie, motDePasse: motDePasseCompte, droits: 'tous' } }
+                        : {}),
+                    }),
                   effet: () =>
                     serveurs.modifier(s.id, (x) => ({
                       bases: [
@@ -579,6 +648,13 @@ export function VueServeurBases({ id }: { id: string }) {
                           ]
                         : x.utilisateurs,
                     })),
+                  effetFinal: () => {
+                    if (compteDedie && motDePasseCompte) {
+                      setSecretUtilisateur({ nom: compteDedie, motDePasse: motDePasseCompte })
+                      setOnglet('utilisateurs')
+                    }
+                    serveurs.recharger()
+                  },
                 })
                 setNomBase('')
                 setCompteDedie('')

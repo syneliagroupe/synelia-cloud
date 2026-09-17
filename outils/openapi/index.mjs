@@ -19,8 +19,10 @@ import { fusion, parametres, reponses } from './socle.mjs'
 import { schemasSocle } from './schemas-socle.mjs'
 import { schemasProduits } from './schemas-produits.mjs'
 import { schemasTransverses } from './schemas-transverses.mjs'
+import { schemasIa } from './schemas-ia.mjs'
 import { cheminsIdentite } from './chemins-identite.mjs'
 import { cheminsInfra } from './chemins-infra.mjs'
+import { cheminsIa } from './chemins-ia.mjs'
 import { cheminsApplicatif } from './chemins-applicatif.mjs'
 import { cheminsWeb } from './chemins-web.mjs'
 import { cheminsServices } from './chemins-services.mjs'
@@ -108,6 +110,8 @@ const TAGS = [
   ['Déploiements', 'Construction, analyse, mise en service, retour arrière.'],
   ['Projets applicatifs', 'Projets, services, zone applicative, domaines, routage.'],
   ['Modèles applicatifs', 'Bibliothèque de solutions libres qualifiées.'],
+  ['IA — Modèles', 'Catalogue des modèles IA, avec la passerelle qui les rend réellement invocables.'],
+  ['IA — Agents', 'Agents : consigne, modèle, réglages, invocation en un aller-retour.'],
   ['Observabilité', 'Séries, événements, journaux, règles d’alerte.'],
   ['Services managés', 'Catalogue, souscription, sièges, configuration, ouverture.'],
   ['Web Cloud — domaines & DNS', 'Noms de domaine, zones et enregistrements.'],
@@ -134,6 +138,7 @@ const TAGS = [
 const chemins = fusion(
   cheminsIdentite,
   cheminsInfra,
+  cheminsIa,
   cheminsApplicatif,
   cheminsWeb,
   cheminsServices,
@@ -181,7 +186,9 @@ const document = {
     parameters: parametres,
     responses: reponses,
     schemas: Object.fromEntries(
-      Object.entries({ ...schemasSocle, ...schemasProduits, ...schemasTransverses }).sort(([a], [b]) => a.localeCompare(b)),
+      Object.entries({ ...schemasSocle, ...schemasProduits, ...schemasTransverses, ...schemasIa }).sort(([a], [b]) =>
+        a.localeCompare(b),
+      ),
     ),
   },
 }

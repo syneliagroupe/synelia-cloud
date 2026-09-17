@@ -1,16 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Ban, KeyRound, Pause, Play, UserCog } from 'lucide-react'
+import { Ban, KeyRound, Pause, Play, ShieldAlert, UserCog } from 'lucide-react'
 import { cn, trendSeries } from '@/lib/utils'
-import { dateCourte, dateHeure, goHumain, MAINTENANT, money, num, pct, relatif } from '@/lib/format'
+import {
+  dateCourte,
+  dateHeure,
+  goHumain,
+  MAINTENANT,
+  money,
+  moneyPerMonth,
+  num,
+  pct,
+  relatif,
+} from '@/lib/format'
 import {
   ELEVATIONS,
   EQUIPE_SYNELIA,
   ESPACES,
   FACTURES,
   IMPAYES,
+  OFFRES,
   ORGANISATIONS,
   SERVICES_MANAGES,
   SOUSCRIPTIONS,
@@ -22,22 +33,59 @@ import {
   MOYEN_LABEL,
   ROLE_LABEL,
   SITE_COURT,
+  type EspaceCloud,
   type Invoice,
+  type Membership,
+  type Offer,
   type Organisation,
   type Role,
+  type Ticket,
 } from '@/lib/types'
-import type { Elevation } from '@/lib/mock'
+import type { Elevation, Impaye } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
-import { Avatar, GatedAction, Tabs } from '@/components/ui/display'
+import { Avatar, GatedAction, Skeleton, Tabs } from '@/components/ui/display'
 import { Field, Input, Select, Switch, Textarea } from '@/components/ui/field'
 import { ConfirmDialog, Modal } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
+import { EmptyState } from '@/components/composition/states'
 import { Timeline } from '@/components/composition/flow'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { estActif, modifierRessource, requete } from '@/lib/api/client'
+
+/**
+ * Ressources d'une organisation *autre* que celle de l'admin connecté : `useCollection` filtre
+ * toujours par `ctx.org_id` (l'organisation du principal), jamais par un `orgId` choisi — donc
+ * inutilisable ici. `GET /admin/organisations/{orgId}/{ressource}` existe pour cette seule lecture
+ * cross-tenant, réservée à `exige_admin` côté backend (voir DEMO-TODO.md, « onglets
+ * Ressources/Membres/Support »). En mode maquette, la donnée reste celle du jeu figé.
+ */
+function useRessourcesOrganisation<T>(orgId: string, ressource: 'espaces' | 'membres' | 'tickets') {
+  const [items, setItems] = useState<T[]>([])
+  const [chargement, setChargement] = useState(estActif())
+  useEffect(() => {
+    if (!estActif()) return
+    let annule = false
+    setChargement(true)
+    requete<T[]>(`/admin/organisations/${encodeURIComponent(orgId)}/${ressource}`)
+      .then((donnees) => {
+        if (!annule) setItems(donnees)
+      })
+      .catch(() => {
+        if (!annule) setItems([])
+      })
+      .finally(() => {
+        if (!annule) setChargement(false)
+      })
+    return () => {
+      annule = true
+    }
+  }, [orgId, ressource])
+  return { items, chargement }
+}
 
 const ONGLETS = [
   { id: 'synthese', label: 'Synthèse' },
@@ -50,6 +98,7 @@ const ONGLETS = [
 ]
 
 export function VueOrganisation({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   // Le journal vit dans l'atelier : les actions faites pendant la session s'y
   // ajoutent, refus compris. Sans atelier touché, il retombe sur la graine.
   const { journal: AUDIT } = useAtelier()
@@ -57,8 +106,17 @@ export function VueOrganisation({ id }: { id: string }) {
   const { autorise, refus, pousser } = useApp()
   const executer = useOperation()
   const lesFactures = useCollection<Invoice>('factures', FACTURES)
+  const offres = useCollection<Offer>('offres', OFFRES)
+  const offresSouscriptibles = offres.items.filter((o) => o.statut === 'publiee')
+  // `tenantPlan` porte le code d'une offre du catalogue (facturée en ligne de base sur la
+  // facture) — sauf les trois libellés hérités (Standard/Avancé/Entreprise), affichés tels quels.
+  const libellePlan = (plan: string) => offres.items.find((o) => o.code === plan)?.nom ?? plan
   const elevations = useCollection<Elevation>(`elevations-${id}`, ELEVATIONS)
   const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
+  const impayes = useCollection<Impaye>('impayes', IMPAYES)
+  const espacesOrg = useRessourcesOrganisation<EspaceCloud>(id, 'espaces')
+  const membresOrg = useRessourcesOrganisation<Membership>(id, 'membres')
+  const ticketsOrg = useRessourcesOrganisation<Ticket>(id, 'tickets')
   const [onglet, setOnglet] = useState('synthese')
   const [elevation, setElevation] = useState(false)
   const [suspension, setSuspension] = useState(false)
@@ -75,16 +133,60 @@ export function VueOrganisation({ id }: { id: string }) {
 
   // L'organisation vient de la collection : suspendre depuis cet écran doit se
   // voir dans la liste, et une organisation créée dans la session doit s'ouvrir.
-  const org = orgs.items.find((o) => o.id === id)!
-  const membres = membresDeLOrg(org.id)
+  // Pas de `!` sur ce `find` : une organisation réelle qui n'est pas (encore)
+  // dans la page chargée ne doit pas faire planter l'écran (§ CLAUDE.md, « une
+  // entité affichée dans un tiroir doit être relue depuis la collection »).
+  const org = orgs.items.find((o) => o.id === id)
+
+  // Chargement distant en cours (lien direct, liste pas encore là) : des
+  // squelettes, pas une organisation « introuvable » qui se contredirait une
+  // seconde après.
+  if (!org && orgs.chargement) {
+    return (
+      <div className="space-y-5">
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    )
+  }
+
+  if (!org) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          fil={[
+            { label: 'Espace super admin', href: '/admin' },
+            { label: 'Organisations', href: '/admin/organisations' },
+            { label: 'Organisation introuvable' },
+          ]}
+          titre="Cette organisation n’existe plus"
+        />
+        <EmptyState
+          titre="Organisation introuvable"
+          phrase="Elle a peut-être été fermée depuis ce lien, ou l’identifiant est erroné."
+          action={{ libelle: 'Retour aux organisations', href: '/admin/organisations' }}
+        />
+      </div>
+    )
+  }
+
+  // En mode API, les trois onglets suivants (Ressources/Membres/Support) viennent de la
+  // lecture cross-tenant `/admin/organisations/{id}/**` (`useRessourcesOrganisation`
+  // ci-dessus) — jamais de la maquette, même pour une organisation qui s'y trouve aussi.
+  const membres = estActif()
+    ? membresOrg.items.map((m) => ({ membership: m, user: m.utilisateur! }))
+    : membresDeLOrg(org.id)
   const factures = lesFactures.items.filter((f) => f.orgId === org.id)
   const impayees = factures.filter((f) => f.statut === 'impayee')
-  const tickets = TICKETS_PLATEFORME.filter((t) => t.orgId === org.id)
+  const tickets = estActif() ? ticketsOrg.items : TICKETS_PLATEFORME.filter((t) => t.orgId === org.id)
   const audit = AUDIT.filter((a) => a.orgId === org.id)
-  const espaces = org.id === 'org-dba' ? ESPACES : []
+  const espaces = estActif() ? espacesOrg.items : org.id === 'org-dba' ? ESPACES : []
+  // Services managés : catalogue entièrement simulé côté backend (pas d'endpoint réel),
+  // reste sur la maquette dans les deux modes — cf. mémoire « services_manages fully simulated ».
   const services = org.id === 'org-dba' ? SERVICES_MANAGES : []
   const souscriptions = SOUSCRIPTIONS.filter((s) => s.orgId === org.id)
-  const impayeReleve = IMPAYES.find((i) => i.org === org.nom)
+  const impayeReleve = impayes.items.find((i) => i.org === org.nom)
 
   return (
     <div className="space-y-5">
@@ -111,7 +213,7 @@ export function VueOrganisation({ id }: { id: string }) {
             </Badge>
             {org.tenantPlan && (
               <Badge tone="neutral" size="sm">
-                Plan {org.tenantPlan}
+                Plan {libellePlan(org.tenantPlan)}
               </Badge>
             )}
             <Badge tone="neutral" size="sm">
@@ -153,8 +255,9 @@ export function VueOrganisation({ id }: { id: string }) {
         <Callout ton="err" titre={`Impayé de ${money(impayeReleve.montant)}`}>
           Facture {impayeReleve.facture}, {impayeReleve.retardJours} jours de retard,{' '}
           {impayeReleve.relances} relance{impayeReleve.relances > 1 ? 's' : ''} envoyée
-          {impayeReleve.relances > 1 ? 's' : ''}. Avant d’envisager une suspension : un appel, puis
-          une proposition d’échelonnement.
+          {impayeReleve.relances > 1 ? 's' : ''}. Avant d’envisager une suspension, un appel et une
+          proposition d’échelonnement sont la marche à suivre — c’est notre engagement, et c’est aussi
+          ce qui récupère le plus de créances.
         </Callout>
       )}
 
@@ -198,7 +301,7 @@ export function VueOrganisation({ id }: { id: string }) {
                 { cle: 'Secteur', valeur: org.secteur ?? '—' },
                 { cle: 'Numéro de contribuable', valeur: org.tva ?? '—' },
                 { cle: 'Domaine principal', valeur: org.domaine ?? '—' },
-                { cle: 'Plan de service', valeur: org.tenantPlan ?? 'Standard' },
+                { cle: 'Plan de service', valeur: libellePlan(org.tenantPlan ?? 'Standard') },
                 { cle: 'Contrat', valeur: 'Direct, sans intermédiaire' },
                 { cle: 'Créée le', valeur: dateCourte(org.createdAt) },
                 { cle: 'Royaume d’identité', valeur: `identite.synelia.cloud/realms/${org.id}` },
@@ -264,7 +367,7 @@ export function VueOrganisation({ id }: { id: string }) {
                       <span className="min-w-0 truncate text-[12px] text-ink">{s.cible.label}</span>
                       <span className="tnum shrink-0 text-[12px] font-semibold text-ink">
                         {money(s.quantite * s.prixApplique)}
-                        <span className="ml-1.5 text-[11px] font-normal text-g-500">
+                        <span className="ml-1.5 text-[10px] font-normal text-g-500">
                           {s.periodicite === 'annuelle' ? 'annuel' : 'mensuel'}
                         </span>
                       </span>
@@ -288,7 +391,7 @@ export function VueOrganisation({ id }: { id: string }) {
               />
             </div>
             {espaces.length === 0 ? (
-              <p className="px-4 py-8 text-center text-[13px] text-g-500">
+              <p className="px-4 py-8 text-center text-[12.5px] text-g-500">
                 Aucun Espace Cloud chargé pour cette organisation dans cette vue de démonstration.
               </p>
             ) : (
@@ -311,19 +414,19 @@ export function VueOrganisation({ id }: { id: string }) {
                         <td className="px-3 py-2.5 font-mono text-[12px] font-semibold text-ink">
                           {e.code}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{e.offreNom}</td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{SITE_COURT[e.site]}</td>
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{e.offreNom}</td>
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{SITE_COURT[e.site]}</td>
                         <td className="px-3 py-2.5 font-mono text-[11px] text-g-500">{e.cidr}</td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {e.usage.vcpu}/{e.quota.vcpu}
                         </td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {e.usage.ramGo}/{e.quota.ramGo} Go
                         </td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {e.usage.stockageTo}/{e.quota.stockageTo} To
                         </td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">{e.projets}</td>
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">{e.projets}</td>
                         <td className="px-3 py-2.5">
                           <Badge tone={e.statut === 'active' ? 'ok' : 'warn'} dot size="sm">
                             {e.statut === 'active'
@@ -365,8 +468,8 @@ export function VueOrganisation({ id }: { id: string }) {
                     {services.map((s) => (
                       <tr key={s.id} className="border-b border-g-100 last:border-0">
                         <td className="px-3 py-2.5">
-                          <span className="block text-[13px] font-semibold text-ink">{s.nom}</span>
-                          <span className="block font-mono text-[11px] text-g-500">
+                          <span className="block text-[12.5px] font-semibold text-ink">{s.nom}</span>
+                          <span className="block font-mono text-[10.5px] text-g-500">
                             {s.domaine}
                           </span>
                         </td>
@@ -378,15 +481,15 @@ export function VueOrganisation({ id }: { id: string }) {
                         <td className="px-3 py-2.5 font-mono text-[11px] text-g-700">
                           {s.version}
                           {s.versionDisponible && (
-                            <Badge tone="info" size="sm" className="ml-1.5">
+                            <Badge tone="violet" size="sm" className="ml-1.5">
                               {s.versionDisponible} dispo
                             </Badge>
                           )}
                         </td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {s.siegesUtilises}/{s.siegesSouscrits}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{SITE_COURT[s.site]}</td>
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{SITE_COURT[s.site]}</td>
                         <td className="px-3 py-2.5">
                           <Badge tone={s.sso.actif ? 'accent' : 'warn'} size="sm">
                             {s.sso.actif ? 'Actif' : 'Absent'}
@@ -427,7 +530,7 @@ export function VueOrganisation({ id }: { id: string }) {
             />
           </div>
           {membres.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[13px] text-g-500">
+            <p className="px-4 py-8 text-center text-[12.5px] text-g-500">
               Aucun membre chargé pour cette organisation dans cette vue de démonstration.
             </p>
           ) : (
@@ -451,10 +554,10 @@ export function VueOrganisation({ id }: { id: string }) {
                         <span className="flex items-center gap-2.5">
                           <Avatar nom={u.nom} size="sm" />
                           <span className="min-w-0">
-                            <span className="block text-[13px] font-semibold text-ink">
+                            <span className="block text-[12.5px] font-semibold text-ink">
                               {u.nom}
                             </span>
-                            <span className="block text-[11px] text-g-500">{u.email}</span>
+                            <span className="block text-[10.5px] text-g-500">{u.email}</span>
                           </span>
                         </span>
                       </td>
@@ -463,10 +566,10 @@ export function VueOrganisation({ id }: { id: string }) {
                           {ROLE_LABEL[m.role]}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                         {m.scopeLabel ?? 'Toute l’organisation'}
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                         {u.idpSource === 'local' ? 'Compte Synelia' : u.idpSource.toUpperCase()}
                       </td>
                       <td className="px-3 py-2.5">
@@ -474,8 +577,8 @@ export function VueOrganisation({ id }: { id: string }) {
                           {u.mfaEnabled ? 'Actif' : 'Absent'}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-500">
-                        {u.lastLoginAt ? relatif(u.lastLoginAt) : 'Jamais'}
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-500">
+                        {u.lastLoginAt ? relatif(u.lastLoginAt, maintenant) : 'Jamais'}
                       </td>
                     </tr>
                   ))}
@@ -484,7 +587,7 @@ export function VueOrganisation({ id }: { id: string }) {
             </div>
           )}
           <div className="border-t border-g-100 px-4 py-3">
-            <p className="text-[12px] leading-relaxed text-g-500">
+            <p className="text-[11.5px] leading-relaxed text-g-500">
               Nous ne modifions jamais les rôles d’une organisation à sa place. Si un client perd
               l’accès de son dernier administrateur, la procédure de récupération exige une
               vérification d’identité auprès du signataire du contrat, et l’opération est journalisée
@@ -528,7 +631,7 @@ export function VueOrganisation({ id }: { id: string }) {
               <CardHeader titre="Factures" className="mb-0" />
             </div>
             {factures.length === 0 ? (
-              <p className="px-4 py-8 text-center text-[13px] text-g-500">
+              <p className="px-4 py-8 text-center text-[12.5px] text-g-500">
                 Aucune facture pour cette organisation.
               </p>
             ) : (
@@ -551,17 +654,17 @@ export function VueOrganisation({ id }: { id: string }) {
                         <td className="px-3 py-2.5 font-mono text-[12px] font-semibold text-ink">
                           {f.numero}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{f.periode}</td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{f.periode}</td>
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {money(f.sousTotal, f.devise)}
                         </td>
                         <td className="tnum px-3 py-2.5 text-[12px] font-bold text-ink">
                           {money(f.total, f.devise)}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                           {f.echeance ? dateCourte(f.echeance) : '—'}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                           {f.moyen ? MOYEN_LABEL[f.moyen] : '—'}
                         </td>
                         <td className="px-3 py-2.5">
@@ -749,7 +852,7 @@ export function VueOrganisation({ id }: { id: string }) {
             />
           </div>
           {tickets.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[13px] text-g-500">
+            <p className="px-4 py-8 text-center text-[12.5px] text-g-500">
               Aucun ticket pour cette organisation.
             </p>
           ) : (
@@ -768,7 +871,7 @@ export function VueOrganisation({ id }: { id: string }) {
                   {tickets.map((t) => (
                     <tr key={t.id} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2.5">
-                        <span className="block font-mono text-[11px] text-g-500">{t.numero}</span>
+                        <span className="block font-mono text-[10.5px] text-g-500">{t.numero}</span>
                         <span className="block text-[12px] font-semibold text-ink">{t.sujet}</span>
                       </td>
                       <td className="px-3 py-2.5">
@@ -800,25 +903,25 @@ export function VueOrganisation({ id }: { id: string }) {
                           {t.statut.replace('_', ' ')}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                         {t.assigneA ?? 'Non assigné'}
                       </td>
                       <td className="px-3 py-2.5">
                         {t.slaRestantMin !== undefined ? (
                           <span
                             className={cn(
-                              'tnum text-[12px] font-semibold',
+                              'tnum text-[11.5px] font-semibold',
                               t.slaRestantMin < 120 ? 'text-err' : 'text-g-700',
                             )}
                           >
                             {t.slaRestantMin} min
                           </span>
                         ) : (
-                          <span className="text-[12px] text-g-500">—</span>
+                          <span className="text-[11.5px] text-g-500">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-500">
-                        {relatif(t.createdAt)}
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-500">
+                        {relatif(t.createdAt, maintenant)}
                       </td>
                     </tr>
                   ))}
@@ -832,8 +935,9 @@ export function VueOrganisation({ id }: { id: string }) {
       {onglet === 'audit' && (
         <div className="space-y-4">
           <Callout ton="violet" titre="Ce journal est celui du client">
-            Les mêmes lignes apparaissent dans son écran de sécurité, nos actions au même titre que les
-            siennes, avec le nom de l’intervenant.
+            Les mêmes lignes apparaissent dans son propre écran de sécurité. Nos actions y figurent au
+            même titre que les siennes, avec le nom de l’intervenant — c’est ce qui rend l’élévation de
+            privilège vérifiable plutôt que déclarative.
           </Callout>
 
           <Card padding={false}>
@@ -855,10 +959,10 @@ export function VueOrganisation({ id }: { id: string }) {
                     <tr key={a.id} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2 text-[11px] text-g-700">{dateHeure(a.ts)}</td>
                       <td className="px-3 py-2">
-                        <span className="block text-[12px] font-semibold text-ink">
+                        <span className="block text-[11.5px] font-semibold text-ink">
                           {a.actor.nom}
                         </span>
-                        <span className="block text-[11px] text-g-500">{a.actor.type}</span>
+                        <span className="block text-[10px] text-g-500">{a.actor.type}</span>
                       </td>
                       <td className="px-3 py-2 text-[11px] text-g-700">
                         {ROLE_LABEL[a.role] ?? a.role}
@@ -877,7 +981,7 @@ export function VueOrganisation({ id }: { id: string }) {
                           {a.result === 'ok' ? 'Succès' : a.result === 'refuse' ? 'Refusé' : 'Erreur'}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2 font-mono text-[11px] text-g-500">{a.ip ?? '—'}</td>
+                      <td className="px-3 py-2 font-mono text-[10px] text-g-500">{a.ip ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -895,14 +999,26 @@ export function VueOrganisation({ id }: { id: string }) {
               sousTitre="Ce que nous pouvons ajuster côté super admin, sans toucher aux ressources du client."
             />
             <div className="space-y-4">
-              <Field label="Plan de service">
+              <Field
+                label="Plan de service"
+                hint="l'offre du catalogue à laquelle l'organisation est abonnée — sa facture porte cet abonnement en ligne de base, en plus de sa consommation réelle"
+              >
                 <Select
                   value={planService || (org.tenantPlan ?? 'Standard')}
                   onChange={(e) => setPlanService(e.target.value)}
                 >
-                  <option value="Standard">Standard</option>
-                  <option value="Avancé">Avancé — support prioritaire</option>
-                  <option value="Entreprise">Entreprise — interlocuteur dédié</option>
+                  <option value="Standard">Standard (héritage — aucune offre du catalogue)</option>
+                  <option value="Avancé">Avancé — support prioritaire (héritage)</option>
+                  <option value="Entreprise">Entreprise — interlocuteur dédié (héritage)</option>
+                  {offresSouscriptibles.length > 0 && (
+                    <optgroup label="Offres du catalogue">
+                      {offresSouscriptibles.map((o) => (
+                        <option key={o.code} value={o.code}>
+                          {o.nom} — {moneyPerMonth(o.prix)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </Select>
               </Field>
               <Field
@@ -963,10 +1079,15 @@ export function VueOrganisation({ id }: { id: string }) {
                 detail: `Plan ${planService || (org.tenantPlan ?? 'Standard')}, quota de ${quotaEspaces} espaces, libre-service ${
                   libreService ? 'autorisé' : 'refusé'
                 }. La modification est journalisée dans l’audit du client, avec votre nom.`,
+                appel: () =>
+                  modifierRessource('/organisations', org.id, {
+                    tenantPlan: planService || (org.tenantPlan ?? 'Standard'),
+                  }),
                 effet: () =>
                   orgs.modifier(org.id, {
                     tenantPlan: planService || (org.tenantPlan ?? 'Standard'),
                   }),
+                effetFinal: () => orgs.recharger(),
               }}
             />
           </Card>
@@ -983,11 +1104,11 @@ export function VueOrganisation({ id }: { id: string }) {
                     key={e.id}
                     className={cn(
                       'rounded-[6px] border px-3 py-2.5',
-                      e.actif ? 'border-warn/40' : 'border-g-300',
+                      e.actif ? 'border-warn/40 bg-warn-bg' : 'border-g-300',
                     )}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                      <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                         <KeyRound size={12} className="shrink-0 text-g-500" />
                         {e.qui}
                       </span>
@@ -995,8 +1116,8 @@ export function VueOrganisation({ id }: { id: string }) {
                         {e.actif ? 'Active' : 'Expirée'}
                       </Badge>
                     </div>
-                    <p className="mt-0.5 text-[12px] text-g-700">{e.motif}</p>
-                    <p className="mt-0.5 text-[11px] text-g-500">
+                    <p className="mt-0.5 text-[11.5px] text-g-700">{e.motif}</p>
+                    <p className="mt-0.5 text-[10.5px] text-g-500">
                       {dateHeure(e.quand)} · durée {e.duree}
                     </p>
                     {e.actif && (
@@ -1026,10 +1147,10 @@ export function VueOrganisation({ id }: { id: string }) {
               />
               <div className="space-y-2">
                 <div className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                  <p className="text-[13px] font-semibold text-ink">
+                  <p className="text-[12.5px] font-semibold text-ink">
                     Suspendre l’organisation
                   </p>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">
                     Les accès sont coupés, les ressources continuent de tourner et de facturer. Une
                     suspension arrête l’activité d’une entreprise : elle exige un motif écrit et reste
                     visible dans son journal d’audit.
@@ -1049,12 +1170,12 @@ export function VueOrganisation({ id }: { id: string }) {
                     </Button>
                   </GatedAction>
                 </div>
-                <div className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                  <p className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                <div className="rounded-[6px] border border-err/40 bg-err-bg px-3 py-2.5">
+                  <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                     <Ban size={12} className="shrink-0 text-err" />
                     Clôturer l’organisation
                   </p>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">
                     Réservé au cas où le client le demande, ou après résiliation contractuelle.
                     Déclenche le calendrier de réversibilité : 30 jours de récupération, 30 jours de
                     conservation en lecture, puis effacement avec attestation.
@@ -1115,6 +1236,20 @@ export function VueOrganisation({ id }: { id: string }) {
                   ton: 'warn',
                   titre: 'Élévation demandée',
                   detail: `Une entrée apparaît immédiatement dans le journal d’audit de ${org.nom}, avec votre nom et le motif.`,
+                  // `POST /organisations/{id}/emprunt-identite` : l’accès aux
+                  // ressources du client, borné en durée, en écriture seulement
+                  // pour une intervention. La session renvoyée n’est pas prise :
+                  // on reste dans l’espace fournisseur.
+                  appel: () =>
+                    requete(`/organisations/${encodeURIComponent(org.id)}/emprunt-identite`, {
+                      methode: 'POST',
+                      corps: {
+                        motif: motifElevation.trim(),
+                        ticketId: ticketElevation.trim() || undefined,
+                        ecriture: perimetreElevation === 'intervention',
+                        dureeMin: Number(dureeElevation) * 60,
+                      },
+                    }),
                   effet: () =>
                     elevations.creer({
                       id: elevations.identifiant('elv'),
@@ -1218,8 +1353,21 @@ export function VueOrganisation({ id }: { id: string }) {
             titre: org.statut === 'active' ? `${org.nom} suspendue` : `${org.nom} réactivée`,
             detail:
               'L’opération est journalisée dans l’audit de l’organisation et dans celui de la plateforme.',
+            appel: () =>
+              org.statut === 'active'
+                ? requete(`/organisations/${encodeURIComponent(org.id)}/suspension`, {
+                    methode: 'POST',
+                    corps: {
+                      motif: 'Suspension décidée depuis l’espace fournisseur, après relances.',
+                      notifier: true,
+                    },
+                  })
+                : requete(`/organisations/${encodeURIComponent(org.id)}/suspension`, {
+                    methode: 'DELETE',
+                  }),
             effet: () =>
               orgs.modifier(org.id, { statut: org.statut === 'active' ? 'suspendue' : 'active' }),
+            effetFinal: () => orgs.recharger(),
           })
           setSuspension(false)
         }}

@@ -18,22 +18,26 @@ import { MAINTENANT } from '@/lib/format'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Avatar, GatedAction, Tabs } from '@/components/ui/display'
-import { Field, Input, Select, Switch } from '@/components/ui/field'
+import { Field, Input, Select, Switch, Textarea } from '@/components/ui/field'
 import { ConfirmDialog, Drawer, Modal, Tooltip } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
 import { RoleMatrix } from '@/components/business/rbac-canvas'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
 
 interface Invitation {
   id: string
   email: string
   role: Role
-  envoyee: string
-  par: string
+  /** Maquette. Le backend renvoie `expire` + `statut` — les deux sont lus. */
+  envoyee?: string
+  par?: string
+  expire?: string
+  statut?: string
 }
 
 /** Invitations en attente — le jeu de données n'en a pas de table. */
@@ -74,10 +78,18 @@ interface LigneMembre {
 }
 
 export default function Membres() {
-  const { autorise, refus, role: roleCourant } = useApp()
+  const maintenant = useMaintenant()
+  const { autorise, refus, role: roleCourant, organisations, organisationId } = useApp()
+  const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
+  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
   const executer = useOperation()
   const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
   const invitations = useCollection<Invitation>('invitations', INVITATIONS)
+  // Les Espaces Cloud existent en tant que collection API à part entière : les
+  // lire depuis la maquette locale montrerait les trois espaces de démonstration
+  // même quand l’organisation réelle en a d’autres.
+  const espacesDistants = useCollection('espaces', ESPACES)
+  const ESPACES_LUS = estActif() ? espacesDistants.items : ESPACES
   const [onglet, setOnglet] = useState('membres')
   const [invitation, setInvitation] = useState(false)
   const [detail, setDetail] = useState<string | null>(null)
@@ -88,20 +100,38 @@ export default function Membres() {
   const [invitePortee, setInvitePortee] = useState('org')
   const [inviteMfa, setInviteMfa] = useState(true)
   const [inviteMessage, setInviteMessage] = useState(false)
+  const [inviteMessageTexte, setInviteMessageTexte] = useState('')
   const [attribMembre, setAttribMembre] = useState('')
   const [attribRole, setAttribRole] = useState<Role>('project_owner')
   const [attribPortee, setAttribPortee] = useState('org')
 
   const membres = adhesions.items
-    .filter((m) => m.orgId === ORG_COURANTE.id)
-    .map((m) => ({ membership: m, user: userById(m.userId)! }))
-    .filter((x) => x.user)
+    // Le backend filtre déjà par organisation active ; la maquette, non.
+    .filter((m) => estActif() || m.orgId === ORG_COURANTE.id)
+    // En mode API l’utilisateur arrive embarqué (`utilisateur`) : les
+    // identifiants du backend sont inconnus du jeu de données local.
+    .map((m) => ({
+      membership: m,
+      user: userById(m.userId) ?? (m as unknown as { utilisateur?: (typeof USERS)[number] }).utilisateur,
+    }))
+    .flatMap((x) => (x.user ? [x as { membership: Membership; user: (typeof USERS)[number] }] : []))
   const lignes: LigneMembre[] = membres.map(({ membership: m, user: u }) => ({
     id: m.id,
     nom: u.nom,
     email: u.email,
     role: m.role,
-    portee: m.scopeLabel ?? (m.scopeType === 'org' ? 'Toute l’organisation' : m.scopeType),
+    portee:
+      m.scopeLabel ??
+      (m.scopeType === 'org'
+        ? 'Toute l’organisation'
+        : (() => {
+            const espace = ESPACES_LUS.find((e) => e.id === m.scopeId)
+            // `scopeId` peut viser un Espace disparu (recréé sous un autre
+            // identifiant, supprimé) : afficher `m.scopeType` tel quel
+            // montrerait le nom technique interne (« espace ») au lieu d’une
+            // portée lisible.
+            return espace ? `Espace ${espace.code}` : 'Espace introuvable'
+          })()),
     mfa: u.mfaEnabled,
     source: u.idpSource,
     dernier: u.lastLoginAt,
@@ -115,8 +145,8 @@ export default function Membres() {
   return (
     <div className="space-y-5">
       <PageHeader
-        fil={[{ label: 'Espace client', href: '/app' }, { label: 'Membres' }]}
-        titre="Membres et rôles"
+        fil={[{ label: 'Espace client', href: '/app' }, { label: 'Membres & rôles' }]}
+        titre="Membres & rôles"
         sousTitre="Qui a le droit de faire quoi, et sur quel périmètre. Les rôles sont volontairement nombreux et étroits : donner à un développeur le droit de déployer ne devrait pas lui donner celui de voir les factures."
         actions={
           <GatedAction autorise={autorise('member.invite')} message={refus('member.invite')}>
@@ -128,7 +158,7 @@ export default function Membres() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {ORG_COURANTE.nom}
+              {nomOrg}
             </Badge>
             <Badge tone="neutral" size="sm">
               {lignes.length} membres
@@ -208,10 +238,10 @@ export default function Membres() {
                     <span className="flex items-center gap-2.5">
                       <Avatar nom={l.nom} size="sm" />
                       <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-semibold text-ink">
+                        <span className="block truncate text-[12.5px] font-semibold text-ink">
                           {l.nom}
                           {l.email === UTILISATEUR_COURANT.email && (
-                            <span className="ml-1.5 text-[11px] font-normal text-g-500">(vous)</span>
+                            <span className="ml-1.5 text-[10.5px] font-normal text-g-500">(vous)</span>
                           )}
                         </span>
                         <span className="block truncate text-[11px] text-g-500">{l.email}</span>
@@ -237,7 +267,7 @@ export default function Membres() {
                   id: 'portee',
                   entete: 'Portée',
                   cle: (l) => l.portee,
-                  rendu: (l) => <span className="text-[12px] text-g-700">{l.portee}</span>,
+                  rendu: (l) => <span className="text-[11.5px] text-g-700">{l.portee}</span>,
                 },
                 {
                   id: 'mfa',
@@ -261,7 +291,7 @@ export default function Membres() {
                   cle: (l) => l.source,
                   masquable: true,
                   rendu: (l) => (
-                    <span className="text-[12px] text-g-700">
+                    <span className="text-[11.5px] text-g-700">
                       {l.source === 'local'
                         ? 'Compte Synelia'
                         : l.source === 'oidc'
@@ -278,8 +308,8 @@ export default function Membres() {
                   aligne: 'right',
                   cle: (l) => l.dernier ?? '',
                   rendu: (l) => (
-                    <span className="text-[12px] text-g-500">
-                      {l.dernier ? relatif(l.dernier) : 'Jamais connecté'}
+                    <span className="text-[11.5px] text-g-500">
+                      {l.dernier ? relatif(l.dernier, maintenant) : 'Jamais connecté'}
                     </span>
                   ),
                 },
@@ -323,18 +353,27 @@ export default function Membres() {
               sousTitre="Une invitation expire au bout de sept jours. Le lien est à usage unique."
             />
             <div className="space-y-2">
-              {invitations.items.map((i) => (
+              {invitations.items
+                // Le backend renvoie toutes les invitations, quel que soit leur
+                // statut (`GET /invitations` sans filtre) : une invitation
+                // relancée ou annulée doit disparaître d'ici, pas rester
+                // affichée « en attente » avec ses boutons actifs.
+                .filter((i) => !i.statut || i.statut === 'en_attente')
+                .map((i) => (
                 <div
                   key={i.id}
                   className="flex flex-wrap items-start justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                 >
                   <span className="min-w-0">
-                    <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                    <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                       <Mail size={12} className="shrink-0 text-g-500" />
                       {i.email}
                     </span>
                     <span className="block text-[11px] text-g-500">
-                      {ROLE_LABEL[i.role]} · envoyée {relatif(i.envoyee)} par {i.par}
+                      {ROLE_LABEL[i.role]} ·{' '}
+                      {i.envoyee
+                        ? `envoyée ${relatif(i.envoyee, maintenant)}${i.par ? ` par ${i.par}` : ''}`
+                        : `expire le ${i.expire ? dateCourte(i.expire) : '—'}`}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -348,7 +387,13 @@ export default function Membres() {
                         action: 'member.invite',
                         titre: `Invitation renvoyée à ${i.email}`,
                         detail: 'Le lien précédent est invalidé : seul le dernier fonctionne.',
+                        appel: () =>
+                          requete(`/invitations/${encodeURIComponent(i.id)}/relance`, {
+                            methode: 'POST',
+                            corps: {},
+                          }),
                         effet: () => invitations.modifier(i.id, { envoyee: MAINTENANT }),
+                        effetFinal: () => invitations.recharger(),
                       }}
                     />
                     <BoutonAction
@@ -359,7 +404,11 @@ export default function Membres() {
                         ton: 'warn',
                         titre: `Invitation de ${i.email} annulée`,
                         detail: 'Le lien devient inutilisable immédiatement.',
+                        // Sans `confirmation` : le backend n’en exige pas pour
+                        // une invitation (le lien seul porte le risque).
+                        appel: () => supprimerRessource('/invitations', i.id),
                         effet: () => invitations.supprimer(i.id),
+                        effetFinal: () => invitations.recharger(),
                       }}
                     />
                   </span>
@@ -376,24 +425,42 @@ export default function Membres() {
           <Card>
             <CardHeader
               titre="Invitations acceptées récemment"
-              sousTitre="Trente derniers jours."
+              sousTitre={
+                estActif()
+                  ? 'Le backend ne date pas l’acceptation : les plus récemment créées d’abord.'
+                  : 'Trente derniers jours.'
+              }
             />
             <div className="space-y-1.5">
-              {[
-                { email: 'k.toure@dba.africa', role: 'app_admin' as Role, quand: '2026-08-02T09:14:00Z' },
-                { email: 'm.diallo@dba.africa', role: 'billing_admin' as Role, quand: '2026-07-28T16:41:00Z' },
-                { email: 'audit@partenaire.com', role: 'read_only' as Role, quand: '2026-07-24T11:08:00Z' },
-              ].map((i) => (
+              {/* En mode API, `GET /invitations` renvoie un vrai `statut`
+                  (dont « acceptee », posé par `POST /auth/invitations/{jeton}`) :
+                  on le lit au lieu d’une liste de noms fixes qui ne
+                  correspondraient à aucune invitation réellement acceptée. */}
+              {(estActif()
+                ? invitations.items
+                    .filter((i) => i.statut === 'acceptee')
+                    .slice(0, 5)
+                    .map((i) => ({ id: i.id, email: i.email, role: i.role, quand: undefined }))
+                : [
+                    { id: 'a1', email: 'k.toure@dba.africa', role: 'app_admin' as Role, quand: '2026-08-02T09:14:00Z' },
+                    { id: 'a2', email: 'm.diallo@dba.africa', role: 'billing_admin' as Role, quand: '2026-07-28T16:41:00Z' },
+                    { id: 'a3', email: 'audit@partenaire.com', role: 'read_only' as Role, quand: '2026-07-24T11:08:00Z' },
+                  ]
+              ).map((i) => (
                 <div
-                  key={i.email}
+                  key={i.id}
                   className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
                 >
                   <span className="min-w-0 text-[12px] text-ink">{i.email}</span>
-                  <span className="shrink-0 text-[11px] text-g-500">
-                    {ROLE_LABEL[i.role]} · {dateCourte(i.quand)}
+                  <span className="shrink-0 text-[10.5px] text-g-500">
+                    {ROLE_LABEL[i.role]}
+                    {i.quand ? ` · ${dateCourte(i.quand)}` : ''}
                   </span>
                 </div>
               ))}
+              {estActif() && invitations.items.filter((i) => i.statut === 'acceptee').length === 0 && (
+                <p className="text-[11.5px] text-g-500">Aucune invitation acceptée pour l’instant.</p>
+              )}
             </div>
             <ButtonLink size="sm" variant="ghost" className="mt-3" href="/app/securite">
               Voir le journal d’audit
@@ -457,12 +524,12 @@ export default function Membres() {
                 ].map((x) => (
                   <div key={x.r} className="rounded-[6px] border border-g-300 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[13px] font-bold text-ink">{ROLE_LABEL[x.r]}</span>
+                      <span className="text-[12.5px] font-bold text-ink">{ROLE_LABEL[x.r]}</span>
                       <Badge tone="neutral" size="sm">
                         {MATRICE_RBAC.filter((a) => can(x.r, a.id) === 'full').length} actions
                       </Badge>
                     </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-g-700">{x.quand}</p>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-g-700">{x.quand}</p>
                   </div>
                 ))}
               </div>
@@ -481,7 +548,7 @@ export default function Membres() {
                     const roles = rolesRequis(id).filter((r) => ROLES_CLIENT.includes(r))
                     return (
                       <div key={id} className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                        <p className="text-[13px] font-semibold text-ink">{a.libelle}</p>
+                        <p className="text-[12.5px] font-semibold text-ink">{a.libelle}</p>
                         <p className="mt-1 flex flex-wrap gap-1">
                           {roles.length === 0 ? (
                             <Badge tone="neutral" size="sm">
@@ -559,7 +626,7 @@ export default function Membres() {
                         </Badge>
                       </td>
                       <td className="px-3 py-2.5 text-[12px] text-ink">{x.c}</td>
-                      <td className="px-3 py-2.5 text-[12px] text-g-500">{x.u}</td>
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-500">{x.u}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -571,21 +638,21 @@ export default function Membres() {
             <Card>
               <CardHeader titre="Attributions par espace" />
               <div className="space-y-2">
-                {ESPACES.map((e) => {
-                  const membresEspace = MEMBERSHIPS.filter((m) => m.scopeId === e.id)
+                {ESPACES_LUS.map((e) => {
+                  const membresEspace = adhesions.items.filter((m) => m.scopeId === e.id)
                   return (
                     <div
                       key={e.id}
                       className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                     >
                       <span className="min-w-0">
-                        <span className="block font-mono text-[13px] font-semibold text-ink">
+                        <span className="block font-mono text-[12.5px] font-semibold text-ink">
                           {e.code}
                         </span>
                         <span className="block text-[11px] text-g-500">{e.offreNom}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className="flex items-center gap-1 text-[12px] text-g-700">
+                        <span className="flex items-center gap-1 text-[11.5px] text-g-700">
                           <Users size={12} />
                           {membresEspace.length} attribution{membresEspace.length > 1 ? 's' : ''}
                         </span>
@@ -626,7 +693,7 @@ export default function Membres() {
                 <Field label="Portée" hint="restreindre le rôle à un périmètre précis">
                   <Select value={attribPortee} onChange={(e) => setAttribPortee(e.target.value)}>
                     <option value="org">Toute l’organisation</option>
-                    {ESPACES.map((e) => (
+                    {ESPACES_LUS.map((e) => (
                       <option key={e.id} value={e.id}>
                         Espace {e.code} — {e.offreNom}
                       </option>
@@ -639,11 +706,18 @@ export default function Membres() {
                   className="mt-4"
                   onClick={() => {
                     const cible = lignes.find((l) => l.id === (attribMembre || lignes[0]?.id))
-                    const espace = ESPACES.find((e) => e.id === attribPortee)
+                    const espace = ESPACES_LUS.find((e) => e.id === attribPortee)
                     executer({
                       action: 'member.invite',
                       titre: 'Attribution enregistrée',
                       detail: `${cible?.nom ?? ''} · ${ROLE_LABEL[attribRole]} sur ${espace ? `l’espace ${espace.code}` : 'toute l’organisation'}. Effet immédiat, sans nouvelle connexion.`,
+                      appel: () =>
+                        creerRessource('/membres', {
+                          userId: adhesions.items.find((m) => m.id === cible?.id)?.userId,
+                          role: attribRole,
+                          scopeType: espace ? 'espace' : 'org',
+                          scopeId: espace?.id,
+                        }),
                       effet: () =>
                         cible
                           ? adhesions.creer({
@@ -657,6 +731,7 @@ export default function Membres() {
                               scopeLabel: espace ? `Espace ${espace.code}` : undefined,
                             })
                           : undefined,
+                      effetFinal: () => adhesions.recharger(),
                     })
                   }}
                 >
@@ -686,6 +761,14 @@ export default function Membres() {
                   titre: `Invitation envoyée à ${inviteEmail}`,
                   detail:
                     'Le lien est valable sept jours et à usage unique. Aucun mot de passe n’est transmis par courriel.',
+                  appel: () =>
+                    creerRessource('/invitations', {
+                      email: inviteEmail,
+                      role: inviteRole,
+                      scopeType: invitePortee === 'org' ? 'org' : 'espace',
+                      scopeId: invitePortee === 'org' ? undefined : invitePortee,
+                      message: inviteMessage && inviteMessageTexte.trim() ? inviteMessageTexte.trim() : undefined,
+                    }),
                   effet: () =>
                     invitations.creer({
                       id: invitations.identifiant('inv'),
@@ -694,8 +777,11 @@ export default function Membres() {
                       envoyee: MAINTENANT,
                       par: UTILISATEUR_COURANT.nom,
                     }),
+                  effetFinal: () => invitations.recharger(),
                 })
                 setInviteEmail('')
+                setInviteMessage(false)
+                setInviteMessageTexte('')
                 setInvitation(false)
               }}
             >
@@ -725,7 +811,7 @@ export default function Membres() {
           <Field label="Portée">
             <Select value={invitePortee} onChange={(e) => setInvitePortee(e.target.value)}>
               <option value="org">Toute l’organisation</option>
-              {ESPACES.map((e) => (
+              {ESPACES_LUS.map((e) => (
                 <option key={e.id} value={e.id}>
                   Espace {e.code}
                 </option>
@@ -744,6 +830,15 @@ export default function Membres() {
               onChange={setInviteMessage}
               label="Ajouter un message personnalisé à l’invitation"
             />
+            {inviteMessage && (
+              <Field label="Message" hint="ajouté au courriel d’invitation, avant le lien">
+                <Textarea
+                  value={inviteMessageTexte}
+                  onChange={(e) => setInviteMessageTexte(e.target.value)}
+                  placeholder="Bienvenue dans l’équipe — n’hésite pas si tu as des questions."
+                />
+              </Field>
+            )}
           </div>
           <Callout ton="info" titre="Ce que la personne recevra">
             Un courriel avec un lien vers notre fournisseur d’identité, où elle choisira son mot de
@@ -786,7 +881,7 @@ export default function Membres() {
                 },
                 {
                   cle: 'Dernière connexion',
-                  valeur: membreDetail.dernier ? relatif(membreDetail.dernier) : 'Jamais connecté',
+                  valeur: membreDetail.dernier ? relatif(membreDetail.dernier, maintenant) : 'Jamais connecté',
                 },
                 { cle: 'Statut', valeur: membreDetail.statut },
               ]}
@@ -802,7 +897,7 @@ export default function Membres() {
                       key={a.id}
                       className="flex items-center justify-between gap-3 rounded-[5px] bg-g-050 px-2.5 py-1.5"
                     >
-                      <span className="min-w-0 truncate text-[12px] text-ink">{a.libelle}</span>
+                      <span className="min-w-0 truncate text-[11.5px] text-ink">{a.libelle}</span>
                       <Badge
                         tone={can(membreDetail.role, a.id) === 'full' ? 'ok' : 'neutral'}
                         size="sm"
@@ -840,7 +935,13 @@ export default function Membres() {
                 libelleValider="Changer le rôle"
                 operation={(v) => ({
                   titre: `${membreDetail.nom} est désormais ${ROLE_LABEL[v.role as Role]}`,
+                  appel: () =>
+                    requete(`/membres/${encodeURIComponent(membreDetail.id)}`, {
+                      methode: 'PATCH',
+                      corps: { role: v.role },
+                    }),
                   effet: () => adhesions.modifier(membreDetail.id, { role: v.role as Role }),
+                  effetFinal: () => adhesions.recharger(),
                 })}
               />
               {!membreDetail.mfa && (
@@ -864,6 +965,18 @@ export default function Membres() {
                   ton: 'warn',
                   titre: `Sessions de ${membreDetail.nom} fermées`,
                   detail: 'La personne devra se reconnecter sur tous ses appareils.',
+                  // `member.invite` gère l'appartenance ; la fermeture de session
+                  // relève de `GET`/`DELETE /securite/sessions`
+                  // (`sso.configure`, que les rôles autorisés ici possèdent aussi).
+                  appel: async () => {
+                    const userId = adhesions.items.find((m) => m.id === membreDetail.id)?.userId
+                    if (!userId) return
+                    const { donnees } = await requete<{ donnees: { id: string }[] }>(
+                      '/securite/sessions',
+                      { query: { userId, parPage: 200 } },
+                    )
+                    await Promise.all(donnees.map((s) => supprimerRessource('/securite/sessions', s.id)))
+                  },
                 }}
               />
             </div>
@@ -891,8 +1004,15 @@ export default function Membres() {
               titre: `${cible.nom} a été retiré de l’organisation`,
               detail:
                 'Son identité subsiste chez notre fournisseur d’identité, mais elle n’a plus accès à vos ressources.',
+              // Le backend confirme par le courriel, que l’adhésion seule
+              // ne porte pas : on le passe explicitement.
+              appel: () => supprimerRessource('/membres', cible.id, cible.email),
               effet: () => {
                 adhesions.supprimer(cible.id)
+                if (detail === cible.id) setDetail(null)
+              },
+              effetFinal: () => {
+                adhesions.recharger()
                 if (detail === cible.id) setDetail(null)
               },
             })

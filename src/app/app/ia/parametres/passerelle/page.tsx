@@ -1,36 +1,57 @@
 'use client'
 
 import { useState } from 'react'
-import { Ban, Plus, RotateCw } from 'lucide-react'
-import { dateCourte, jetons, money, num, relatif } from '@/lib/format'
-import { CLASSE_DONNEES_LABEL, type CleIA } from '@/lib/types'
+import { Ban, Lock, Plus, RotateCw } from 'lucide-react'
+import { MAINTENANT, dateCourte, jetons, money, num, relatif } from '@/lib/format'
+import { CLASSE_DONNEES_LABEL, type ClasseDonnees, type CleIA } from '@/lib/types'
 import { CLES_IA, COFFRE_CLES_FOURNISSEURS, MODELES_IA, PASSERELLE_IA } from '@/lib/mock'
+import type { ModeleIA } from '@/lib/types'
+import { creerRessource, estActif } from '@/lib/api/client'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction } from '@/components/ui/display'
-import { Checkbox, Field, Input, Select } from '@/components/ui/field'
-import { ConfirmDialog, Modal } from '@/components/ui/overlay'
+import { Checkbox } from '@/components/ui/field'
+import { ConfirmDialog } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
 import { LogPeek } from '@/components/business/observabilite'
 import { JOURNAL_PASSERELLE } from '@/lib/mock/ia'
-import { useApp, useEspace } from '@/components/app/contexte'
+import { useApp, useEspace, useMaintenant } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
+import { BoutonFormulaire, useOperation } from '@/components/app/actions'
 
 const TON_STATUT = { active: 'ok', suspendue: 'warn', revoquee: 'neutral' } as const
 const LIBELLE_STATUT = { active: 'Active', suspendue: 'Suspendue', revoquee: 'Révoquée' } as const
 
 export default function Passerelle() {
+  const maintenant = useMaintenant()
   const espace = useEspace()
   const { autorise, refus, pousser } = useApp()
-  const [creation, setCreation] = useState(false)
+  const executer = useOperation()
   const [aRevoquer, setARevoquer] = useState<CleIA | null>(null)
+  const [creationOuverte, setCreationOuverte] = useState(false)
+  /** Secret renvoyé une seule fois à la création d’une clé IA. */
+  const [secretCree, setSecretCree] = useState<{ prefixe: string; secret: string } | null>(null)
+  const [modelesChoisis, setModelesChoisis] = useState<Set<string>>(new Set())
 
-  const cles = CLES_IA.filter((c) => c.espaceId === espace.id)
+  const clesCol = useCollection<CleIA>('cles-ia', CLES_IA)
+  const modelesCol = useCollection<ModeleIA>('modeles-ia', MODELES_IA)
+  const modeles = modelesCol.items
+  const cles = clesCol.items.filter((c) => c.espaceId === espace.id)
   const actives = cles.filter((c) => c.statut === 'active')
   const jetonsConsommes = actives.reduce((a, c) => a + c.jetonsConsommes, 0)
   const budget = actives.reduce((a, c) => a + c.budgetMensuel, 0)
   const depense = actives.reduce((a, c) => a + c.budgetConsomme, 0)
+  // Vérifié en direct sur la passerelle LiteLLM (`/v1/models` + un appel réel
+  // par modèle) : les huit modèles du catalogue OpenRouter répondent tous.
+  // `invocable` distingue ceux réellement appelables des entrées catalogue
+  // (embedding, reranker…) qui n'ont pas d'équivalent chat sur cette route.
+  const modelesInvocables = modeles.filter((m) => m.invocable)
+  // Le backend réel ne renvoie jamais la chaîne nue `'tous'` : `modelesAutorises`
+  // est toujours un tableau, valant `['tous']` par défaut. La maquette, elle,
+  // utilise encore le sentinel nu dans `mock/ia.ts` — les deux formes comptent.
+  const estTous = (m: CleIA['modelesAutorises']) => (Array.isArray(m) ? m.includes('tous') : true)
 
   const colonnes: Array<Colonne<CleIA>> = [
     {
@@ -39,7 +60,7 @@ export default function Passerelle() {
       cle: (c) => c.nom,
       rendu: (c) => (
         <span className="block">
-          <span className="block text-[13px] font-semibold text-ink">{c.nom}</span>
+          <span className="block text-[12.5px] font-semibold text-ink">{c.nom}</span>
           <span className="block font-mono text-[11px] text-g-500">{c.prefixe}…</span>
         </span>
       ),
@@ -54,9 +75,9 @@ export default function Passerelle() {
     {
       id: 'modeles',
       entete: 'Modèles autorisés',
-      cle: (c) => (c.modelesAutorises === 'tous' ? 'tous' : c.modelesAutorises.length),
+      cle: (c) => (estTous(c.modelesAutorises) ? 'tous' : c.modelesAutorises.length),
       rendu: (c) =>
-        c.modelesAutorises === 'tous' ? (
+        estTous(c.modelesAutorises) ? (
           <Badge tone="warn" size="sm">
             Tout le catalogue
           </Badge>
@@ -88,7 +109,7 @@ export default function Passerelle() {
       cle: (c) => c.budgetConsomme,
       rendu: (c) => (
         <span className="block">
-          <span className="tnum block text-[13px] font-semibold text-ink">
+          <span className="tnum block text-[12.5px] font-semibold text-ink">
             {money(c.budgetConsomme)}
           </span>
           <span className="tnum block text-[11px] text-g-500">plafond {money(c.budgetMensuel)}</span>
@@ -113,7 +134,7 @@ export default function Passerelle() {
       cle: (c) => c.derniereUtilisation ?? '',
       rendu: (c) => (
         <span className="text-[12px] text-g-500">
-          {c.derniereUtilisation ? relatif(c.derniereUtilisation) : 'Jamais'}
+          {c.derniereUtilisation ? relatif(c.derniereUtilisation, maintenant) : 'Jamais'}
         </span>
       ),
     },
@@ -134,7 +155,34 @@ export default function Passerelle() {
       rendu: (c) => (
         <span className="flex justify-end gap-1">
           <GatedAction autorise={autorise('ia.key.manage')} message={refus('ia.key.manage')}>
-            <IconButton label={`Faire tourner la clé ${c.nom}`} variant="ghost" size="sm">
+            <IconButton
+              label={`Faire tourner la clé ${c.nom}`}
+              variant="ghost"
+              size="sm"
+              disabled={c.statut !== 'active'}
+              onClick={() =>
+                executer({
+                  action: 'ia.key.manage',
+                  titre: `Clé ${c.nom} tournée`,
+                  detail:
+                    'L’ancien secret cesse de fonctionner immédiatement — copiez le nouveau dans vos applications.',
+                  appel: () =>
+                    creerRessource(`/ia/cles/${c.id}/rotation`, {}).then((reponse) => {
+                      const r = reponse as { cle?: { prefixe?: string }; secret?: string } | null
+                      if (r?.secret) {
+                        setSecretCree({ prefixe: String(r.cle?.prefixe ?? c.prefixe), secret: r.secret })
+                      }
+                      return reponse
+                    }),
+                  effet: () =>
+                    setSecretCree({
+                      prefixe: c.prefixe,
+                      secret: `${c.prefixe}.${clesCol.identifiant('tournee')}`,
+                    }),
+                  effetFinal: () => clesCol.recharger(),
+                })
+              }
+            >
               <RotateCw size={13} />
             </IconButton>
           </GatedAction>
@@ -166,13 +214,153 @@ export default function Passerelle() {
         titre="Passerelle & clés d’accès"
         sousTitre="Une seule URL pour tous les modèles, une clé par application. Le quota, le plafond de dépense et la classe de données maximale se règlent sur la clé, pas dans votre code — vous pouvez donc les changer sans redéployer."
         actions={
-          <GatedAction autorise={autorise('ia.key.manage')} message={refus('ia.key.manage')}>
-            <Button iconBefore={<Plus size={14} />} onClick={() => setCreation(true)}>
-              Créer une clé
-            </Button>
-          </GatedAction>
+          <BoutonFormulaire
+            libelle="Créer une clé"
+            variant="primary"
+            icone={<Plus size={14} />}
+            action="ia.key.manage"
+            titre="Créer une clé d’accès"
+            description="Le secret complet n’est affiché qu’une fois, à la création. Nous ne le stockons pas en clair et ne pouvons pas vous le redonner."
+            ouvert={creationOuverte}
+            onOuvertChange={setCreationOuverte}
+            champs={[
+              {
+                id: 'nom',
+                label: 'Nom',
+                hint: 'Application et environnement, par exemple app-metier · production',
+                placeholder: 'facturation · production',
+                obligatoire: true,
+              },
+              {
+                id: 'usage',
+                label: 'Usage déclaré',
+                hint: 'Sert au showback et à l’audit ; visible par les administrateurs',
+                placeholder: 'Résumés de dossiers dans le back-office',
+              },
+              {
+                id: 'quotaMillions',
+                label: 'Quota mensuel',
+                type: 'nombre',
+                demi: true,
+                hint: 'En millions de jetons',
+                min: 1,
+              },
+              {
+                id: 'budgetMensuel',
+                label: 'Plafond de dépense',
+                type: 'nombre',
+                demi: true,
+                hint: 'En FCFA hors taxes, 0 = aucun plafond',
+                min: 0,
+              },
+              {
+                id: 'residenceMax',
+                label: 'Classe de données maximale',
+                type: 'select',
+                options: [
+                  { value: 'publique', label: 'Publique — sortie de territoire autorisée' },
+                  { value: 'interne', label: 'Interne — sortie vers l’Union européenne' },
+                  { value: 'personnelle', label: 'À caractère personnel — territoire uniquement' },
+                  { value: 'reglementee', label: 'Réglementée — territoire uniquement, trace cinq ans' },
+                ],
+              },
+            ]}
+            valeursDepart={{ quotaMillions: 100, budgetMensuel: 60000, residenceMax: 'interne' }}
+            libelleValider="Créer la clé"
+            complement={() => (
+              <div>
+                <MicroLabel className="mb-2">Modèles autorisés</MicroLabel>
+                <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-[6px] border border-g-300 p-2.5">
+                  {modeles
+                    .filter((m) => m.statut !== 'retire')
+                    .map((m) => (
+                      <Checkbox
+                        key={m.id}
+                        checked={modelesChoisis.has(m.slug)}
+                        onChange={(e) =>
+                          setModelesChoisis((prev) => {
+                            const suivant = new Set(prev)
+                            if (e.target.checked) suivant.add(m.slug)
+                            else suivant.delete(m.slug)
+                            return suivant
+                          })
+                        }
+                        label={`${m.nom} — ${m.hebergement === 'souverain' ? 'territoire' : m.residence}${
+                          m.invocable ? '' : ' · non appelable actuellement'
+                        }`}
+                      />
+                    ))}
+                </div>
+                <p className="mt-1.5 text-[11.5px] text-g-500">
+                  Aucune sélection = tous les modèles du catalogue autorisés. Restreindre la liste
+                  vaut mieux que tout ouvrir : une clé qui ne peut appeler que deux modèles ne peut
+                  pas dériver vers le plus cher du catalogue.
+                </p>
+              </div>
+            )}
+            operation={(v) => {
+              const nom = String(v.nom)
+              const modelesAutorises = Array.from(modelesChoisis)
+              const quotaJetonsMois = Math.round(Number(v.quotaMillions || 100) * 1_000_000)
+              const budgetMensuel = Math.round(Number(v.budgetMensuel || 0))
+              const residenceMax = String(v.residenceMax || 'interne') as ClasseDonnees
+              return {
+                titre: `Clé ${nom} créée`,
+                detail: 'Le secret est affiché une seule fois — copiez-le dans votre coffre.',
+                appel: () =>
+                  creerRessource('/ia/cles', {
+                    nom,
+                    espaceId: espace.id,
+                    usage: v.usage ? String(v.usage) : undefined,
+                    modelesAutorises,
+                    quotaJetonsMois,
+                    budgetMensuel,
+                    residenceMax,
+                  }).then((reponse) => {
+                    const r = reponse as { cle?: { prefixe?: string }; secret?: string } | null
+                    if (r?.secret) setSecretCree({ prefixe: String(r.cle?.prefixe ?? ''), secret: r.secret })
+                    return reponse
+                  }),
+                effet: () =>
+                  clesCol.creer({
+                    id: clesCol.identifiant('cia'),
+                    nom,
+                    prefixe: 'cia_demo',
+                    espaceId: espace.id,
+                    usage: v.usage ? String(v.usage) : '',
+                    modelesAutorises: modelesAutorises.length > 0 ? modelesAutorises : ['tous'],
+                    quotaJetonsMois,
+                    jetonsConsommes: 0,
+                    debitMaxParMinute: 60,
+                    budgetMensuel,
+                    budgetConsomme: 0,
+                    auDepassement: 'bloquer',
+                    residenceMax,
+                    statut: 'active',
+                    creeeLe: MAINTENANT,
+                    creeePar: 'moi',
+                  }),
+                effetFinal: () => {
+                  clesCol.recharger()
+                  setModelesChoisis(new Set())
+                },
+              }
+            }}
+          />
         }
       />
+
+      {secretCree && (
+        <div className="rounded-[8px] border border-err/40 bg-err-bg px-3.5 py-3">
+          <p className="text-[12.5px] font-bold text-ink">
+            Copiez ce secret maintenant — il ne sera plus jamais affiché
+          </p>
+          <p className="mt-1 font-mono text-[12px] break-all text-ink">{secretCree.secret}</p>
+          <Button size="sm" variant="ghost" className="mt-2" onClick={() => setSecretCree(null)}>
+            Je l’ai copié, masquer
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
@@ -191,7 +379,7 @@ export default function Passerelle() {
           </div>
           <div className="mt-4 border-t border-g-100 pt-4">
             <MicroLabel className="mb-2">Points d’API servis</MicroLabel>
-            <p className="font-mono text-[12px] leading-relaxed text-g-700">
+            <p className="font-mono text-[11.5px] leading-relaxed text-g-700">
               {PASSERELLE_IA.compatible}
             </p>
           </div>
@@ -209,6 +397,15 @@ export default function Passerelle() {
               404 qui laisserait croire à une faute de frappe.
             </p>
           </Callout>
+          {estActif() && (
+            <Callout ton="ok" className="mt-4" titre="Passerelle LiteLLM active, en amont d’OpenRouter">
+              {modelesInvocables.length} modèle{modelesInvocables.length > 1 ? 's' : ''} du catalogue
+              répond{modelesInvocables.length > 1 ? 'ent' : ''} réellement à un appel de complétion —
+              pas une liste déclarée, une vérification faite modèle par modèle contre la passerelle.
+              Les autres entrées du catalogue (embedding, reranker…) passent par un autre point d’API
+              et ne sont pas comptées ici.
+            </Callout>
+          )}
         </Card>
 
         <div className="space-y-4">
@@ -273,7 +470,7 @@ curl ${PASSERELLE_IA.base}/models \\
             titre: 'Aucune clé sur cet espace',
             phrase:
               'Une clé porte le quota, le plafond de dépense et la liste des modèles autorisés. Tant qu’il n’en existe pas, la passerelle refuse tous les appels de cet espace.',
-            action: { libelle: 'Créer une clé', href: '#' },
+            action: { libelle: 'Créer une clé', onClick: () => setCreationOuverte(true) },
           }}
           parPage={10}
         />
@@ -312,79 +509,11 @@ curl ${PASSERELLE_IA.base}/models \\
       </div>
 
 
-      <Modal
-        open={creation}
-        onClose={() => setCreation(false)}
-        title="Créer une clé d’accès"
-        description="Le secret complet n’est affiché qu’une fois, à la création. Nous ne le stockons pas en clair et ne pouvons pas vous le redonner."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setCreation(false)}>
-              Annuler
-            </Button>
-            <GatedAction autorise={autorise('ia.key.manage')} message={refus('ia.key.manage')}>
-              <Button
-                onClick={() => {
-                  setCreation(false)
-                  pousser({
-                    ton: 'ok',
-                    titre: 'Clé créée',
-                    detail: 'Le secret est affiché une seule fois — copiez-le dans votre coffre.',
-                  })
-                }}
-              >
-                Créer la clé
-              </Button>
-            </GatedAction>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <Field label="Nom" hint="Application et environnement, par exemple app-metier · production" required>
-            <Input placeholder="facturation · production" />
-          </Field>
-          <Field label="Usage déclaré" hint="Sert au showback et à l’audit ; visible par les administrateurs">
-            <Input placeholder="Résumés de dossiers dans le back-office" />
-          </Field>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Quota mensuel" hint="En millions de jetons">
-              <Input type="number" defaultValue={100} />
-            </Field>
-            <Field label="Plafond de dépense" hint="En FCFA hors taxes">
-              <Input type="number" defaultValue={60000} />
-            </Field>
-          </div>
-          <Field label="Classe de données maximale">
-            <Select defaultValue="interne">
-              <option value="publique">Publique — sortie de territoire autorisée</option>
-              <option value="interne">Interne — sortie vers l’Union européenne</option>
-              <option value="personnelle">À caractère personnel — territoire uniquement</option>
-              <option value="reglementee">Réglementée — territoire uniquement, trace cinq ans</option>
-            </Select>
-          </Field>
-          <div>
-            <MicroLabel className="mb-2">Modèles autorisés</MicroLabel>
-            <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-[6px] border border-g-300 p-2.5">
-              {MODELES_IA.filter((m) => m.statut !== 'retire').map((m) => (
-                <Checkbox
-                  key={m.id}
-                  defaultChecked={m.hebergement === 'souverain'}
-                  label={`${m.nom} — ${m.hebergement === 'souverain' ? 'territoire' : m.residence}`}
-                />
-              ))}
-            </div>
-            <p className="mt-1.5 text-[12px] text-g-500">
-              Restreindre la liste vaut mieux que tout ouvrir : une clé qui ne peut appeler que deux
-              modèles ne peut pas dériver vers le plus cher du catalogue.
-            </p>
-          </div>
-        </div>
-      </Modal>
-
       <ConfirmDialog
         open={aRevoquer !== null}
         onClose={() => setARevoquer(null)}
         onConfirm={() => {
+          if (aRevoquer) clesCol.supprimer(aRevoquer.id, aRevoquer.nom)
           pousser({
             ton: 'warn',
             titre: 'Clé révoquée',

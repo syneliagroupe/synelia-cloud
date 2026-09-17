@@ -34,7 +34,7 @@ export const cheminsTransverses = fusion(
           'Alimente la recherche de la barre supérieure. Les résultats portent leur route : ' +
           'le client navigue sans avoir à deviner l’écran qui affiche la ressource.',
         params: [
-          filtre('q', chaine(), 'Terme recherché.'),
+          filtre('q', chaine(), 'Terme recherché.', true),
           filtre('types', chaine(), 'Types à considérer, séparés par des virgules.'),
           filtre('limite', entier(undefined, { maximum: 50, default: 10 })),
         ],

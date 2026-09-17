@@ -1,21 +1,28 @@
 'use client'
 
 import Link from 'next/link'
+import { Globe, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, relatif } from '@/lib/format'
 import type { Projet, ServiceProjet, TypeServiceProjet } from '@/lib/types'
-import { PROJETS, SERVICES_PROJET, TYPE_SERVICE_LABEL, ZONE_APPLICATIVE, syntheseDeServices } from '@/lib/mock'
+import {
+  PROJETS,
+  SERVICES_PROJET,
+  TYPE_SERVICE_LABEL,
+  ZONE_APPLICATIVE,
+  syntheseDeServices,
+} from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { ICONE_TYPE } from '@/components/business/projets'
-import { useApp, useEspace } from '@/components/app/contexte'
+import { useApp, useEspace, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
-import { Boxes, Globe, Layers, Plus } from 'lucide-react'
 
 export default function Projets() {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const espace = useEspace()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
@@ -41,21 +48,19 @@ export default function Projets() {
     { services: 0, enEchec: 0, coutMensuel: 0 },
   )
 
-  const boutonCreer = (
-    <GatedAction autorise={autorise('app.deploy')} message={refus('app.deploy')}>
-      <ButtonLink href="/app/applications/projets/nouveau" iconBefore={<Plus size={14} />}>
-        Créer un projet
-      </ButtonLink>
-    </GatedAction>
-  )
-
   return (
     <div className="space-y-6">
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Projets' }]}
         titre="Projets"
         sousTitre="Un projet regroupe les services qui forment un même système : l’application, sa base, son cache, ses tâches de fond. C’est la maille qui répond à « qu’est-ce qui casse si j’arrête ça ? »."
-        actions={boutonCreer}
+        actions={
+          <GatedAction autorise={autorise('app.deploy')} message={refus('app.deploy')}>
+            <ButtonLink href="/app/applications/nouveau" iconBefore={<Plus size={14} />}>
+              Créer un projet
+            </ButtonLink>
+          </GatedAction>
+        }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -83,7 +88,7 @@ export default function Projets() {
         <span className="font-mono text-[12px]">{ZONE_APPLICATIVE.wildcard}</span>, certificat
         compris. Votre première mise en ligne ne dépend donc d’aucun achat de domaine. Vous
         brancherez le vôtre quand vous voudrez, depuis{' '}
-        <Link href="/app/applications/routage" className="font-semibold text-p-700 hover:underline">
+        <Link href="/app/applications/routage" className="font-semibold text-p-700 hover:text-m-600">
           Domaines &amp; routage
         </Link>
         .
@@ -94,7 +99,13 @@ export default function Projets() {
           <CardHeader
             titre={`Aucun projet dans ${espace.code}`}
             sousTitre="Un projet regroupe les services qui forment un même système : l’application, sa base, son cache, ses tâches de fond. Créez le premier ici, ou changez d’Espace Cloud dans le panneau de gauche."
-            actions={boutonCreer}
+            actions={
+              <GatedAction autorise={autorise('app.deploy')} message={refus('app.deploy')}>
+                <ButtonLink href="/app/applications/nouveau" iconBefore={<Plus size={14} />}>
+                  Créer un projet
+                </ButtonLink>
+              </GatedAction>
+            }
           />
         </Card>
       )}
@@ -131,7 +142,7 @@ export default function Projets() {
                   .map((t) => (
                     <span
                       key={t}
-                      className="inline-flex items-center gap-1.5 rounded-[6px] border border-g-300 bg-g-050 px-2 py-1 text-[12px] font-semibold text-g-700"
+                      className="inline-flex items-center gap-1.5 rounded-[6px] border border-g-300 bg-g-050 px-2 py-1 text-[11.5px] font-semibold text-g-700"
                     >
                       <span className="text-p-700">{ICONE_TYPE[t]}</span>
                       {s.parType[t]} {TYPE_SERVICE_LABEL[t].toLowerCase()}
@@ -148,17 +159,6 @@ export default function Projets() {
                   </Badge>
                 ))}
               </div>
-
-              {(p.tags ?? []).length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <MicroLabel className="mr-1">Étiquettes</MicroLabel>
-                  {(p.tags ?? []).map((t) => (
-                    <Badge key={t} tone="violet" size="sm">
-                      {t}
-                    </Badge>
-                  ))}
-                </div>
-              )}
 
               <ul className="mt-3.5 space-y-1 border-t border-g-100 pt-3">
                 {services.slice(0, 4).map((svc) => (
@@ -187,12 +187,12 @@ export default function Projets() {
                       <span className="shrink-0 text-[11px] text-g-500">{svc.environnement}</span>
                     </Link>
                     <span className="shrink-0 text-[11px] text-g-500">
-                      {relatif(svc.derniereMaj)}
+                      {relatif(svc.derniereMaj, maintenant)}
                     </span>
                   </li>
                 ))}
                 {services.length > 4 && (
-                  <li className="pt-0.5 text-[12px] text-g-500">
+                  <li className="pt-0.5 text-[11.5px] text-g-500">
                     et {services.length - 4} autre{services.length - 4 > 1 ? 's' : ''} service
                     {services.length - 4 > 1 ? 's' : ''}
                   </li>
@@ -200,7 +200,7 @@ export default function Projets() {
               </ul>
 
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-g-100 pt-3">
-                <span className="flex items-center gap-3 text-[12px] text-g-500">
+                <span className="flex items-center gap-3 text-[11.5px] text-g-500">
                   <span className="inline-flex items-center gap-1">
                     <Globe size={12} />
                     {s.domaines} domaine{s.domaines > 1 ? 's' : ''}
@@ -254,27 +254,13 @@ export default function Projets() {
                 <span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-p-050 text-p-700">
                   {ICONE_TYPE[t.type]}
                 </span>
-                <span className="text-[13px] font-bold text-ink">
+                <span className="text-[12.5px] font-bold text-ink">
                   {TYPE_SERVICE_LABEL[t.type]}
                 </span>
               </span>
-              <p className="mt-2 text-[12px] leading-relaxed text-g-700">{t.phrase}</p>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-g-700">{t.phrase}</p>
             </div>
           ))}
-          <div className="flex flex-col justify-center rounded-[8px] border border-dashed border-p-300 bg-p-050 p-3">
-            <span className="flex items-center gap-2 text-[13px] font-bold text-p-700">
-              <Layers size={14} />
-              Composer plusieurs briques
-            </span>
-            <p className="mt-2 text-[12px] leading-relaxed text-g-700">
-              L’assistant de déploiement propose aussi un canvas : on pose les briques, on relie les
-              dépendances, la plateforme génère le tout.
-            </p>
-            <ButtonLink href="/app/applications/nouveau" variant="ghost" size="sm" className="mt-2 self-start">
-              Ouvrir l’assistant
-              <Boxes size={13} />
-            </ButtonLink>
-          </div>
         </div>
       </Card>
     </div>

@@ -191,7 +191,7 @@ export default function ListeClusters() {
           titre: 'Aucun cluster Kubernetes',
           phrase:
             'Un cluster managé consomme le quota vCPU et mémoire de votre Espace Cloud pour ses nœuds workers ; le control plane est facturé à part et exploité par nos équipes.',
-          action: { libelle: 'Créer un cluster', href: '#' },
+          action: { libelle: 'Créer un cluster', href: '/app/kubernetes/new' },
         }}
       />
 

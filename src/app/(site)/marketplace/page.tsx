@@ -5,6 +5,8 @@ import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CATEGORIE_LABEL, type CategorieService } from '@/lib/types'
 import { CATALOGUE, CONTRAT_INTEGRATION } from '@/lib/mock'
+import { usePublic } from '@/lib/api/public'
+import { fusionnerCatalogue, type FicheCataloguePublique } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { SearchInput, SegmentedControl } from '@/components/ui/field'
 import { CatalogCard } from '@/components/business/service-card'
@@ -23,10 +25,18 @@ export default function MarketplacePublic() {
   const [q, setQ] = useState('')
   const [categorie, setCategorie] = useState<CategorieService | 'toutes'>('toutes')
   const [mode, setMode] = useState<'tous' | 'dedie' | 'mutualise'>('tous')
+  // En mode API, le catalogue publié (`GET /public/catalogue/services`)
+  // remplace la liste locale ; chaque fiche garde l’habillage local de
+  // même `slug` (pictogramme, captures) que le backend ne publie pas.
+  const distant = usePublic<{ donnees: FicheCataloguePublique[] }>('/public/catalogue/services')
+  const catalogue = useMemo(
+    () => fusionnerCatalogue(distant.donnees?.donnees, CATALOGUE) ?? CATALOGUE,
+    [distant.donnees],
+  )
 
   const resultats = useMemo(
     () =>
-      CATALOGUE.filter((s) => {
+      catalogue.filter((s) => {
         if (categorie !== 'toutes' && s.categorie !== categorie) return false
         if (mode !== 'tous' && !s.modes.includes(mode)) return false
         if (!q.trim()) return true
@@ -37,7 +47,7 @@ export default function MarketplacePublic() {
           s.pitch.toLowerCase().includes(n)
         )
       }),
-    [q, categorie, mode],
+    [catalogue, q, categorie, mode],
   )
 
   return (
@@ -55,15 +65,15 @@ export default function MarketplacePublic() {
         enfants={
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
             {[
-              { v: `${CATALOGUE.length}`, l: 'solutions au catalogue' },
-              { v: `${CATALOGUE.filter((c) => c.certifie).length}`, l: 'certifiées Synelia' },
+              { v: `${catalogue.length}`, l: 'solutions au catalogue' },
+              { v: `${catalogue.filter((c) => c.certifie).length}`, l: 'certifiées Synelia' },
               { v: '2', l: 'sites en Côte d’Ivoire' },
             ].map((x) => (
               <div key={x.l} className="rounded-[14px] border border-encre-2/10 bg-creme px-4 py-3">
                 <p className="tnum text-[22px] font-black leading-none [font-family:var(--font-display)] text-p-600">
                   {x.v}
                 </p>
-                <p className="mt-1.5 text-[12px] text-encre-2/65">{x.l}</p>
+                <p className="mt-1.5 text-[11.5px] text-encre-2/65">{x.l}</p>
               </div>
             ))}
           </div>
@@ -91,7 +101,7 @@ export default function MarketplacePublic() {
                 ]}
               />
             </div>
-            <p className="tnum text-[13px] text-g-500">
+            <p className="tnum text-[12.5px] text-g-500">
               {resultats.length} service{resultats.length > 1 ? 's' : ''}
             </p>
           </div>
@@ -122,8 +132,8 @@ export default function MarketplacePublic() {
                 )}
               >
                 {CATEGORIE_LABEL[c]}
-                <span className="ml-1.5 text-[11px] opacity-70">
-                  {CATALOGUE.filter((s) => s.categorie === c).length}
+                <span className="ml-1.5 text-[10px] opacity-70">
+                  {catalogue.filter((s) => s.categorie === c).length}
                 </span>
               </button>
             ))}
@@ -160,8 +170,8 @@ export default function MarketplacePublic() {
                   {c.num}
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[14px] font-semibold leading-snug text-ink">{c.capacite}</p>
-                  <p className="mt-0.5 text-[12px] text-g-500">{c.ecran}</p>
+                  <p className="text-[13.5px] font-semibold leading-snug text-ink">{c.capacite}</p>
+                  <p className="mt-0.5 text-[11.5px] text-g-500">{c.ecran}</p>
                 </div>
               </li>
             ))}
@@ -217,11 +227,11 @@ export default function MarketplacePublic() {
               ].map((x) => (
                 <div key={x.cat} className="rounded-[10px] border border-g-300 bg-white p-4">
                   <p className="text-[13px] font-bold text-ink">{x.cat}</p>
-                  <p className="mt-2 flex items-start gap-2 text-[13px] leading-snug text-g-700">
+                  <p className="mt-2 flex items-start gap-2 text-[12.5px] leading-snug text-g-700">
                     <Check size={13} className="mt-0.5 shrink-0 text-ok" />
                     Le portail : {x.fait}
                   </p>
-                  <p className="mt-1.5 flex items-start gap-2 text-[13px] leading-snug text-g-500">
+                  <p className="mt-1.5 flex items-start gap-2 text-[12.5px] leading-snug text-g-500">
                     <span className="mt-0.5 shrink-0 font-bold text-g-500">—</span>
                     Le portail ne fait pas : {x.pas}
                   </p>

@@ -1,20 +1,17 @@
 'use client'
 
-import { joursAvant, CERTIFICATS, TYPE_CERTIFICAT_LABEL, type Certificat } from '@/lib/mock'
-
+import { joursAvant } from '@/lib/mock'
+import { CERTIFICATS, TYPE_CERTIFICAT_LABEL, type Certificat } from '@/lib/mock'
 import type { Tone } from '@/components/ui/badge'
 import { CadreSection } from '@/components/app/cadre-section'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 
-/**
- * Panneau de la section — liste les certificats de l'organisation, depuis
- * l'atelier : un renouvellement lancé depuis la fiche doit passer le badge à
- * « Émission » ici aussi, et un certificat commandé doit apparaître.
- */
+/** Panneau de la section — liste les certificats de l'organisation. */
 export function CadreSsl({ children }: { children: React.ReactNode }) {
-  const certificats = useCollection<Certificat>('certificats', CERTIFICATS)
-
-  const entrees = certificats.items.map((c) => {
+  const collection = useCollection<Certificat>('certificats', CERTIFICATS)
+  const source = estActif() ? collection.items : CERTIFICATS
+  const entrees = source.map((c) => {
     const jours = joursAvant(c.expire)
     return {
       id: c.id,
@@ -38,7 +35,6 @@ export function CadreSsl({ children }: { children: React.ReactNode }) {
       titre="Certificats"
       base="/app/web/ssl"
       entrees={entrees}
-      actionPrincipale={{ libelle: 'Commander un certificat', href: '/app/web/ssl' }}
       placeholderRecherche="Rechercher un hôte…"
       compteur={(visibles, total) =>
         visibles === total ? `${total} certificat${total > 1 ? 's' : ''}` : `${visibles} sur ${total}`

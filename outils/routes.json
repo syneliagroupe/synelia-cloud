@@ -68,8 +68,6 @@
 "/app/ia/integrations/out-mcp-supervision",
 "/app/ia/modeles",
 "/app/ia/modeles/m-llama-70b",
-"/app/ia/inference",
-"/app/ia/inference/inf-llama-prod",
 "/app/ia/consommation",
 "/app/ia/parametres",
 "/app/ia/parametres/passerelle",

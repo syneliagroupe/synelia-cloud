@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Camera, Plus, Power, RotateCw, Shield, Tag, Layers} from 'lucide-react'
 import { num, relatif } from '@/lib/format'
-import { SITE_COURT, type VM } from '@/lib/types'
+import { SITE_COURT, type EspaceCloud, type VM } from '@/lib/types'
 import { BACKUP_PLANS, ESPACES, VMS,
   hrefDuService,
 } from '@/lib/mock'
@@ -13,14 +13,31 @@ import { GatedAction } from '@/components/ui/display'
 import { PageHeader, Card, Callout } from '@/components/composition/card'
 import { HealthBadge, StatTile } from '@/components/composition/metrics'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
-import { useApp, useEspace } from '@/components/app/contexte'
+import { useApp, useEspace, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { estActif, requete } from '@/lib/api/client'
+import { useEffect, useState } from 'react'
 
 export default function ListeVms() {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const espace = useEspace()
   const parc = useCollection<VM>('vms', VMS)
+  // `/catalogue/images` résout l'UUID Glance que le backend pose sur `vm.os` — même
+  // contrat que la fiche détail (`vms/[vm]/vue.tsx`). Sans ça, la colonne « Système »
+  // affiche un UUID au lieu d'un nom lisible.
+  const [catalogueImages, setCatalogueImages] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!estActif()) return
+    requete<Array<{ id: string; nom: string }>>('/catalogue/images')
+      .then((images) => setCatalogueImages(Object.fromEntries(images.map((i) => [i.id, i.nom]))))
+      .catch(() => {})
+  }, [])
+  // Même collection que le panneau `CadreEspace` : en mode API, la liste des
+  // « autres Espaces » ci-dessous doit suivre le backend, pas rester sur la
+  // graine de démonstration alors que le reste de l'écran est déjà réel.
+  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
   const executer = useOperation()
   const vms = parc.items.filter((v) => v.espaceId === espace.id)
 
@@ -31,17 +48,30 @@ export default function ListeVms() {
     workflow: string,
     statutFinal: VM['statut'],
   ) => {
-    // Sur une seule machine, la nommer : « Démarrage de 1 machine » se lit mal
-    // dans le centre de tâches, et le nom est l'information utile.
-    const cible =
-      ids.length === 1
-        ? (vms.find((v) => v.id === ids[0])?.nom ?? '1 machine')
-        : `${ids.length} machines`
+    const actionApi =
+      workflow === 'vm.power.start'
+        ? 'demarrage'
+        : workflow === 'vm.power.stop'
+          ? 'arret'
+          : 'redemarrage'
     return executer({
+      action: 'vm.power',
       ton: 'info',
-      titre: `${libelle} de ${cible}`,
-      job: { workflow, cible },
-      effetFinal: () => parc.modifierPlusieurs(ids, { statut: statutFinal }),
+      titre: `${libelle} de ${ids.length} machine${ids.length > 1 ? 's' : ''}`,
+      // En mode API chaque machine reçoit son ordre ; le premier travail
+      // renvoyé pilote le suivi, les autres avancent dans le centre de tâches.
+      appel: () =>
+        Promise.all(
+          ids.map((vmId) => requete(`/vms/${encodeURIComponent(vmId)}/${actionApi}`, { methode: 'POST', corps: {} })),
+        ).then((reponses) => reponses[0]),
+      job: {
+        workflow,
+        cible: `${ids.length} machine${ids.length > 1 ? 's' : ''}`,
+      },
+      effetFinal: () => {
+        parc.modifierPlusieurs(ids, { statut: statutFinal })
+        parc.recharger()
+      },
     })
   }
 
@@ -52,7 +82,7 @@ export default function ListeVms() {
       cle: (v) => v.nom,
       rendu: (v) => (
         <span className="block">
-          <span className="block font-mono text-[13px] font-semibold text-ink">{v.nom}</span>
+          <span className="block font-mono text-[12.5px] font-semibold text-ink">{v.nom}</span>
           {v.applicationNom && (
             <span className="block text-[11px] text-g-500">{v.applicationNom}</span>
           )}
@@ -65,7 +95,12 @@ export default function ListeVms() {
       cle: (v) => v.statut,
       rendu: (v) => <HealthBadge etat={v.statut} size="sm" />,
     },
-    { id: 'os', entete: 'Système', cle: (v) => v.os, rendu: (v) => v.os },
+    {
+      id: 'os',
+      entete: 'Système',
+      cle: (v) => catalogueImages[v.os] ?? v.os,
+      rendu: (v) => catalogueImages[v.os] ?? v.os,
+    },
     {
       id: 'gabarit',
       entete: 'Gabarit',
@@ -87,7 +122,7 @@ export default function ListeVms() {
         <span className="block space-y-0.5">
           {v.ips.map((i) => (
             <span key={i.adresse} className="flex items-center gap-1.5">
-              <span className="font-mono text-[12px] text-ink">{i.adresse}</span>
+              <span className="font-mono text-[11.5px] text-ink">{i.adresse}</span>
               <Badge tone={i.type === 'publique' ? 'accent' : 'neutral'} size="sm">
                 {i.type === 'publique' ? 'pub' : 'priv'}
               </Badge>
@@ -115,7 +150,7 @@ export default function ListeVms() {
         v.applicationId ? (
           <Link
             href={hrefDuService(v.applicationId)}
-            className="text-[13px] text-p-700 hover:underline"
+            className="text-[12.5px] text-p-700 hover:text-m-600"
           >
             {v.applicationNom}
           </Link>
@@ -130,7 +165,7 @@ export default function ListeVms() {
       cle: (v) => v.derniereSauvegarde ?? '',
       rendu: (v) =>
         v.derniereSauvegarde ? (
-          <span className="text-[12px] text-g-700">{relatif(v.derniereSauvegarde)}</span>
+          <span className="text-[12px] text-g-700">{relatif(v.derniereSauvegarde, maintenant)}</span>
         ) : (
           <Badge tone="warn" size="sm">
             Non protégée
@@ -160,7 +195,7 @@ export default function ListeVms() {
       rendu: (v) => (
         <Link
           href={`/app/vms/${v.id}`}
-          className="text-[12px] font-semibold text-p-700 hover:underline"
+          className="text-[12px] font-semibold text-p-700 hover:text-m-600"
         >
           Ouvrir →
         </Link>
@@ -235,7 +270,9 @@ export default function ListeVms() {
           {
             id: 'os',
             libelle: 'Système',
-            options: Array.from(new Set(vms.map((v) => v.os.split(' ')[0]))).map((o) => ({
+            options: Array.from(
+              new Set(vms.map((v) => (catalogueImages[v.os] ?? v.os).split(' ')[0])),
+            ).map((o) => ({
               value: o,
               label: o,
             })),
@@ -251,7 +288,7 @@ export default function ListeVms() {
         ]}
         selection={(v, id, val) => {
           if (id === 'statut') return v.statut === val
-          if (id === 'os') return v.os.startsWith(val)
+          if (id === 'os') return (catalogueImages[v.os] ?? v.os).startsWith(val)
           return val === 'oui' ? Boolean(v.backupPlanId) : !v.backupPlanId
         }}
         href={(v) => `/app/vms/${v.id}`}
@@ -301,10 +338,21 @@ export default function ListeVms() {
                 iconBefore={<Camera size={13} />}
                 onClick={() =>
                   executer({
+                    action: 'vm.create_delete',
                     titre: `Snapshot de ${ids.length} machine${ids.length > 1 ? 's' : ''} demandé`,
                     detail:
                       'Un snapshot n’est pas une sauvegarde : il vit sur le même stockage que la machine.',
+                    appel: () =>
+                      Promise.all(
+                        ids.map((vmId) =>
+                          requete(`/vms/${encodeURIComponent(vmId)}/instantanes`, {
+                            methode: 'POST',
+                            corps: { nom: `groupe-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}` },
+                          }),
+                        ),
+                      ).then((reponses) => reponses[0]),
                     job: { workflow: 'vm.snapshot', cible: `${ids.length} machine${ids.length > 1 ? 's' : ''}` },
+                    effetFinal: () => parc.recharger(),
                   })
                 }
               >
@@ -376,11 +424,11 @@ export default function ListeVms() {
         </Callout>
       )}
 
-      {ESPACES.length > 1 && (
+      {espacesCol.items.length > 1 && (
         <Callout ton="info" titre="Machines dans les autres espaces">
-          {ESPACES.filter((e) => e.id !== espace.id).map((e) => (
+          {espacesCol.items.filter((e) => e.id !== espace.id).map((e) => (
             <span key={e.id} className="mr-4 inline-block">
-              <Link href={`/app/espaces/${e.id}`} className="font-semibold text-p-700 hover:underline">
+              <Link href={`/app/espaces/${e.id}`} className="font-semibold text-p-700 hover:text-m-600">
                 {e.code}
               </Link>{' '}
               · {parc.items.filter((v) => v.espaceId === e.id).length} machines

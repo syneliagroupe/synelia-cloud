@@ -14,3 +14,13 @@ pnpm-debug.log*
 
 # Le gestionnaire de paquets est bun : bun.lock fait foi.
 package-lock.json
+
+# Dérive du contrat (outils/contrat/derive.mjs) : sortie déterministe régénérée
+# à chaque contrôle, jamais importée depuis src/.
+outils/contrat/contrat.genere.d.ts
+
+# Tests d'intégration (Playwright, backend réel)
+tests/integration/resultats/
+test-results/
+.env.local
+.env*

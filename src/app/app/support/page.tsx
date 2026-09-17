@@ -21,10 +21,35 @@ import { Modal } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { GaugeCircle, StatTile } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif } from '@/lib/api/client'
+import { useLectureDegradable } from '@/lib/api/degradable'
 import type { Ticket } from '@/lib/types'
+
+interface EngagementSlaApi {
+  composant: string
+  dispo: number
+  constate: number
+  reponseCritique: number
+  resolutionCritique: number
+}
+
+interface CreditSlaApi {
+  periode: string
+  composant: string
+  dispoConstatee: number
+  engagement: number
+  credit: number
+  statut: string
+}
+
+const LIBELLE_COMPOSANT_SLA: Record<string, string> = {
+  compute: 'Espace Cloud (calcul)',
+  stockage: 'Stockage',
+  reseau: 'Réseau & IP',
+}
 
 const ONGLETS = [
   { id: 'tickets', label: 'Mes tickets' },
@@ -64,7 +89,10 @@ const TON_GRAVITE: Record<Ticket['gravite'], 'err' | 'warn' | 'info' | 'neutral'
 }
 
 export default function Support() {
-  const { autorise, refus, pousser } = useApp()
+  const maintenant = useMaintenant()
+  const { autorise, refus, pousser, organisations, organisationId } = useApp()
+  const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
+  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
   const [onglet, setOnglet] = useState('tickets')
   const [nouveau, setNouveau] = useState(false)
   const [sujet, setSujet] = useState('')
@@ -75,7 +103,12 @@ export default function Support() {
 
   const executer = useOperation()
   const collection = useCollection<Ticket>('tickets', TICKETS)
-  const tickets = collection.items.filter((t) => t.orgId === ORG_COURANTE.id)
+  // Le backend filtre déjà par organisation ; ORG_COURANTE.id est un
+  // identifiant de la graine fictive, inconnu de l'API réelle — filtrer avec
+  // en mode API viderait la liste au lieu de la restreindre.
+  const tickets = estActif()
+    ? collection.items
+    : collection.items.filter((t) => t.orgId === ORG_COURANTE.id)
   const ouverts = tickets.filter((t) => !['resolu', 'ferme'].includes(t.statut))
   const enAttente = tickets.filter((t) => t.statut === 'attente_client')
   const critique = ouverts.find((t) => t.gravite === 'critique')
@@ -83,7 +116,29 @@ export default function Support() {
   const themes = ['tous', ...new Set(ARTICLES_KB.map((a) => a.theme))]
   const articles = theme === 'tous' ? ARTICLES_KB : ARTICLES_KB.filter((a) => a.theme === theme)
 
-  const creditsEnAttente = CREDITS_SLA.filter((c) => c.statut !== 'appliqué')
+  // Premières réponses réelles : premier message d'un agent Synelia après
+  // l'ouverture du ticket, médiane sur les tickets qui en ont déjà une.
+  const reponses = tickets
+    .map((t) => {
+      const premiere = t.messages.find((m) => m.role === 'synelia')
+      if (!premiere) return undefined
+      return (new Date(premiere.date).getTime() - new Date(t.createdAt).getTime()) / 60000
+    })
+    .filter((v): v is number => v !== undefined && v >= 0)
+    .sort((a, b) => a - b)
+  const reponseMedianeMin = reponses.length ? reponses[Math.floor((reponses.length - 1) / 2)] : undefined
+
+  const { donnees: slaDistant } = useLectureDegradable<{
+    engagements: EngagementSlaApi[]
+    credits: CreditSlaApi[]
+  }>('/facturation/sla')
+  const engagementsSla = estActif() ? (slaDistant?.engagements ?? []) : ENGAGEMENTS_SLA
+  const creditsSla = estActif() ? (slaDistant?.credits ?? []) : CREDITS_SLA
+  const disponibiliteConstatee = engagementsSla.length
+    ? engagementsSla.reduce((a, e) => a + e.constate, 0) / engagementsSla.length
+    : undefined
+
+  const creditsEnAttente = creditsSla.filter((c) => c.statut !== 'appliqué')
 
   return (
     <div className="space-y-5">
@@ -99,7 +154,7 @@ export default function Support() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {ORG_COURANTE.nom}
+              {nomOrg}
             </Badge>
             <Badge tone="ok" dot size="sm">
               Support ouvert · 8 h – 19 h GMT
@@ -138,19 +193,19 @@ export default function Support() {
         />
         <StatTile
           libelle="Première réponse médiane"
-          valeur="14 min"
+          valeur={reponseMedianeMin !== undefined ? dureeMin(Math.round(reponseMedianeMin)) : '—'}
           ton="ok"
           detail="Engagement : 30 min sur critique"
         />
         <StatTile
           libelle="Disponibilité constatée 30 j"
-          valeur={pct(99.94, 2)}
+          valeur={disponibiliteConstatee !== undefined ? pct(disponibiliteConstatee, 2) : '—'}
           ton="ok"
           detail="Engagement contractuel 99,9 %"
         />
         <StatTile
           libelle="Avoirs de service"
-          valeur={money(CREDITS_SLA.reduce((a, c) => a + c.credit, 0))}
+          valeur={money(creditsSla.reduce((a, c) => a + c.credit, 0))}
           ton={creditsEnAttente.length > 0 ? 'warn' : 'neutral'}
           detail={
             creditsEnAttente.length > 0
@@ -206,7 +261,7 @@ export default function Support() {
                   rendu: (t) => (
                     <span className="block min-w-0">
                       <span className="block font-mono text-[11px] text-g-500">{t.numero}</span>
-                      <span className="block truncate text-[13px] font-semibold text-ink">
+                      <span className="block truncate text-[12.5px] font-semibold text-ink">
                         {t.sujet}
                       </span>
                     </span>
@@ -239,7 +294,7 @@ export default function Support() {
                   masquable: true,
                   rendu: (t) =>
                     t.ressourcesLiees.length === 0 ? (
-                      <span className="text-[12px] text-g-500">—</span>
+                      <span className="text-[11.5px] text-g-500">—</span>
                     ) : (
                       <span className="flex flex-wrap gap-1">
                         {t.ressourcesLiees.slice(0, 2).map((r) => (
@@ -262,7 +317,7 @@ export default function Support() {
                   cle: (t) => t.slaRestantMin ?? 99999,
                   rendu: (t) =>
                     t.slaRestantMin === undefined ? (
-                      <span className="text-[12px] text-g-500">—</span>
+                      <span className="text-[11.5px] text-g-500">—</span>
                     ) : (
                       <span
                         className={cn(
@@ -271,7 +326,7 @@ export default function Support() {
                         )}
                       >
                         {dureeMin(t.slaRestantMin)}
-                        <span className="block text-[11px] font-normal text-g-500">restantes</span>
+                        <span className="block text-[10px] font-normal text-g-500">restantes</span>
                       </span>
                     ),
                 },
@@ -281,7 +336,7 @@ export default function Support() {
                   cle: (t) => t.assigneA ?? '',
                   masquable: true,
                   rendu: (t) => (
-                    <span className="text-[12px] text-g-700">{t.assigneA ?? 'Non assigné'}</span>
+                    <span className="text-[11.5px] text-g-700">{t.assigneA ?? 'Non assigné'}</span>
                   ),
                 },
                 {
@@ -299,7 +354,7 @@ export default function Support() {
                   aligne: 'right',
                   cle: (t) => t.createdAt,
                   rendu: (t) => (
-                    <span className="text-[12px] text-g-500">{relatif(t.createdAt)}</span>
+                    <span className="text-[11.5px] text-g-500">{relatif(t.createdAt, maintenant)}</span>
                   ),
                 },
               ]}
@@ -319,9 +374,15 @@ export default function Support() {
             <Card>
               <CardHeader titre="Disponibilité globale" sousTitre="Trente derniers jours, toutes ressources." />
               <div className="flex justify-center py-2">
-                <GaugeCircle valeur={99.94} min={99} max={100} cible={99.9} libelle="Constatée" />
+                <GaugeCircle
+                  valeur={disponibiliteConstatee ?? 100}
+                  min={99}
+                  max={100}
+                  cible={99.9}
+                  libelle="Constatée"
+                />
               </div>
-              <p className="mt-2 text-center text-[12px] leading-relaxed text-g-500">
+              <p className="mt-2 text-center text-[11.5px] leading-relaxed text-g-500">
                 Mesurée depuis l’extérieur, sur trois points de contrôle indépendants. Nous ne
                 mesurons pas notre disponibilité depuis notre propre réseau.
               </p>
@@ -349,12 +410,12 @@ export default function Support() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ENGAGEMENTS_SLA.map((e) => {
+                    {engagementsSla.map((e) => {
                       const tenu = e.constate >= e.dispo
                       return (
                         <tr key={e.composant} className="border-b border-g-100 last:border-0">
                           <td className="px-3 py-2 text-[12px] font-semibold text-ink">
-                            {e.composant}
+                            {LIBELLE_COMPOSANT_SLA[e.composant] ?? e.composant}
                           </td>
                           <td className="tnum px-3 py-2 text-[12px] text-g-700">
                             {pct(e.dispo, 2)}
@@ -364,10 +425,10 @@ export default function Support() {
                               {pct(e.constate, 2)}
                             </Badge>
                           </td>
-                          <td className="tnum px-3 py-2 text-[12px] text-g-700">
+                          <td className="tnum px-3 py-2 text-[11.5px] text-g-700">
                             {dureeMin(e.reponseCritique)}
                           </td>
-                          <td className="tnum px-3 py-2 text-[12px] text-g-700">
+                          <td className="tnum px-3 py-2 text-[11.5px] text-g-700">
                             {dureeMin(e.resolutionCritique)}
                           </td>
                         </tr>
@@ -376,11 +437,18 @@ export default function Support() {
                   </tbody>
                 </table>
               </div>
-              {ENGAGEMENTS_SLA.some((e) => e.constate < e.dispo) && (
+              {engagementsSla.some((e) => e.constate < e.dispo) && (
                 <Callout ton="warn" className="mt-4" titre="Un engagement n’a pas été tenu">
-                  Les services managés et Kubernetes sont passés sous leur engagement sur la période.
-                  Nous n’attendons pas que vous le remarquiez : l’avoir correspondant est calculé
-                  automatiquement et apparaît sur votre prochaine facture.
+                  {engagementsSla
+                    .filter((e) => e.constate < e.dispo)
+                    .map((e) => LIBELLE_COMPOSANT_SLA[e.composant] ?? e.composant)
+                    .join(', ')}{' '}
+                  {engagementsSla.filter((e) => e.constate < e.dispo).length > 1
+                    ? 'sont passés'
+                    : 'est passé'}{' '}
+                  sous engagement sur la période. Nous n’attendons pas que vous le remarquiez :
+                  l’avoir correspondant est calculé automatiquement et apparaît sur votre prochaine
+                  facture.
                 </Callout>
               )}
             </Card>
@@ -408,19 +476,21 @@ export default function Support() {
                   </tr>
                 </thead>
                 <tbody>
-                  {CREDITS_SLA.map((c) => (
+                  {creditsSla.map((c) => (
                     <tr key={`${c.periode}-${c.composant}`} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2 text-[12px] text-ink">{c.periode}</td>
-                      <td className="px-3 py-2 text-[12px] text-g-700">{c.composant}</td>
+                      <td className="px-3 py-2 text-[12px] text-g-700">
+                        {LIBELLE_COMPOSANT_SLA[c.composant] ?? c.composant}
+                      </td>
                       <td className="px-3 py-2">
                         <Badge tone="err" size="sm">
                           {pct(c.dispoConstatee, 2)}
                         </Badge>
                       </td>
-                      <td className="tnum px-3 py-2 text-[12px] text-g-700">
+                      <td className="tnum px-3 py-2 text-[11.5px] text-g-700">
                         {pct(c.engagement, 2)}
                       </td>
-                      <td className="tnum px-3 py-2 text-[13px] font-bold text-ok">
+                      <td className="tnum px-3 py-2 text-[12.5px] font-bold text-ok">
                         {money(c.credit)}
                       </td>
                       <td className="px-3 py-2">
@@ -434,7 +504,7 @@ export default function Support() {
               </table>
             </div>
             <div className="border-t border-g-100 px-4 py-3">
-              <p className="text-[12px] leading-relaxed text-g-500">
+              <p className="text-[11.5px] leading-relaxed text-g-500">
                 L’avoir est proportionnel à l’écart entre l’engagement et le constaté, appliqué sur la
                 part d’abonnement du composant concerné. Il vient en déduction de votre facture
                 suivante, sans démarche de votre part.
@@ -442,9 +512,11 @@ export default function Support() {
             </div>
           </Card>
 
-          <Callout ton="violet" titre="Avoir calculé sans réclamation de votre part">
-            Un engagement non tenu est constaté de notre côté et crédité sur la facture suivante. Vous
-            n’avez ni formulaire à remplir ni délai à respecter.
+          <Callout ton="violet" titre="Pourquoi nous calculons les avoirs nous-mêmes">
+            Beaucoup de fournisseurs exigent une réclamation écrite dans un délai court, en sachant
+            très bien que la plupart des clients ne la feront pas. Nous trouvons cette pratique
+            malhonnête : si nous ne tenons pas notre engagement, c’est à nous de le constater et de le
+            créditer.
           </Callout>
         </div>
       )}
@@ -458,7 +530,7 @@ export default function Support() {
                 type="button"
                 onClick={() => setTheme(t)}
                 className={cn(
-                  'rounded-full border px-2.5 py-1 text-[12px] font-semibold transition-colors',
+                  'rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition-colors',
                   theme === t
                     ? 'border-p-700 bg-p-700 text-white'
                     : 'border-g-300 text-g-700 hover:border-p-400',
@@ -570,8 +642,8 @@ export default function Support() {
                       {i + 1}
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-[13px] font-semibold text-ink">{x.t}</span>
-                      <span className="block text-[12px] leading-relaxed text-g-500">{x.d}</span>
+                      <span className="block text-[12.5px] font-semibold text-ink">{x.t}</span>
+                      <span className="block text-[11.5px] leading-relaxed text-g-500">{x.d}</span>
                     </span>
                   </li>
                 ))}
@@ -606,7 +678,7 @@ export default function Support() {
                     <Badge tone={TON_GRAVITE[x.g]} dot size="sm">
                       {LIBELLE_GRAVITE[x.g]}
                     </Badge>
-                    <p className="mt-1.5 text-[12px] leading-relaxed text-g-700">{x.d}</p>
+                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-g-700">{x.d}</p>
                   </div>
                 ))}
               </div>
@@ -643,6 +715,13 @@ export default function Support() {
                   titre: 'Ticket ouvert',
                   detail:
                     'Les métriques, journaux et l’emplacement des ressources sélectionnées ont été joints automatiquement.',
+                  appel: () =>
+                    creerRessource('/support/tickets', {
+                      sujet,
+                      gravite,
+                      contenu: description,
+                      ressourcesLiees: ressource ? [ressource] : [],
+                    }),
                   effet: () =>
                     collection.creer({
                       id: collection.identifiant('tck'),
@@ -664,6 +743,7 @@ export default function Support() {
                         },
                       ],
                     }),
+                  effetFinal: () => collection.recharger(),
                 })
                 setSujet('')
                 setDescription('')

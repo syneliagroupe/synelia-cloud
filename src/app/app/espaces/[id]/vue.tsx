@@ -5,20 +5,33 @@ import { useState } from 'react'
 import { Container, Link2, Plus, Server, Settings2, TrendingUp, Unlink } from 'lucide-react'
 import { cn, seededSeries, trendSeries } from '@/lib/utils'
 import { dateCourte, dateHeure, goHumain, money, num, pct, toHumain } from '@/lib/format'
-import { SITE_LABEL, type EspaceCloud, type K8sCluster, type VM, type Volume } from '@/lib/types'
 import {
-  APPLICATIONS,
+  SITE_LABEL,
+  type BackupPlan,
+  type ServiceProjet,
+  type EspaceCloud,
+  type K8sCluster,
+  type Membership,
+  type Network,
+  type Offer,
+  type PublicIP,
+  type RestorePoint,
+  type VM,
+  type Volume,
+} from '@/lib/types'
+import {
   BACKUP_PLANS,
   ESPACES,
   EVENEMENTS_SUPERVISION,
   K8S_CLUSTERS,
   MEMBERSHIPS,
+  NETWORKS,
   OFFRES,
+  PUBLIC_IPS,
   RESTORE_POINTS,
+  SERVICES_PROJET,
   VMS,
   VOLUMES,
-  ipsDeLEspace,
-  reseauxDeLEspace,
   userById,
   hrefDuService,
 } from '@/lib/mock'
@@ -33,6 +46,7 @@ import { EventList, GrilleSparkCharts } from '@/components/business/observabilit
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
+import { modifierRessource, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'apercu', label: 'Vue d’ensemble' },
@@ -50,14 +64,51 @@ export function VueEspace({ id }: { id: string }) {
   const parc = useCollection<VM>('vms', VMS)
   const disques = useCollection<Volume>('volumes', VOLUMES)
   const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  // Le catalogue réel prime sur la graine : un tarif changé côté
+  // /admin/catalogue doit se voir ici, pas seulement dans l'admin.
+  const offresReelles = useCollection<Offer>('offres', OFFRES)
+  // Même collections que `/app/reseau`, `/app/membres` et `/app/sauvegarde` :
+  // avant ce correctif, ces trois onglets lisaient les graines directement
+  // (`reseauxDeLEspace`/`ipsDeLEspace`, `MEMBERSHIPS`, `BACKUP_PLANS`,
+  // `RESTORE_POINTS`) sans jamais passer par l'atelier, donc en mode API la
+  // fiche d'un Espace affichait des réseaux/IP/membres/plans fabriqués au lieu
+  // des vraies collections déjà branchées ailleurs.
+  const reseauxCollection = useCollection<Network>('reseaux', NETWORKS)
+  const ipsCollection = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
+  const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
+  const pointsRestauration = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
+  const services = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
   const [onglet, setOnglet] = useState('apercu')
 
-  const espace = espaces.items.find((e) => e.id === id)!
+  const espace = espaces.items.find((e) => e.id === id)
   const vms = parc.items.filter((v) => v.espaceId === id)
   const clusters = grappes.items.filter((c) => c.espaceId === id)
   const volumes = disques.items.filter((v) => v.espaceId === id)
-  const reseaux = reseauxDeLEspace(id)
-  const ips = ipsDeLEspace(id)
+  const reseaux = reseauxCollection.items.filter((n) => n.espaceId === id)
+  const ips = ipsCollection.items.filter((i) => i.espaceId === id)
+
+  // Identifiant inconnu (lien direct, espace supprimé) : la page le dit au
+  // lieu de planter sur `espace.code`.
+  if (!espace) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          fil={[
+            { label: 'Espace client', href: '/app' },
+            { label: 'Espaces Cloud', href: '/app/espaces' },
+            { label: 'Introuvable' },
+          ]}
+          titre="Espace introuvable"
+        />
+        <EmptyState
+          titre="Cet Espace Cloud n’existe pas ou plus"
+          phrase="Il a peut-être été supprimé, ou vous avez suivi un lien vers une autre organisation."
+          action={{ libelle: 'Retour aux espaces', href: '/app/espaces' }}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -99,15 +150,26 @@ export function VueEspace({ id }: { id: string }) {
               operation={(v) => ({
                 titre: `Capacité de ${espace.code} étendue`,
                 detail: `${v.vcpu} vCPU · ${v.ram} Go · ${v.stockage} To`,
+                appel: () =>
+                  requete(`/espaces/${encodeURIComponent(espace.id)}/quota`, {
+                    methode: 'PUT',
+                    corps: {
+                      vcpu: Number(v.vcpu),
+                      ramGo: Number(v.ram),
+                      stockageTo: Number(v.stockage),
+                    },
+                  }),
                 job: { workflow: 'espace.extend', cible: espace.code },
-                effetFinal: () =>
+                effetFinal: () => {
                   espaces.modifier(espace.id, {
                     quota: {
                       vcpu: Number(v.vcpu),
                       ramGo: Number(v.ram),
                       stockageTo: Number(v.stockage),
                     },
-                  }),
+                  })
+                  espaces.recharger()
+                },
               })}
             />
             <BoutonFormulaire
@@ -123,7 +185,7 @@ export function VueEspace({ id }: { id: string }) {
                   id: 'offre',
                   label: 'Offre',
                   type: 'select',
-                  options: OFFRES.filter((o) => o.categorie === 'espace_cloud').map((o) => ({
+                  options: offresReelles.items.filter((o) => o.categorie === 'espace_cloud').map((o) => ({
                     value: o.id,
                     label: `${o.nom} · ${o.specs}`,
                   })),
@@ -132,10 +194,13 @@ export function VueEspace({ id }: { id: string }) {
               valeursDepart={{ offre: espace.offerId }}
               libelleValider="Changer d’offre"
               operation={(v) => {
-                const offre = OFFRES.find((o) => o.id === v.offre)
+                const offre = offresReelles.items.find((o) => o.id === v.offre)
                 return {
                   titre: `Offre de ${espace.code} changée`,
                   detail: offre ? `${offre.nom} · effet à la prochaine période` : undefined,
+                  // `offerId` ne fait pas partie du contrat : seul le quota
+                  // se règle côté backend, le changement d’offre reste local
+                  // en attendant (aucun appel, aucun job simulé en mode API).
                   effet: () =>
                     offre
                       ? espaces.modifier(espace.id, {
@@ -345,18 +410,21 @@ export function VueEspace({ id }: { id: string }) {
                               id: 'application',
                               label: 'Application',
                               type: 'select',
-                              options: APPLICATIONS.map((a) => ({ value: a.id, label: a.nom })),
+                              options: services.items
+                                .filter((s) => s.appId)
+                                .map((s) => ({ value: s.appId!, label: s.nom })),
                             },
                           ]}
                           libelleValider="Rattacher"
                           operation={(f) => {
-                            const app = APPLICATIONS.find((a) => a.id === f.application)
+                            const appId = String(f.application)
+                            const svc = services.items.find((s) => s.appId === appId)
                             return {
-                              titre: `${v.nom} rattachée à ${app?.nom ?? f.application}`,
+                              titre: `${v.nom} rattachée à ${svc?.nom ?? appId}`,
                               effet: () =>
                                 parc.modifier(v.id, {
-                                  applicationId: app?.id,
-                                  applicationNom: app?.nom,
+                                  applicationId: appId,
+                                  applicationNom: svc?.nom,
                                 }),
                             }
                           }}
@@ -442,15 +510,21 @@ export function VueEspace({ id }: { id: string }) {
                               id: 'application',
                               label: 'Application',
                               type: 'select',
-                              options: APPLICATIONS.map((a) => ({ value: a.id, label: a.nom })),
+                              options: services.items
+                                .filter((s) => s.appId)
+                                .map((s) => ({ value: s.appId!, label: s.nom })),
                             },
                           ]}
                           libelleValider="Rattacher"
-                          operation={(f) => ({
-                            titre: `${c.nom} rattaché à ${f.application}`,
-                            effet: () =>
-                              grappes.modifier(c.id, { applicationId: String(f.application) }),
-                          })}
+                          operation={(f) => {
+                            const appId = String(f.application)
+                            const svc = services.items.find((s) => s.appId === appId)
+                            return {
+                              titre: `${c.nom} rattaché à ${svc?.nom ?? appId}`,
+                              effet: () =>
+                                grappes.modifier(c.id, { applicationId: appId }),
+                            }
+                          }}
                         />
                       )}
                     </span>
@@ -735,7 +809,7 @@ export function VueEspace({ id }: { id: string }) {
             />
             <StatTile
               libelle="Points de restauration"
-              valeur={RESTORE_POINTS.filter((p) =>
+              valeur={pointsRestauration.items.filter((p) =>
                 vms.some((v) => v.id === p.resourceId),
               ).length}
             />
@@ -757,7 +831,7 @@ export function VueEspace({ id }: { id: string }) {
               }
             />
             <div className="space-y-2">
-              {BACKUP_PLANS.filter((p) => vms.some((v) => v.backupPlanId === p.id)).map((p) => (
+              {plansSauvegarde.items.filter((p) => vms.some((v) => v.backupPlanId === p.id)).map((p) => (
                 <div
                   key={p.id}
                   className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
@@ -863,7 +937,7 @@ export function VueEspace({ id }: { id: string }) {
             }
           />
           <ul className="space-y-2">
-            {MEMBERSHIPS.filter(
+            {adhesions.items.filter(
               (m) =>
                 (m.scopeType === 'espace' && m.scopeId === id) || m.scopeType === 'org',
             ).map((m) => {
@@ -898,7 +972,7 @@ export function VueEspace({ id }: { id: string }) {
           <Callout ton="info" className="mt-3.5" titre="Portée des rôles">
             Un rôle de portée espace ne s’applique qu’à cet espace. Un rôle de portée organisation
             s’applique à tous les espaces. La matrice complète des droits est consultable dans
-            Utilisateurs & rôles.
+            Membres & rôles.
           </Callout>
         </Card>
       )}

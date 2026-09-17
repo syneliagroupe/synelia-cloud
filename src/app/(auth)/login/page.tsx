@@ -4,8 +4,13 @@ import { ArrowRight, Building2, KeyRound, Mail } from 'lucide-react'
 import { ButtonLink } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/field'
 import { Callout } from '@/components/composition/card'
+import { FormulaireConnexionApi } from './formulaire-connexion'
 
 export const metadata: Metadata = { title: 'Se connecter' }
+
+// Rendu côté serveur à partir de la même variable que `estActif()` : le
+// premier HTML montre déjà le bon parcours, sans bascule à l’hydratation.
+const API_ACTIVE = !!process.env.NEXT_PUBLIC_API_URL
 
 export default function Connexion() {
   return (
@@ -18,6 +23,9 @@ export default function Connexion() {
         </p>
       </div>
 
+      {API_ACTIVE ? (
+        <FormulaireConnexionApi />
+      ) : (
       <div className="rounded-[10px] border border-g-300 bg-white p-5">
         <div className="flex items-center gap-2">
           <Mail size={15} className="text-p-700" />
@@ -35,7 +43,12 @@ export default function Connexion() {
           Vous serez redirigé vers notre fournisseur d’identité pour saisir votre mot de passe. Ce
           portail n’affiche jamais de champ de mot de passe et n’en conserve aucun.
         </p>
+        <p className="mt-2.5 text-[11.5px] leading-relaxed text-g-500">
+          Vous serez redirigé vers notre fournisseur d’identité pour saisir votre mot de passe. Ce
+          portail n’affiche jamais de champ de mot de passe et n’en conserve aucun.
+        </p>
       </div>
+      )}
 
       <div className="flex items-center gap-3">
         <span className="h-px flex-1 bg-g-300" />

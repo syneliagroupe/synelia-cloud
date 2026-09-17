@@ -1,7 +1,14 @@
 'use client'
 
 import Link from 'next/link'
-import { AlertTriangle, Building2, ShieldAlert } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Building2,
+  Server,
+  ShieldAlert,
+  TicketCheck,
+} from 'lucide-react'
 import { cn, seededSeries, trendSeries } from '@/lib/utils'
 import { dateHeure, goHumain, money, num, pct, relatif } from '@/lib/format'
 import {
@@ -10,11 +17,13 @@ import {
   IMPAYES,
   INCIDENTS,
   JOBS_PLATEFORME,
+  libellePlan,
   ORGANISATIONS,
   SYNTHESE_PLATEFORME,
   TICKETS_PLATEFORME,
   TOP_ORGANISATIONS,
 } from '@/lib/mock'
+import type { Impaye } from '@/lib/mock'
 import { BACKEND_LABEL, SITE_COURT } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -24,39 +33,76 @@ import { EventList } from '@/components/business/observabilite'
 import { BackendGauge } from '@/components/business/infra'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction } from '@/components/app/actions'
-import type { ProvisioningJob } from '@/lib/types'
+import type { Backend, Incident, ProvisioningJob, Ticket } from '@/lib/types'
+import { useLectureDegradable } from '@/lib/api/degradable'
+import { estActif } from '@/lib/api/client'
+import { useMaintenant } from '@/components/app/contexte'
+
+/** `GET /admin/tableau-de-bord` : même forme que `SYNTHESE_PLATEFORME`. */
+interface SynthesePlateformeDistante {
+  vcpuTotal: number
+  vcpuUtilise: number
+  ramTotalGo: number
+  stockageTotalTo: number
+  tenantsActifs: number
+  espacesTotal: number
+  projetsTotal: number
+  backendsEnLigne: number
+  backendsTotal: number
+  accesRefuses24h: number
+  jobsEnEchec: number
+  ticketsSlaRisque: number
+  caMensuel: number
+}
 
 export default function VuePlateforme() {
+  const maintenant = useMaintenant()
   // Le journal vit dans l'atelier : les actions faites pendant la session s'y
   // ajoutent, refus compris. Sans atelier touché, il retombe sur la graine.
   const { journal: AUDIT, reprendreJob } = useAtelier()
+  const api = estActif()
 
+  // Socles, incidents, tickets, impayés et provisionnements ont chacun un
+  // vrai backend admin (`/admin/backends`, `/admin/statut/incidents`,
+  // `/admin/tickets`, `/admin/facturation/impayes`, `/admin/travaux`) : même
+  // mécanisme que le reste de la plateforme. Les agrégats de la bande 1
+  // (vCPU, mémoire, stockage, CA, organisations actives) viennent de
+  // `/admin/tableau-de-bord`, qui calcule exactement la forme de
+  // `SYNTHESE_PLATEFORME` côté backend.
   const jobs = useCollection<ProvisioningJob>('jobs-plateforme', JOBS_PLATEFORME)
-  const enSortie = BACKENDS.filter((b) => b.enSortie?.actif)
-  const satures = BACKENDS.filter((b) => (b.saturation?.j30 ?? 0) > 85)
-  const incidentsOuverts = INCIDENTS.filter((i) => i.statut !== 'resolu')
-  const jobsEchec = jobs.items.filter((j) => j.statut === 'failed' || j.statut === 'rolled_back')
-  const slaRisque = TICKETS_PLATEFORME.filter(
+  const backends = useCollection<Backend>('backends', BACKENDS)
+  const incidents = useCollection<Incident>('incidents', INCIDENTS)
+  const ticketsPlateforme = useCollection<Ticket>('tickets-plateforme', TICKETS_PLATEFORME)
+  const impayes = useCollection<Impaye>('impayes', IMPAYES)
+  const { donnees: syntheseDistante } = useLectureDegradable<SynthesePlateformeDistante>(
+    '/admin/tableau-de-bord',
+  )
+  const synthese = syntheseDistante ?? SYNTHESE_PLATEFORME
+
+  const enSortie = backends.items.filter((b) => b.enSortie?.actif)
+  const satures = backends.items.filter((b) => (b.saturation?.j30 ?? 0) > 85)
+  const incidentsOuverts = incidents.items.filter((i) => i.statut !== 'resolu')
+  const jobsEchec = jobs.items.filter((j) => j.statut === 'failed')
+  const slaRisque = ticketsPlateforme.items.filter(
     (t) => (t.slaRestantMin ?? 9999) < 120 && !['resolu', 'ferme'].includes(t.statut),
   )
-  const impayesTotal = IMPAYES.reduce((a, i) => a + i.montant, 0)
+  const impayesTotal = impayes.items.reduce((a, i) => a + i.montant, 0)
 
-  const vcpuPct = Math.round(
-    (SYNTHESE_PLATEFORME.vcpuUtilise / SYNTHESE_PLATEFORME.vcpuTotal) * 100,
-  )
+  const vcpuPct = Math.round((synthese.vcpuUtilise / synthese.vcpuTotal) * 100)
 
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin' }]}
         titre="Vue plateforme"
         sousTitre="L’état réel de la plateforme, sans arrondi favorable : capacité par socle technique, incidents en cours, provisionnements en échec, engagements de service en risque et impayés. Ce qui demande une décision est en haut."
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {SYNTHESE_PLATEFORME.tenantsActifs} organisations actives
+              {synthese.tenantsActifs} organisations actives
             </Badge>
             <Badge tone="neutral" size="sm">
-              {SYNTHESE_PLATEFORME.backendsEnLigne}/{SYNTHESE_PLATEFORME.backendsTotal} socles en ligne
+              {synthese.backendsEnLigne}/{synthese.backendsTotal} socles en ligne
             </Badge>
             <Badge tone="neutral" size="sm">
               Données à {dateHeure('2026-08-19T15:20:00Z')}
@@ -107,25 +153,25 @@ export default function VuePlateforme() {
           libelle="Processeur alloué"
           valeur={pct(vcpuPct)}
           ton={vcpuPct > 80 ? 'warn' : 'violet'}
-          detail={`${num(SYNTHESE_PLATEFORME.vcpuUtilise)} / ${num(SYNTHESE_PLATEFORME.vcpuTotal)} vCPU`}
+          detail={`${num(synthese.vcpuUtilise)} / ${num(synthese.vcpuTotal)} vCPU`}
           serie={trendSeries('plateforme-vcpu', 30, vcpuPct - 9, vcpuPct)}
         />
         <StatTile
           libelle="Mémoire installée"
-          valeur={`${num(Math.round(SYNTHESE_PLATEFORME.ramTotalGo / 1024))} Tio`}
-          detail={`${num(SYNTHESE_PLATEFORME.ramTotalGo)} Go sur ${SYNTHESE_PLATEFORME.backendsTotal} socles`}
+          valeur={`${num(Math.round(synthese.ramTotalGo / 1024))} Tio`}
+          detail={`${num(synthese.ramTotalGo)} Go sur ${synthese.backendsTotal} socles`}
         />
         <StatTile
           libelle="Stockage installé"
-          valeur={`${num(SYNTHESE_PLATEFORME.stockageTotalTo)} To`}
+          valeur={`${num(synthese.stockageTotalTo)} To`}
           detail="Bloc et objet confondus"
         />
         <StatTile
           libelle="Chiffre d’affaires mensuel"
-          valeur={money(SYNTHESE_PLATEFORME.caMensuel)}
+          valeur={money(synthese.caMensuel)}
           ton="ok"
-          detail={`${SYNTHESE_PLATEFORME.tenantsActifs} organisations facturées`}
-          serie={trendSeries('plateforme-ca', 12, SYNTHESE_PLATEFORME.caMensuel * 0.72, SYNTHESE_PLATEFORME.caMensuel)}
+          detail={`${synthese.tenantsActifs} organisations facturées`}
+          serie={trendSeries('plateforme-ca', 12, synthese.caMensuel * 0.72, synthese.caMensuel)}
         />
         <StatTile
           libelle="Provisionnements en échec"
@@ -153,7 +199,7 @@ export default function VuePlateforme() {
             }
           />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {BACKENDS.map((b) => (
+            {backends.items.map((b) => (
               <BackendGauge key={b.id} backend={b} />
             ))}
           </div>
@@ -193,7 +239,7 @@ export default function VuePlateforme() {
             />
             <div className="space-y-3">
               {(['ABJ', 'GBM'] as const).map((s) => {
-                const socles = BACKENDS.filter((b) => b.site === s)
+                const socles = backends.items.filter((b) => b.site === s)
                 if (socles.length === 0) return null
                 const vcpu = socles.reduce((a, b) => a + b.capacite.vcpu, 0)
                 const utilise = Math.round(
@@ -224,7 +270,11 @@ export default function VuePlateforme() {
           <div className="border-b border-g-100 px-4 py-3.5">
             <CardHeader
               titre="Organisations les plus consommatrices"
-              sousTitre="Par processeur alloué, avec la croissance sur trente jours."
+              sousTitre={
+                api
+                  ? 'Démonstration — pas encore une lecture réelle, y compris la colonne CA mensuel (qui ne reflète pas le chiffre d’affaires ci-dessus)'
+                  : 'Par processeur alloué. Une organisation qui croît vite mérite un contact commercial avant qu’elle ne se heurte à un quota.'
+              }
               className="mb-0"
               actions={
                 <ButtonLink size="sm" variant="ghost" href="/admin/organisations">
@@ -247,24 +297,30 @@ export default function VuePlateforme() {
                 </tr>
               </thead>
               <tbody>
+                {/* `GET /organisations` (collection `organisations`, déjà câblée sur
+                    `/admin/organisations`) liste bien les organisations réelles, mais
+                    sans consommation vCPU ni CA par organisation — le classement
+                    « plus consommatrices » n'a pas d'équivalent réel à ce jour et
+                    reste sur la graine plutôt que d'inventer un tri sur des champs
+                    absents de la réponse. */}
                 {TOP_ORGANISATIONS.map((o) => (
                   <tr key={o.id} className="border-b border-g-100 last:border-0">
                     <td className="px-3 py-2.5">
                       <Link
                         href={`/admin/organisations/${o.id}`}
-                        className="flex items-center gap-2 text-[13px] font-semibold text-ink hover:text-p-700"
+                        className="flex items-center gap-2 text-[12.5px] font-semibold text-ink hover:text-p-700"
                       >
                         <Building2 size={12} className="shrink-0 text-g-500" />
                         {o.nom}
                       </Link>
-                      <span className="block pl-[20px] text-[11px] text-g-500">
+                      <span className="block pl-[20px] text-[10.5px] text-g-500">
                         {o.pays}
                         {o.secteur ? ` · ${o.secteur}` : ''}
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
                       <Badge tone="neutral" size="sm">
-                        {o.tenantPlan ?? 'Standard'}
+                        {libellePlan(o.tenantPlan ?? 'Standard')}
                       </Badge>
                     </td>
                     <td className="tnum px-3 py-2.5 text-[12px] text-g-700">{o.espaces ?? 0}</td>
@@ -316,19 +372,19 @@ export default function VuePlateforme() {
               }
             />
             <div className="space-y-2">
-              {IMPAYES.map((i) => (
+              {impayes.items.map((i) => (
                 <div
                   key={i.facture}
                   className={cn(
                     'rounded-[6px] border px-3 py-2.5',
-                    i.retardJours > 60 ? 'border-err/40' : 'border-warn/40',
+                    i.retardJours > 60 ? 'border-err/40 bg-err-bg' : 'border-warn/40 bg-warn-bg',
                   )}
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+                    <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">
                       {i.org}
                     </span>
-                    <span className="tnum shrink-0 text-[13px] font-bold text-ink">
+                    <span className="tnum shrink-0 text-[12.5px] font-bold text-ink">
                       {money(i.montant)}
                     </span>
                   </div>
@@ -356,19 +412,19 @@ export default function VuePlateforme() {
             ) : (
               <div className="space-y-2">
                 {jobsEchec.map((j) => (
-                  <div key={j.id} className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                    <p className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                  <div key={j.id} className="rounded-[6px] border border-err/40 bg-err-bg px-3 py-2.5">
+                    <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                       <AlertTriangle size={12} className="shrink-0 text-err" />
                       {j.type}
                     </p>
-                    <p className="mt-0.5 font-mono text-[11px] text-g-700">{j.label}</p>
+                    <p className="mt-0.5 font-mono text-[10.5px] text-g-700">{j.label}</p>
                     <p className="mt-1 text-[11px] leading-relaxed text-g-700">
                       {j.erreur?.message ??
                         j.taches.find((t) => t.statut === 'failed')?.message ??
                         'Échec sans message détaillé'}
                     </p>
                     {j.erreur?.correlationId && (
-                      <p className="mt-1 font-mono text-[11px] text-g-500">
+                      <p className="mt-1 font-mono text-[10px] text-g-500">
                         {j.erreur.correlationId}
                       </p>
                     )}
@@ -380,7 +436,7 @@ export default function VuePlateforme() {
                           ton: 'info',
                           titre: `Reprise de « ${j.label} »`,
                           detail: 'La séquence repart à l’étape qui a échoué, pas depuis le début.',
-                          effet: () => reprendreJob(j.id),
+                          effet: () => reprendreJob(j.id, 'jobs-plateforme', JOBS_PLATEFORME),
                         }}
                       />
                       <BoutonAction
@@ -452,19 +508,19 @@ export default function VuePlateforme() {
                 <Link
                   key={t.id}
                   href="/admin/tickets"
-                  className="block rounded-[6px] border border-g-300 px-3 py-2.5 transition-colors hover:border-p-400"
+                  className="block rounded-[6px] border border-warn/40 bg-warn-bg px-3 py-2.5 transition-colors hover:border-warn"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="min-w-0 truncate text-[12px] font-semibold text-ink">
                       {t.sujet}
                     </span>
-                    <span className="tnum shrink-0 text-[12px] font-bold text-err">
+                    <span className="tnum shrink-0 text-[11.5px] font-bold text-err">
                       {t.slaRestantMin} min
                     </span>
                   </div>
-                  <p className="mt-0.5 text-[11px] text-g-700">
+                  <p className="mt-0.5 text-[10.5px] text-g-700">
                     <span className="font-mono">{t.numero}</span> ·{' '}
-                    {t.assigneA ?? 'non assigné'} · {relatif(t.createdAt)}
+                    {t.assigneA ?? 'non assigné'} · {relatif(t.createdAt, maintenant)}
                   </p>
                 </Link>
               ))}
@@ -477,8 +533,8 @@ export default function VuePlateforme() {
             titre="Accès refusés (24 h)"
             sousTitre="Un refus signale un rôle mal calibré, ou une tentative."
             actions={
-              <Badge tone={SYNTHESE_PLATEFORME.accesRefuses24h > 0 ? 'warn' : 'ok'} size="sm">
-                {SYNTHESE_PLATEFORME.accesRefuses24h}
+              <Badge tone={synthese.accesRefuses24h > 0 ? 'warn' : 'ok'} size="sm">
+                {synthese.accesRefuses24h}
               </Badge>
             }
           />
@@ -491,9 +547,9 @@ export default function VuePlateforme() {
                     <ShieldAlert size={11} className="shrink-0 text-warn" />
                     {a.actor.nom}
                   </p>
-                  <p className="mt-0.5 font-mono text-[11px] text-p-700">{a.action}</p>
-                  <p className="mt-0.5 text-[11px] text-g-500">
-                    {a.scope.label} · {relatif(a.ts)}
+                  <p className="mt-0.5 font-mono text-[10.5px] text-p-700">{a.action}</p>
+                  <p className="mt-0.5 text-[10.5px] text-g-500">
+                    {a.scope.label} · {relatif(a.ts, maintenant)}
                   </p>
                 </div>
               ))}
@@ -507,29 +563,30 @@ export default function VuePlateforme() {
           <CardHeader
             titre="Charge du support"
             sousTitre="File courante, toutes organisations."
+            actions={<TicketCheck size={15} className="text-p-700" />}
           />
           <div className="space-y-3">
             {[
               {
                 l: 'Tickets ouverts',
-                v: TICKETS_PLATEFORME.filter((t) => !['resolu', 'ferme'].includes(t.statut)).length,
+                v: ticketsPlateforme.items.filter((t) => !['resolu', 'ferme'].includes(t.statut)).length,
                 t: 'violet' as const,
               },
               {
                 l: 'Critiques',
-                v: TICKETS_PLATEFORME.filter(
+                v: ticketsPlateforme.items.filter(
                   (t) => t.gravite === 'critique' && !['resolu', 'ferme'].includes(t.statut),
                 ).length,
                 t: 'err' as const,
               },
               {
                 l: 'En attente client',
-                v: TICKETS_PLATEFORME.filter((t) => t.statut === 'attente_client').length,
+                v: ticketsPlateforme.items.filter((t) => t.statut === 'attente_client').length,
                 t: 'warn' as const,
               },
               {
                 l: 'Non assignés',
-                v: TICKETS_PLATEFORME.filter((t) => !t.assigneA).length,
+                v: ticketsPlateforme.items.filter((t) => !t.assigneA).length,
                 t: 'warn' as const,
               },
             ].map((x) => (
@@ -546,7 +603,7 @@ export default function VuePlateforme() {
             {seededSeries('tickets-30j', 30, 2, 14).map((v, i) => (
               <span
                 key={i}
-                className="flex-1 rounded-t-sm bg-p-300"
+                className={cn('flex-1 rounded-t-sm', v > 11 ? 'bg-warn' : 'bg-p-300')}
                 style={{ height: `${6 + v * 4}px` }}
               />
             ))}
@@ -556,6 +613,13 @@ export default function VuePlateforme() {
           </ButtonLink>
         </Card>
       </div>
+
+      <Callout ton="violet" titre="Ce tableau de bord ne cache pas les mauvaises nouvelles">
+        Un socle en tension, un provisionnement en échec, un engagement en risque, un impayé : tout
+        est en haut de page, pas dans un onglet secondaire. Un tableau de bord d’exploitation qui
+        n’affiche que du vert ne sert à rien — il faut aller chercher l’information ailleurs, et
+        c’est précisément ce qui fait perdre du temps quand quelque chose va mal.
+      </Callout>
     </div>
   )
 }

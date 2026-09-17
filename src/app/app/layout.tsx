@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { AppProvider } from '@/components/app/contexte'
+import { AppProvider, GardeAuth } from '@/components/app/contexte'
 import { TopBar } from '@/components/app/topbar'
 import { ToastHost } from '@/components/app/toasts'
 import { Conteneur } from '@/components/app/conteneur'
@@ -13,6 +13,7 @@ export const metadata: Metadata = {
 export default function EspaceClientLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppProvider>
+      <GardeAuth />
       <div className="min-h-screen bg-white">
         <TopBar portee="client" />
         <main className="bg-g-050">

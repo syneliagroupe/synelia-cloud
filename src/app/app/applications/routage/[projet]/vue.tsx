@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useMemo } from 'react'
 import { Globe } from 'lucide-react'
 import { dateCourte } from '@/lib/format'
 import { SITE_LABEL, type Projet, type ServiceProjet } from '@/lib/types'
@@ -16,6 +17,7 @@ import { Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { useCollection } from '@/components/app/atelier'
+import { useServicesProjet } from '@/lib/api/services-projet'
 import { EnteteProjet, ProjetIntrouvable } from '@/components/business/projets'
 
 const ETAT_CERT = {
@@ -30,7 +32,13 @@ export function VueRoutage({ id }: { id: string }) {
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
 
   const projet = lesProjets.items.find((p) => p.id === id)
-  const services = lesServices.items.filter((x) => x.projetId === id)
+  // Avec l’API, la liste vient de `GET /projets/{id}/services` (route nichée,
+  // hors registre) ; en maquette, du filtre local.
+  const { distants: servicesDistants } = useServicesProjet(id)
+  const services = useMemo(
+    () => servicesDistants ?? lesServices.items.filter((x) => x.projetId === id),
+    [servicesDistants, lesServices.items, id],
+  )
 
   if (!projet) return <ProjetIntrouvable />
   const ids = new Set(services.map((s) => s.id))

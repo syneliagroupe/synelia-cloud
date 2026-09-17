@@ -9,8 +9,10 @@ import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
+import { useMaintenant } from '@/components/app/contexte'
 
 export default function BackupTousProjets() {
+  const maintenant = useMaintenant()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
   const proteges = lesServices.items.filter((s) => s.sauvegarde)
@@ -32,7 +34,7 @@ export default function BackupTousProjets() {
         fil={[
           { label: 'Espace client', href: '/app' },
           { label: 'Applications', href: '/app/applications' },
-          { label: 'Backup' },
+          { label: 'Sauvegardes' },
         ]}
         titre="Sauvegardes applicatives"
         sousTitre="Ce qui est protégé dans vos projets, et ce qui ne l’est pas. Choisissez un projet dans le panneau de gauche pour ses points de restauration et son bouton de restauration."
@@ -68,7 +70,7 @@ export default function BackupTousProjets() {
         />
         <StatTile
           libelle="Dernière exécution"
-          valeur={relatif(dernier)}
+          valeur={relatif(dernier, maintenant)}
           detail="tous projets confondus"
           ton="ok"
         />

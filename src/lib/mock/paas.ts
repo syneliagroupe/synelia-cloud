@@ -83,14 +83,14 @@ export const APPLICATIONS: Application[] = [
     id: 'app-ci',
     espaceId: 'ec-dba-01',
     nom: 'ci-runners',
-    source: 'canvas',
+    source: 'image',
     cible: 'vm',
     domainePrincipal: '—',
     sante: 'sain',
     stack: ['Docker', 'Docker Swarm', 'Prometheus'],
     dernierDeploiement: '2026-08-14T09:12:00Z',
     environnements: 1,
-    description: 'Runners CI/CD éphémères composés depuis le canvas.',
+    description: 'Runners CI/CD éphémères, image pré-construite.',
   },
 ]
 

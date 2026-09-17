@@ -1,0 +1,37 @@
+# Qualité — types, lint, tests unitaires, dérive du contrat.
+#
+# Pas de `build` ici : Vercel construit déjà chaque push (`vercel.yml`), le
+# doubler dans ce runner ne dirait rien de plus et coûterait le temps de
+# construction pour rien.
+#
+# La dérive du contrat (`bun run api:derive`) est informative par défaut : le
+# niveau 1 (clés en trop/manquantes entre `src/lib/types.ts` et
+# `docs/api/openapi.json`) est à zéro depuis la réconciliation du 2026-09-08
+# (`docs/PLAN-ARCHITECTURE-SUITE.md` §2.5), donc bloquant via `CONTRAT_STRICT=1`.
+# Le niveau 2 (assignabilité bidirectionnelle, plus bruyant sur les enums et
+# les optionnels) reste informatif — voir `docs/api/README.md`.
+
+name: Qualité
+
+on:
+  push:
+    branches: ['**']
+  pull_request: {}
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: '1.4.2' } # bun.lock v2 exige ≥ 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      # `bun run test`, pas `bun test` : le glob par défaut de bun matche aussi
+      # `tests/integration/*.spec.ts` (Playwright, backend réel dev01) — le
+      # script npm le borne à `src/`.
+      - run: bun run test
+      - run: bun run api:derive
+        env:
+          CONTRAT_STRICT: '1'

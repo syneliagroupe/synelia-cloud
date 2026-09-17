@@ -13,7 +13,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { money, num, relatif } from '@/lib/format'
-import type { Deployment, Projet, ServiceProjet } from '@/lib/types'
+import type { Deployment, DomaineApplicatif, Projet, ServiceProjet } from '@/lib/types'
 import {
   DEPLOIEMENTS,
   DOMAINES_APPLICATIFS,
@@ -29,26 +29,49 @@ import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
 import { StatutServiceBadge } from '@/components/business/projets'
 import { useCollection } from '@/components/app/atelier'
+import { useLectureDegradable } from '@/lib/api/degradable'
+import { useMaintenant } from '@/components/app/contexte'
+
+/**
+ * `GET /projets/synthese` : agrégats calculés côté backend sur l'organisation
+ * entière — exactement les chiffres que ce tableau de bord affiche. La liste
+ * détaillée des services, elle, reste sur la graine : le backend n'expose que
+ * `/projets/{id}/services` (par projet), pas de liste globale « tous
+ * services confondus » à interroger en une fois.
+ */
+interface SyntheseProjets {
+  projets: number
+  services: number
+  enEchec: number
+  domaines: number
+  domainesAVerifier: number
+  coutMensuel: number
+}
 
 export default function AccueilApplications() {
+  const maintenant = useMaintenant()
   // Le tableau de bord lit l'état de la session : un service créé ou arrêté
   // ailleurs doit se compter ici aussi.
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
   const lesDeploiements = useCollection<Deployment>('deploiements', DEPLOIEMENTS)
+  const lesDomaines = useCollection<DomaineApplicatif>('domaines-applicatifs', DOMAINES_APPLICATIFS)
+  const { donnees: syntheseDistante } = useLectureDegradable<SyntheseProjets>('/projets/synthese')
 
-  // Les agrégats figés du jeu de données seraient faux dès la première création.
+  // Les agrégats figés du jeu de données seraient faux dès la première
+  // création : `/projets/synthese` en sert la version réelle quand l'API est
+  // active ; sinon, calcul local à partir de la graine.
   const synthese = {
-    projets: lesProjets.items.length,
-    services: lesServices.items.length,
-    coutMensuel: lesServices.items.reduce((a, s) => a + s.coutMensuel, 0),
+    projets: syntheseDistante?.projets ?? lesProjets.items.length,
+    services: syntheseDistante?.services ?? lesServices.items.length,
+    coutMensuel: syntheseDistante?.coutMensuel ?? lesServices.items.reduce((a, s) => a + s.coutMensuel, 0),
   }
 
   const sauvegardes = lesServices.items.filter((s) => s.sauvegarde)
   const enEchec = lesServices.items.filter((s) => s.statut === 'failed')
   const degrades = lesServices.items.filter((s) => s.statut === 'degraded')
   const deploiementsRates = lesDeploiements.items.filter((d) => d.statut === 'failed')
-  const domainesAVerifier = DOMAINES_APPLICATIFS.filter(
+  const domainesAVerifier = lesDomaines.items.filter(
     (d) => d.verification && d.verification.etat !== 'ok',
   )
   const secrets = lesProjets.items.flatMap((p) => p.variables.filter((v) => v.secret))
@@ -58,7 +81,7 @@ export default function AccueilApplications() {
   const aSurveiller = [
     ...enEchec.map((s) => ({
       quoi: `${s.nom} — en échec`,
-      detail: `${s.environnement} · le service ne répond plus depuis ${relatif(s.derniereMaj)}.`,
+      detail: `${s.environnement} · le service ne répond plus depuis ${relatif(s.derniereMaj, maintenant)}.`,
       href: `/app/applications/projets/${s.projetId}/${s.id}`,
       rang: 0,
     })),
@@ -108,7 +131,7 @@ export default function AccueilApplications() {
       detail: 'services hors de leurs seuils',
     },
     {
-      nom: 'Backup',
+      nom: 'Sauvegardes',
       href: '/app/applications/backup',
       icone: <HardDrive size={16} />,
       valeur: sauvegardes.length,
@@ -118,7 +141,7 @@ export default function AccueilApplications() {
       nom: 'Domaines & routage',
       href: '/app/applications/routage',
       icone: <Globe size={16} />,
-      valeur: DOMAINES_APPLICATIFS.length,
+      valeur: lesDomaines.items.length,
       detail: `${domainesAVerifier.length} à vérifier`,
     },
     {
@@ -313,7 +336,7 @@ export default function AccueilApplications() {
                         {appById(d.appId)?.nom ?? d.appId} {d.version}
                       </span>
                       <span className="block text-[11px] text-g-500">
-                        {relatif(d.startedAt)} · {d.auteur}
+                        {relatif(d.startedAt, maintenant)} · {d.auteur}
                       </span>
                     </span>
                     <Badge

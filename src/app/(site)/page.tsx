@@ -185,18 +185,12 @@ export default function Accueil() {
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link
-                  href="/offres/espace-cloud"
-                  className="inline-flex items-center gap-2 rounded-full bg-p-700 px-7 py-4 text-[15px] font-bold text-creme transition-transform hover:-translate-y-1"
-                >
-                  Commencer <ArrowRight size={17} />
-                </Link>
-                <Link
-                  href="/simulateur"
-                  className="inline-flex items-center gap-2 rounded-full border-2 border-encre-2/15 px-7 py-4 text-[15px] font-bold text-encre-2 transition-colors hover:border-encre-2/40"
-                >
+                <ButtonLink href="/offres/espace-cloud" size="xl" iconAfter={<ArrowRight size={17} />}>
+                  Commencer
+                </ButtonLink>
+                <ButtonLink href="/simulateur" size="xl" variant="secondary">
                   Estimer mon budget
-                </Link>
+                </ButtonLink>
               </div>
 
               <dl className="mt-10 flex flex-wrap gap-x-10 gap-y-4">

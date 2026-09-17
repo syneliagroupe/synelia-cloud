@@ -2,9 +2,11 @@
 
 import { BASES_CONNAISSANCE } from '@/lib/mock'
 import type { Tone } from '@/components/ui/badge'
+import type { BaseConnaissance } from '@/lib/types'
 import { num } from '@/lib/format'
 import { CadreSection } from '@/components/app/cadre-section'
 import { useEspace } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
 const TON: Record<string, Tone> = {
   a_jour: 'ok',
@@ -23,7 +25,8 @@ const ETAT: Record<string, string> = {
 /** Panneau de la section — les bases de connaissances de l'Espace. */
 export function CadreConnaissances({ children }: { children: React.ReactNode }) {
   const espace = useEspace()
-  const entrees = BASES_CONNAISSANCE.filter((b) => b.espaceId === espace.id).map((b) => ({
+  const basesCol = useCollection<BaseConnaissance>('connaissances-ia', BASES_CONNAISSANCE)
+  const entrees = basesCol.items.filter((b) => b.espaceId === espace.id).map((b) => ({
     id: b.id,
     nom: b.nom,
     sousTitre: `${num(b.documents)} documents`,
@@ -38,7 +41,6 @@ export function CadreConnaissances({ children }: { children: React.ReactNode }) 
       titre="Bases"
       base="/app/ia/connaissances"
       entrees={entrees}
-      actionPrincipale={{ libelle: 'Créer une base', href: '/app/ia/connaissances' }}
       placeholderRecherche="Rechercher une base, une source…"
       compteur={(visibles, total) =>
         visibles === total ? `${total} base${total > 1 ? 's' : ''}` : `${visibles} sur ${total}`

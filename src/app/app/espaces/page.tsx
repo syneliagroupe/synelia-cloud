@@ -13,6 +13,7 @@ import { HealthBadge, QuotaBar, StatTile } from '@/components/composition/metric
 import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 
 const colonnesEspaces = (vms: VM[]): Array<Colonne<EspaceCloud>> => [
   {
@@ -111,7 +112,7 @@ const colonnesEspaces = (vms: VM[]): Array<Colonne<EspaceCloud>> => [
     rendu: (e) => (
       <Link
         href={`/app/espaces/${e.id}`}
-        className="text-[12px] font-semibold text-p-700 hover:underline"
+        className="text-[12px] font-semibold text-p-700 hover:text-m-600"
       >
         Ouvrir →
       </Link>
@@ -123,13 +124,19 @@ export default function ListeEspaces() {
   const { autorise, refus } = useApp()
   const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const parc = useCollection<VM>('vms', VMS)
-
-  // Les tuiles se somment depuis les espaces affichés, pas depuis la synthèse
-  // figée : créer un Espace de 48 vCPU sans bouger le plafond annoncé juste
-  // au-dessus de la liste se voit tout de suite.
-  const total = (cle: 'vcpu' | 'ramGo' | 'stockageTo', champ: 'usage' | 'quota') =>
-    Math.round(espaces.items.reduce((a, e) => a + e[champ][cle], 0) * 10) / 10
-  const sites = new Set(espaces.items.map((e) => e.site)).size
+  // Somme des vrais Espaces Cloud plutôt que `SYNTHESE_CLIENT` : sinon les
+  // trois tuiles de quota restent fictives à côté d'un compte « Espaces
+  // Cloud » réel, comme sur le tableau de bord (§ même motif).
+  const quota = {
+    vcpu: espaces.items.reduce((a, e) => a + e.quota.vcpu, 0),
+    ramGo: espaces.items.reduce((a, e) => a + e.quota.ramGo, 0),
+    stockageTo: Math.round(espaces.items.reduce((a, e) => a + e.quota.stockageTo, 0) * 10) / 10,
+  }
+  const usage = {
+    vcpu: espaces.items.reduce((a, e) => a + e.usage.vcpu, 0),
+    ramGo: espaces.items.reduce((a, e) => a + e.usage.ramGo, 0),
+    stockageTo: Math.round(espaces.items.reduce((a, e) => a + e.usage.stockageTo, 0) * 10) / 10,
+  }
 
   return (
     <div className="space-y-6">
@@ -147,25 +154,21 @@ export default function ListeEspaces() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile
-          libelle="Espaces Cloud"
-          valeur={espaces.items.length}
-          detail={`Répartis sur ${sites} site${sites > 1 ? 's' : ''}`}
-        />
+        <StatTile libelle="Espaces Cloud" valeur={espaces.items.length} detail="Répartis sur 2 sites" />
         <StatTile
           libelle="vCPU consommés"
-          valeur={`${total('vcpu', 'usage')}/${total('vcpu', 'quota')}`}
-          detail={pct(Math.round((total('vcpu', 'usage') / total('vcpu', 'quota')) * 100))}
+          valeur={`${usage.vcpu}/${quota.vcpu}`}
+          detail={quota.vcpu > 0 ? pct(Math.round((usage.vcpu / quota.vcpu) * 100)) : '—'}
         />
         <StatTile
           libelle="Mémoire consommée"
-          valeur={`${num(total('ramGo', 'usage'))}/${num(total('ramGo', 'quota'))}`}
+          valeur={`${num(usage.ramGo)}/${num(quota.ramGo)}`}
           unite="Go"
-          detail={pct(Math.round((total('ramGo', 'usage') / total('ramGo', 'quota')) * 100))}
+          detail={quota.ramGo > 0 ? pct(Math.round((usage.ramGo / quota.ramGo) * 100)) : '—'}
         />
         <StatTile
           libelle="Stockage consommé"
-          valeur={`${total('stockageTo', 'usage')}/${total('stockageTo', 'quota')}`}
+          valeur={`${usage.stockageTo}/${quota.stockageTo}`}
           unite="To"
           ton="warn"
           detail="Premier facteur limitant"
@@ -216,11 +219,13 @@ export default function ListeEspaces() {
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Callout ton="warn" titre="EC-DBA-01 approche de son plafond de stockage">
-          7,1 To utilisés sur 8 To, soit 89 %. Le devis DEV-0418 propose une extension à 12 To
-          accompagnée de 16 vCPU supplémentaires, applicable à chaud et sans interruption. Il est en
-          attente de validation dans votre espace facturation.
-        </Callout>
+        {!estActif() && (
+          <Callout ton="warn" titre="EC-DBA-01 approche de son plafond de stockage">
+            7,1 To utilisés sur 8 To, soit 89 %. Le devis DEV-0418 propose une extension à 12 To
+            accompagnée de 16 vCPU supplémentaires, applicable à chaud et sans interruption. Il est
+            en attente de validation dans votre espace facturation.
+          </Callout>
+        )}
         <Callout ton="violet" titre="Pourquoi plusieurs espaces ?">
           C’est la façon habituelle de séparer production, préproduction et site de repli : chacun
           avec son quota, sa plage réseau et son site. Le peering entre deux Espaces Cloud d’une même

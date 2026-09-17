@@ -93,6 +93,7 @@ export const UNIVERS_CLIENT: UniversNav[] = [
       { nom: 'Réseau & VPN', href: '/app/reseau' },
       { nom: 'Stockage bloc', href: '/app/stockage' },
       { nom: 'Stockage objet S3', href: '/app/objet' },
+      { nom: 'Bases managées', href: '/app/bases' },
       // Les sauvegardes se règlent aussi ressource par ressource ; cette
       // section porte les plans réutilisables, la restauration granulaire, la
       // reprise d'activité et le tableau de conformité qu'on montre à un auditeur.
@@ -135,7 +136,7 @@ export const UNIVERS_CLIENT: UniversNav[] = [
         panneau: ['/app/applications/observabilite'],
       },
       {
-        nom: 'Backup',
+        nom: 'Sauvegardes',
         href: '/app/applications/backup',
         panneau: ['/app/applications/backup'],
       },
@@ -192,7 +193,6 @@ export const UNIVERS_CLIENT: UniversNav[] = [
         panneau: ['/app/ia/integrations'],
       },
       { nom: 'Modèles', href: '/app/ia/modeles', panneau: ['/app/ia/modeles'] },
-      { nom: 'Inférence dédiée', href: '/app/ia/inference', panneau: ['/app/ia/inference'] },
       { nom: 'Consommation', href: '/app/ia/consommation' },
       // Les réglages transverses — passerelle, routage, garde-fous, résidence,
       // budget, coffre — étaient six sections dans la barre. Ils sont devenus
@@ -212,12 +212,12 @@ export const UNIVERS_CLIENT: UniversNav[] = [
       { nom: 'Accueil', href: '/app/web' },
       { nom: 'Domaines', href: '/app/web/domaines', panneau: ['/app/web/domaines'] },
       { nom: 'Hébergement Web', href: '/app/web/hebergement', panneau: ['/app/web/hebergement'] },
-      { nom: 'Databases', href: '/app/web/bases', panneau: ['/app/web/bases'] },
-      { nom: 'Emails', href: '/app/web/emails', panneau: ['/app/web/emails'] },
+      { nom: 'Bases de données', href: '/app/web/bases', panneau: ['/app/web/bases'] },
+      { nom: 'Messagerie', href: '/app/web/emails', panneau: ['/app/web/emails'] },
       { nom: 'Drive', href: '/app/web/drive', panneau: ['/app/web/drive'] },
       { nom: 'Applications', href: '/app/web/applications', panneau: ['/app/web/applications'] },
       { nom: 'SSL', href: '/app/web/ssl', panneau: ['/app/web/ssl'] },
-      { nom: 'Backup', href: '/app/web/backup', panneau: ['/app/web/backup'] },
+      { nom: 'Sauvegardes', href: '/app/web/backup', panneau: ['/app/web/backup'] },
       { nom: 'Relais SMTP', href: '/app/smtp' },
     ],
   },
@@ -225,9 +225,12 @@ export const UNIVERS_CLIENT: UniversNav[] = [
     id: 'iam',
     nom: 'IAM & sécurité',
     sections: [
-      { nom: 'Utilisateurs & rôles', href: '/app/membres' },
+      { nom: 'Membres & rôles', href: '/app/membres' },
       { nom: "Fédération d'identité", href: '/app/sso' },
-      { nom: 'Sécurité & audit', href: '/app/securite' },
+      // « Mon compte » (double authentification personnelle) n'a pas d'onglet
+      // propre, sur le patron du lanceur : on y arrive par le menu du compte.
+      // Rattaché ici pour que la barre garde un repère quand on l'ouvre.
+      { nom: 'Sécurité & audit', href: '/app/securite', aussi: ['/app/compte'] },
     ],
   },
 ]
@@ -260,9 +263,10 @@ export const UNIVERS_SUPER_ADMIN: UniversNav[] = [
     nom: 'Infrastructure',
     sections: [
       { nom: 'Capacité & backends', href: '/admin/capacite' },
-      // Le parc GPU se pilote à part : sa contrainte n'est pas le vCPU mais la
-      // VRAM, et sa marge dépend autant des contrats fournisseurs que du matériel.
-      { nom: 'Parc GPU & IA', href: '/admin/ia' },
+      // Pas de parc GPU sur cette plateforme (§ décision « Inférence dédiée »
+      // dans CLAUDE.md) : cette section reste une vue d'usage IA — modèles
+      // appelés, agents et orchestration par organisation — pas de matériel.
+      { nom: 'IA & Agents', href: '/admin/ia' },
       { nom: 'Sites & zones', href: '/admin/sites' },
       { nom: 'Migration inter-backend', href: '/admin/migration' },
     ],

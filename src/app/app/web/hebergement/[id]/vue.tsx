@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
+  Activity,
   Clock,
   Database,
   Download,
@@ -13,6 +14,9 @@ import {
   KeyRound,
   Plus,
   RefreshCw,
+  Server,
+  ShieldCheck,
+  ShoppingBag,
   Terminal,
   Trash2,
 } from 'lucide-react'
@@ -32,8 +36,10 @@ import {
   CATALOGUE_PARTAGE,
   COMPTES_FICHIERS,
   LOGS_EXECUTION,
+  SERVEURS_BASES,
   SITES_WEB,
   TACHES_WEB,
+  type ServeurBases,
   TYPE_SITE_LABEL,
   abonnementDeLEntree,
   basesDeLHebergement,
@@ -53,14 +59,30 @@ import { Field, Input, SegmentedControl, Select, Switch } from '@/components/ui/
 import { Drawer, Tooltip } from '@/components/ui/overlay'
 import { PageHeader, Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
 import { StatTile, QuotaBar, HealthBadge } from '@/components/composition/metrics'
-import { EmptyState } from '@/components/composition/states'
+import { DegradedState, EmptyState } from '@/components/composition/states'
 import { GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { ConfigurationServicePanel } from '@/components/business/configuration-service'
 import { CarteAbonnement } from '@/components/business/abonnement'
+import {
+  ApiError,
+  creerRessource,
+  estActif,
+  modifierRessource,
+  requete,
+  supprimerRessource,
+} from '@/lib/api/client'
 
-import { useApp } from '@/components/app/contexte'
+/** Mot de passe fort généré côté client — affiché une seule fois, jamais stocké ici. */
+function genererMotDePasse(longueur = 20): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!#%+-_'
+  const octets = new Uint8Array(longueur)
+  crypto.getRandomValues(octets)
+  return Array.from(octets, (o) => alphabet[o % alphabet.length]).join('')
+}
+
+import { useApp, useMaintenant } from '@/components/app/contexte'
 
 const ONGLETS = [
   { id: 'apercu', label: 'Vue d’ensemble' },
@@ -79,12 +101,14 @@ const TEINTE_SITE: Record<string, string> = {
 }
 
 export function VueHebergement({ id }: { id: string }) {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const [onglet, setOnglet] = useState('apercu')
   const [siteOuvertId, setSiteOuvert] = useState<string | null>(null)
   const [baseOuverteId, setBaseOuverte] = useState<string | null>(null)
   const [partageOuvert, setPartageOuvert] = useState<string | null>(null)
   const [phpSite, setPhpSite] = useState<string | null>(null)
+  const [tacheOuverte, setTacheOuverte] = useState(false)
 
   const executer = useOperation()
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
@@ -92,6 +116,31 @@ export function VueHebergement({ id }: { id: string }) {
   const toutesBases = useCollection<BaseHebergement>('bases-hebergement', BASES_HEBERGEMENT)
   const tousComptes = useCollection<CompteFichiers>('comptes-fichiers', COMPTES_FICHIERS)
   const toutesTaches = useCollection<TachePlanifieeWeb>('taches-web', TACHES_WEB)
+  const serveursBases = useCollection<ServeurBases>('serveurs-bases', SERVEURS_BASES)
+  /** Mot de passe remplacé d’un compte de transfert — montré une fois. */
+  const [secretCompte, setSecretCompte] = useState<{ utilisateur: string; motDePasse: string } | null>(null)
+  /** `GET /web/hebergements/{id}/metriques` : `424` → intégration nommée à la place des courbes. */
+  const [metriquesDegradees, setMetriquesDegradees] = useState<{
+    integration?: string
+    dateDonnees?: string
+  } | null>(null)
+  useEffect(() => {
+    if (!estActif()) return
+    let annule = false
+    requete(`/web/hebergements/${encodeURIComponent(id)}/metriques`).then(
+      () => {
+        if (!annule) setMetriquesDegradees(null)
+      },
+      (e: unknown) => {
+        if (annule) return
+        if (e instanceof ApiError && e.statut === 424)
+          setMetriquesDegradees({ integration: e.integration, dateDonnees: e.dateDonnees })
+      },
+    )
+    return () => {
+      annule = true
+    }
+  }, [id])
 
   const h = hebergements.items.find((x) => x.id === id)
   if (!h) return null
@@ -163,6 +212,17 @@ export function VueHebergement({ id }: { id: string }) {
                 return {
                   titre: `Installation de ${v.hote} lancée`,
                   detail: `${v.type} · PHP ${v.php}`,
+                  appel: () =>
+                    creerRessource('/web/sites', {
+                      hebergementId: h.id,
+                      site: {
+                        hote: String(v.hote),
+                        type: v.type as SiteWeb['type'],
+                        phpVersion: String(v.php),
+                        creerBase: Boolean(v.base),
+                        ssl: true,
+                      },
+                    }),
                   effet: () =>
                     tousSites.creer({
                       id: idSite,
@@ -178,11 +238,16 @@ export function VueHebergement({ id }: { id: string }) {
                       statut: 'installation',
                     }),
                   job: { workflow: 'web.app.install', cible: String(v.hote) },
-                  effetFinal: () =>
+                  effetFinal: () => {
+                    if (estActif()) {
+                      tousSites.recharger()
+                      return
+                    }
                     tousSites.modifier(idSite, {
                       statut: 'en_ligne',
                       ssl: { etat: 'actif', emetteur: 'Let’s Encrypt', expire: '2026-11-17' },
-                    }),
+                    })
+                  },
                 }
               }}
             />
@@ -238,7 +303,7 @@ export function VueHebergement({ id }: { id: string }) {
             />
             <StatTile
               libelle="Dernière sauvegarde"
-              valeur={relatif(h.sauvegarde.derniere)}
+              valeur={h.sauvegarde.derniere ? relatif(h.sauvegarde.derniere, maintenant) : '—'}
               ton={h.sauvegarde.statut === 'ok' ? 'ok' : 'err'}
               detail={h.sauvegarde.taille}
             />
@@ -260,6 +325,11 @@ export function VueHebergement({ id }: { id: string }) {
                       titre: `${h.serveur.serveurWeb} redémarré`,
                       detail:
                         'Coupure de moins d’une seconde : les connexions en cours sont laissées se terminer.',
+                      appel: () =>
+                        requete(
+                          `/web/hebergements/${encodeURIComponent(h.id)}/redemarrage`,
+                          { methode: 'POST', query: { confirmation: h.domaineProvisoire } },
+                        ),
                       job: {
                         type: 'hebergement.restart',
                         label: `Redémarrage de ${h.serveur.serveurWeb} · ${nom}`,
@@ -267,13 +337,26 @@ export function VueHebergement({ id }: { id: string }) {
                         dureeEtapeMs: 900,
                       },
                     }}
+                    confirmation={{
+                      ressource: h.domaineProvisoire,
+                      titre: `Redémarrer les services de ${nom} ?`,
+                      pertes: [
+                        'Coupure de quelques secondes sur tous les sites du serveur',
+                        'Les sessions en cours seront interrompues',
+                      ],
+                      libelleAction: 'Redémarrer',
+                    }}
                   />
                 }
               />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2.5">
-                  <QuotaBar libelle="Processeur" utilise={h.serveur.chargeCpuPct} total={100} unite="%" seuil={85} />
-                  <QuotaBar libelle="Mémoire" utilise={h.serveur.ramUtiliseePct} total={100} unite="%" seuil={90} />
+                  {h.serveur.chargeCpuPct != null && (
+                    <QuotaBar libelle="Processeur" utilise={h.serveur.chargeCpuPct} total={100} unite="%" seuil={85} />
+                  )}
+                  {h.serveur.ramUtiliseePct != null && (
+                    <QuotaBar libelle="Mémoire" utilise={h.serveur.ramUtiliseePct} total={100} unite="%" seuil={90} />
+                  )}
                   <QuotaBar
                     libelle="Disque"
                     utilise={h.espaceUtiliseGo}
@@ -288,19 +371,32 @@ export function VueHebergement({ id }: { id: string }) {
                     { cle: 'Nom', valeur: <span className="font-mono">{h.serveur.nom}</span> },
                     { cle: 'Gabarit', valeur: `${h.serveur.vcpu} vCPU · ${h.serveur.ramGo} Go · ${h.serveur.diskGo} Go` },
                     { cle: 'Adresse IPv4', valeur: <span className="font-mono">{h.serveur.ip}</span> },
-                    { cle: 'Adresse IPv6', valeur: <span className="font-mono text-[12px]">{h.serveur.ipv6}</span> },
+                    {
+                      cle: 'Adresse IPv6',
+                      valeur: (
+                        <span className="font-mono text-[12px]">{h.serveur.ipv6 ?? '—'}</span>
+                      ),
+                    },
                     { cle: 'Système', valeur: `${h.serveur.os} · ${h.serveur.serveurWeb}` },
                     { cle: 'Site physique', valeur: SITE_LABEL[h.serveur.site] },
-                    { cle: 'En service depuis', valeur: `${h.serveur.uptimeJours} jours` },
+                    {
+                      cle: 'En service depuis',
+                      valeur: h.serveur.uptimeJours != null ? `${h.serveur.uptimeJours} jours` : '—',
+                    },
                   ]}
                 />
               </div>
               <Callout ton="info" className="mt-4" titre="Pointer votre domaine ici">
                 Créez un enregistrement <span className="font-mono">A</span> vers{' '}
-                <span className="font-mono">{h.serveur.ip}</span> et un{' '}
-                <span className="font-mono">AAAA</span> vers{' '}
-                <span className="font-mono text-[12px]">{h.serveur.ipv6}</span>. Si votre zone est
-                gérée chez nous, l’onglet DNS le fait en une action.
+                <span className="font-mono">{h.serveur.ip}</span>
+                {h.serveur.ipv6 && (
+                  <>
+                    {' '}
+                    et un <span className="font-mono">AAAA</span> vers{' '}
+                    <span className="font-mono text-[11.5px]">{h.serveur.ipv6}</span>
+                  </>
+                )}
+                . Si votre zone est gérée chez nous, l’onglet DNS le fait en une action.
               </Callout>
             </Card>
 
@@ -320,7 +416,7 @@ export function VueHebergement({ id }: { id: string }) {
                     <li key={st.id} className="flex flex-wrap items-center gap-3 py-2.5 first:pt-0">
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-[13px] font-semibold text-ink">
+                          <span className="font-mono text-[12.5px] font-semibold text-ink">
                             {st.hote}
                           </span>
                           <Badge tone="neutral" size="sm">
@@ -355,7 +451,7 @@ export function VueHebergement({ id }: { id: string }) {
                             </Badge>
                           )}
                         </span>
-                        <span className="mt-1 block text-[12px] text-g-500">
+                        <span className="mt-1 block text-[11.5px] text-g-500">
                           <span className="font-mono">{st.racine}</span> ·{' '}
                           {(st.espaceMo / 1024).toFixed(2)} Go · {num(st.visitesMois)} visites ce mois
                         </span>
@@ -374,7 +470,9 @@ export function VueHebergement({ id }: { id: string }) {
                               titre: `${st.hote} retiré du serveur`,
                               detail:
                                 'La racine et la base restent en place le temps de la rétention : rien n’est effacé dans la seconde.',
+                              appel: () => supprimerRessource('/web/sites', st.id, st.hote),
                               effet: () => tousSites.supprimer(st.id),
+                              effetFinal: () => tousSites.recharger(),
                             })
                           }
                         >
@@ -446,7 +544,7 @@ export function VueHebergement({ id }: { id: string }) {
                     <Link
                       key={a.l}
                       href={a.href}
-                      className="flex w-full items-center gap-2.5 rounded-[6px] border border-g-300 px-2.5 py-2 text-left text-[13px] font-semibold text-g-700 transition-colors hover:border-p-400 hover:bg-p-050 hover:text-p-700"
+                      className="flex w-full items-center gap-2.5 rounded-[6px] border border-g-300 px-2.5 py-2 text-left text-[12.5px] font-semibold text-g-700 transition-colors hover:border-p-400 hover:bg-p-050 hover:text-p-700"
                     >
                       <span className="text-p-700">{a.i}</span>
                       {a.l}
@@ -456,7 +554,7 @@ export function VueHebergement({ id }: { id: string }) {
                       key={a.l}
                       type="button"
                       onClick={() => setOnglet(a.o as string)}
-                      className="flex w-full items-center gap-2.5 rounded-[6px] border border-g-300 px-2.5 py-2 text-left text-[13px] font-semibold text-g-700 transition-colors hover:border-p-400 hover:bg-p-050 hover:text-p-700"
+                      className="flex w-full items-center gap-2.5 rounded-[6px] border border-g-300 px-2.5 py-2 text-left text-[12.5px] font-semibold text-g-700 transition-colors hover:border-p-400 hover:bg-p-050 hover:text-p-700"
                     >
                       <span className="text-p-700">{a.i}</span>
                       {a.l}
@@ -474,7 +572,7 @@ export function VueHebergement({ id }: { id: string }) {
               sousTitre="Mesuré par nos sondes sur les sites de cet hébergement."
               actions={
                 <ButtonLink
-                  href="https://grafana.synelia.cloud"
+                  href="https://grafana.synelia.dev01.ovh.smile.ci"
                   variant="ghost"
                   size="sm"
                   iconAfter={<ExternalLink size={12} />}
@@ -483,15 +581,23 @@ export function VueHebergement({ id }: { id: string }) {
                 </ButtonLink>
               }
             />
-            <GrilleSparkCharts
-              seed={h.id}
-              metriques={[
-                { titre: 'Visites', unite: '/h', min: 40, max: 320 },
-                { titre: 'Temps de réponse', unite: 'ms', min: 120, max: 480 },
-                { titre: 'Processeur', unite: '%', min: 12, max: 68, seuil: 85 },
-                { titre: 'Erreurs 5xx', unite: '/h', min: 0, max: 6 },
-              ]}
-            />
+            {metriquesDegradees ? (
+              <DegradedState
+                source="métriques de l’hébergement"
+                integration={metriquesDegradees.integration}
+                dateDonnees={metriquesDegradees.dateDonnees}
+              />
+            ) : (
+              <GrilleSparkCharts
+                seed={h.id}
+                metriques={[
+                  { titre: 'Visites', unite: '/h', min: 40, max: 320 },
+                  { titre: 'Temps de réponse', unite: 'ms', min: 120, max: 480 },
+                  { titre: 'Processeur', unite: '%', min: 12, max: 68, seuil: 85 },
+                  { titre: 'Erreurs 5xx', unite: '/h', min: 0, max: 6 },
+                ]}
+              />
+            )}
           </Card>
         </div>
       )}
@@ -512,37 +618,53 @@ export function VueHebergement({ id }: { id: string }) {
                     titre="Ajouter un compte de transfert"
                     description="Un compte par intervenant, cantonné à son dossier. Le mot de passe n’est affiché qu’une fois."
                     champs={[
-                      { id: 'utilisateur', label: 'Identifiant', placeholder: 'agence-web', obligatoire: true, demi: true },
-                      { id: 'motDePasse', label: 'Mot de passe', type: 'mot_de_passe', placeholder: 'Au moins 12 caractères', obligatoire: true, demi: true },
+                      { id: 'utilisateur', label: 'Identifiant', placeholder: 'agence-web', obligatoire: true },
                       { id: 'racine', label: 'Dossier racine', placeholder: '/var/www/boutique', obligatoire: true },
-                      { id: 'sftp', label: 'SFTP', type: 'switch', demi: true, placeholder: 'Recommandé' },
-                      { id: 'ftps', label: 'FTPS', type: 'switch', demi: true, placeholder: 'Autorisé' },
-                      { id: 'ftp', label: 'FTP en clair', type: 'switch', demi: true, placeholder: 'Déconseillé' },
+                      {
+                        id: 'protocole',
+                        label: 'Protocoles',
+                        type: 'select',
+                        demi: true,
+                        options: [
+                          { value: 'sftp', label: 'SFTP seulement (recommandé)' },
+                          { value: 'ftps', label: 'FTPS' },
+                          { value: 'ftp', label: 'FTP en clair' },
+                        ],
+                      },
                       { id: 'quota', label: 'Quota', type: 'nombre', demi: true, min: 0, suffixe: 'Go' },
                     ]}
-                    valeursDepart={{ sftp: true, ftps: false, ftp: false, quota: 5, racine: '/var/www' }}
+                    valeursDepart={{ protocole: 'sftp', quota: 5, racine: '/var/www' }}
                     libelleValider="Créer le compte"
-                    operation={(v) => {
-                      const protocoles = (['sftp', 'ftps', 'ftp'] as const).filter((p) => v[p])
-                      return {
-                        titre: `Compte ${v.utilisateur} créé`,
-                        detail: protocoles.includes('ftp')
+                    operation={(v) => ({
+                      titre: `Compte ${v.utilisateur} créé`,
+                      detail:
+                        v.protocole === 'ftp'
                           ? 'FTP en clair transmet le mot de passe en clair : à réserver à un besoin ponctuel.'
-                          : 'Communiquez le mot de passe saisi à l’intervenant par un canal séparé.',
-                        effet: () =>
-                          tousComptes.creer({
-                            id: tousComptes.identifiant('cf'),
-                            hebergementId: h.id,
+                          : 'Le mot de passe est affiché une seule fois.',
+                      appel: () =>
+                        creerRessource(
+                          `/web/hebergements/${encodeURIComponent(h.id)}/comptes-fichiers`,
+                          {
                             utilisateur: String(v.utilisateur),
-                            protocoles: protocoles.length > 0 ? protocoles : ['sftp'],
+                            protocoles: [v.protocole as 'ftp' | 'sftp' | 'ftps'],
                             racine: String(v.racine),
-                            quotaGo: Number(v.quota) || null,
-                            utiliseGo: 0,
-                            clesSsh: 0,
-                            statut: 'actif',
-                          }),
-                      }
-                    }}
+                            ...(Number(v.quota) ? { quotaGo: Number(v.quota) } : {}),
+                          },
+                        ),
+                      effet: () =>
+                        tousComptes.creer({
+                          id: tousComptes.identifiant('cf'),
+                          hebergementId: h.id,
+                          utilisateur: String(v.utilisateur),
+                          protocoles: [v.protocole as 'ftp' | 'sftp' | 'ftps'],
+                          racine: String(v.racine),
+                          quotaGo: Number(v.quota) || null,
+                          utiliseGo: 0,
+                          clesSsh: 0,
+                          statut: 'actif',
+                        }),
+                      effetFinal: () => tousComptes.recharger(),
+                    })}
                   />
                 }
               />
@@ -551,7 +673,7 @@ export function VueHebergement({ id }: { id: string }) {
                   <li key={c.id} className="flex flex-wrap items-start gap-3 py-2.5 first:pt-0">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-[13px] font-semibold text-ink">
+                        <span className="font-mono text-[12.5px] font-semibold text-ink">
                           {c.utilisateur}
                         </span>
                         {c.protocoles.map((p) => (
@@ -568,36 +690,49 @@ export function VueHebergement({ id }: { id: string }) {
                           {c.statut === 'actif' ? 'Actif' : 'Suspendu'}
                         </Badge>
                       </div>
-                      <p className="mt-1 text-[12px] text-g-500">
+                      <p className="mt-1 text-[11.5px] text-g-500">
                         <span className="font-mono">{c.racine}</span> ·{' '}
                         {c.quotaGo === null
                           ? `${c.utiliseGo.toFixed(1)} Go, sans quota`
                           : `${c.utiliseGo.toFixed(1)} Go sur ${c.quotaGo} Go`}
                         {c.derniereConnexion
-                          ? ` · dernière connexion ${relatif(c.derniereConnexion)}`
+                          ? ` · dernière connexion ${relatif(c.derniereConnexion, maintenant)}`
                           : ' · jamais connecté'}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <BoutonFormulaire
+                      <BoutonAction
                         libelle="Remplacer le mot de passe"
-                        action="service.admin"
-                        titre={`Remplacer le mot de passe de ${c.utilisateur}`}
-                        description="L’ancien mot de passe cesse de fonctionner immédiatement : prévenez l’intervenant."
-                        champs={[
-                          {
-                            id: 'motDePasse',
-                            label: 'Nouveau mot de passe',
-                            type: 'mot_de_passe',
-                            placeholder: 'Au moins 12 caractères',
-                            obligatoire: true,
-                          },
-                        ]}
-                        libelleValider="Remplacer"
-                        operation={() => ({
-                          titre: `Mot de passe de ${c.utilisateur} remplacé`,
-                          detail: 'L’ancien cesse de fonctionner immédiatement : prévenez l’intervenant.',
-                        })}
+                        operation={(() => {
+                          // Généré au clic, envoyé au backend, montré une fois.
+                          const motDePasse = genererMotDePasse()
+                          return {
+                            action: 'service.admin',
+                            titre: `Mot de passe de ${c.utilisateur} remplacé`,
+                            detail:
+                              'Affiché une seule fois ci-dessous. L’ancien cesse de fonctionner immédiatement : prévenez l’intervenant.',
+                            // `PATCH …/comptes-fichiers/{id}` reprend le corps de
+                            // création (utilisateur, protocoles, racine requis).
+                            appel: () =>
+                              requete(
+                                `/web/hebergements/${encodeURIComponent(h.id)}/comptes-fichiers/${encodeURIComponent(c.id)}`,
+                                {
+                                  methode: 'PATCH',
+                                  corps: {
+                                    utilisateur: c.utilisateur,
+                                    protocoles: c.protocoles,
+                                    racine: c.racine,
+                                    ...(c.quotaGo ? { quotaGo: c.quotaGo } : {}),
+                                    motDePasse,
+                                  },
+                                },
+                              ),
+                            effetFinal: () => {
+                              setSecretCompte({ utilisateur: c.utilisateur, motDePasse })
+                              if (estActif()) tousComptes.recharger()
+                            },
+                          }
+                        })()}
                       />
                       <IconButton
                         label={`Supprimer ${c.utilisateur}`}
@@ -608,7 +743,13 @@ export function VueHebergement({ id }: { id: string }) {
                             ton: 'warn',
                             titre: `Compte ${c.utilisateur} supprimé`,
                             detail: 'Les fichiers déposés restent en place ; seul l’accès disparaît.',
+                            appel: () =>
+                              requete(
+                                `/web/hebergements/${encodeURIComponent(h.id)}/comptes-fichiers/${encodeURIComponent(c.id)}`,
+                                { methode: 'DELETE', query: { confirmation: c.utilisateur } },
+                              ),
                             effet: () => tousComptes.supprimer(c.id),
+                            effetFinal: () => tousComptes.recharger(),
                           })
                         }
                       >
@@ -618,6 +759,15 @@ export function VueHebergement({ id }: { id: string }) {
                   </li>
                 ))}
               </ul>
+              {secretCompte && (
+                <Callout
+                  ton="warn"
+                  className="mt-4"
+                  titre={`Nouveau mot de passe de ${secretCompte.utilisateur} — affiché une seule fois`}
+                >
+                  <CopyField className="mt-2" value={secretCompte.motDePasse} masque mono />
+                </Callout>
+              )}
             </Card>
 
             <Card>
@@ -636,10 +786,22 @@ export function VueHebergement({ id }: { id: string }) {
                       detail: v
                         ? undefined
                         : 'Ce qui est fermé ne peut pas être attaqué.',
+                      appel: () =>
+                        requete(`/web/hebergements/${encodeURIComponent(h.id)}/acces`, {
+                          methode: 'PUT',
+                          corps: {
+                            ftp: h.acces.ftp,
+                            sftp: v,
+                            ftps: h.acces.ftps,
+                            ssh: h.acces.ssh,
+                            portSsh: h.acces.portSsh,
+                          },
+                        }),
                       effet: () =>
                         hebergements.modifier(h.id, (x) => ({
                           acces: { ...x.acces, sftp: v },
                         })),
+                      effetFinal: () => hebergements.recharger(),
                     })
                   }
                   label="SFTP"
@@ -655,10 +817,22 @@ export function VueHebergement({ id }: { id: string }) {
                       detail: v
                         ? undefined
                         : 'Ce qui est fermé ne peut pas être attaqué.',
+                      appel: () =>
+                        requete(`/web/hebergements/${encodeURIComponent(h.id)}/acces`, {
+                          methode: 'PUT',
+                          corps: {
+                            ftp: h.acces.ftp,
+                            sftp: h.acces.sftp,
+                            ftps: v,
+                            ssh: h.acces.ssh,
+                            portSsh: h.acces.portSsh,
+                          },
+                        }),
                       effet: () =>
                         hebergements.modifier(h.id, (x) => ({
                           acces: { ...x.acces, ftps: v },
                         })),
+                      effetFinal: () => hebergements.recharger(),
                     })
                   }
                   label="FTPS"
@@ -674,10 +848,22 @@ export function VueHebergement({ id }: { id: string }) {
                       detail: v
                         ? 'Le mot de passe circule en clair : à n’ouvrir que le temps d’un dépannage.'
                         : 'Ce qui est fermé ne peut pas être attaqué.',
+                      appel: () =>
+                        requete(`/web/hebergements/${encodeURIComponent(h.id)}/acces`, {
+                          methode: 'PUT',
+                          corps: {
+                            ftp: v,
+                            sftp: h.acces.sftp,
+                            ftps: h.acces.ftps,
+                            ssh: h.acces.ssh,
+                            portSsh: h.acces.portSsh,
+                          },
+                        }),
                       effet: () =>
                         hebergements.modifier(h.id, (x) => ({
                           acces: { ...x.acces, ftp: v },
                         })),
+                      effetFinal: () => hebergements.recharger(),
                     })
                   }
                   label="FTP simple"
@@ -693,10 +879,22 @@ export function VueHebergement({ id }: { id: string }) {
                       detail: v
                         ? undefined
                         : 'Ce qui est fermé ne peut pas être attaqué.',
+                      appel: () =>
+                        requete(`/web/hebergements/${encodeURIComponent(h.id)}/acces`, {
+                          methode: 'PUT',
+                          corps: {
+                            ftp: h.acces.ftp,
+                            sftp: h.acces.sftp,
+                            ftps: h.acces.ftps,
+                            ssh: v,
+                            portSsh: h.acces.portSsh,
+                          },
+                        }),
                       effet: () =>
                         hebergements.modifier(h.id, (x) => ({
                           acces: { ...x.acces, ssh: v },
                         })),
+                      effetFinal: () => hebergements.recharger(),
                     })
                   }
                   label="Shell SSH"
@@ -729,7 +927,32 @@ export function VueHebergement({ id }: { id: string }) {
                 sousTitre="Une version par défaut pour le serveur, et une version propre à chaque site si besoin."
               />
               <Field label="Version par défaut" hint="S’applique aux sites qui n’ont pas de réglage propre.">
-                <Select defaultValue={h.php.versionDefaut}>
+                <Select
+                  defaultValue={h.php.versionDefaut}
+                  onChange={(e) =>
+                    executer({
+                      action: 'service.admin',
+                      titre: `PHP ${e.target.value} par défaut`,
+                      detail: 'Les sites sans réglage propre basculent à la prochaine requête.',
+                      appel: () =>
+                        requete(`/web/hebergements/${encodeURIComponent(h.id)}/php`, {
+                          methode: 'PUT',
+                          corps: {
+                            versionDefaut: e.target.value,
+                            extensionsActivees: h.php.extensions
+                              .filter((x) => x.active)
+                              .map((x) => x.nom),
+                            limites: h.php.limites,
+                          },
+                        }),
+                      effet: () =>
+                        hebergements.modifier(h.id, (x) => ({
+                          php: { ...x.php, versionDefaut: e.target.value },
+                        })),
+                      effetFinal: () => hebergements.recharger(),
+                    })
+                  }
+                >
                   {h.php.versionsDisponibles.map((v) => (
                     <option key={v} value={v}>
                       PHP {v}
@@ -781,10 +1004,22 @@ export function VueHebergement({ id }: { id: string }) {
                       detail: v
                         ? 'Le bytecode compilé reste en mémoire : le gain est immédiat.'
                         : 'Chaque requête recompile le code : à ne faire qu’en développement.',
+                      appel: () =>
+                        requete(`/web/hebergements/${encodeURIComponent(h.id)}/php`, {
+                          methode: 'PUT',
+                          corps: {
+                            versionDefaut: h.php.versionDefaut,
+                            extensionsActivees: h.php.extensions
+                              .filter((x) => x.active)
+                              .map((x) => x.nom),
+                            limites: { ...h.php.limites, opcache: v },
+                          },
+                        }),
                       effet: () =>
                         hebergements.modifier(h.id, (x) => ({
                           php: { ...x.php, limites: { ...x.php.limites, opcache: v } },
                         })),
+                      effetFinal: () => hebergements.recharger(),
                     })
                   }
                   label="OPcache"
@@ -809,7 +1044,7 @@ export function VueHebergement({ id }: { id: string }) {
                         {e.nom}
                       </span>
                       {e.requisePar && (
-                        <span className="block text-[11px] text-g-500">requise par {e.requisePar}</span>
+                        <span className="block text-[10.5px] text-g-500">requise par {e.requisePar}</span>
                       )}
                     </span>
                     {e.requisePar && e.active ? (
@@ -830,6 +1065,17 @@ export function VueHebergement({ id }: { id: string }) {
                             action: 'service.admin',
                             titre: v ? `Extension ${e.nom} activée` : `Extension ${e.nom} désactivée`,
                             detail: 'Prise en compte au prochain rechargement de PHP-FPM.',
+                            appel: () =>
+                              requete(`/web/hebergements/${encodeURIComponent(h.id)}/php`, {
+                                methode: 'PUT',
+                                corps: {
+                                  versionDefaut: h.php.versionDefaut,
+                                  extensionsActivees: h.php.extensions
+                                    .filter((x) => (x.nom === e.nom ? v : x.active))
+                                    .map((x) => x.nom),
+                                  limites: h.php.limites,
+                                },
+                              }),
                             effet: () =>
                               hebergements.modifier(h.id, (x) => ({
                                 php: {
@@ -839,6 +1085,7 @@ export function VueHebergement({ id }: { id: string }) {
                                   ),
                                 },
                               })),
+                            effetFinal: () => hebergements.recharger(),
                           })
                         }
                       />
@@ -865,6 +1112,8 @@ export function VueHebergement({ id }: { id: string }) {
                 action="service.admin"
                 titre="Programmer une tâche"
                 description="La tâche s’exécute sur ce serveur, avec les droits du compte du site. Une tâche en échec ne bloque pas les autres."
+                ouvert={tacheOuverte}
+                onOuvertChange={setTacheOuverte}
                 champs={[
                   { id: 'libelle', label: 'Intitulé', placeholder: 'Export des commandes', obligatoire: true },
                   { id: 'commande', label: 'Commande', placeholder: 'php /var/www/boutique/bin/export.php', obligatoire: true },
@@ -885,6 +1134,16 @@ export function VueHebergement({ id }: { id: string }) {
                 operation={(v) => ({
                   titre: `Tâche « ${v.libelle} » programmée`,
                   detail: String(v.frequence),
+                  appel: () =>
+                    creerRessource(
+                      `/web/hebergements/${encodeURIComponent(h.id)}/taches`,
+                      {
+                        libelle: String(v.libelle),
+                        expression: String(v.frequence),
+                        commande: String(v.commande),
+                        actif: true,
+                      },
+                    ),
                   effet: () =>
                     toutesTaches.creer({
                       id: toutesTaches.identifiant('cron'),
@@ -905,6 +1164,7 @@ export function VueHebergement({ id }: { id: string }) {
                       prochaine: '2026-08-20T02:00:00Z',
                       actif: true,
                     }),
+                  effetFinal: () => toutesTaches.recharger(),
                 })}
               />
             </div>
@@ -913,7 +1173,7 @@ export function VueHebergement({ id }: { id: string }) {
                 className="m-4"
                 titre="Aucune tâche planifiée"
                 phrase="WordPress et PrestaShop ont besoin d’une tâche périodique pour leurs traitements de fond. Nous la créons automatiquement à l’installation."
-                action={{ libelle: 'Programmer une tâche', href: '#' }}
+                action={{ libelle: 'Programmer une tâche', onClick: () => setTacheOuverte(true) }}
               />
             ) : (
               <ul className="divide-y divide-g-100">
@@ -925,7 +1185,7 @@ export function VueHebergement({ id }: { id: string }) {
                         <Badge tone="neutral" size="sm">
                           <span className="font-mono">{t.expression}</span>
                         </Badge>
-                        <span className="text-[12px] text-g-500">{t.lisible}</span>
+                        <span className="text-[11.5px] text-g-500">{t.lisible}</span>
                         <Badge tone={t.statut === 'ok' ? 'ok' : 'err'} size="sm" dot>
                           {t.statut === 'ok' ? 'Dernière exécution réussie' : 'Dernière exécution en échec'}
                         </Badge>
@@ -937,8 +1197,10 @@ export function VueHebergement({ id }: { id: string }) {
                       </div>
                       <p className="mt-1 font-mono text-[11px] text-g-500">{t.commande}</p>
                       <p className="mt-1 text-[11px] text-g-500">
-                        Exécutée {relatif(t.derniereExecution)} en {t.dureeS} s · prochaine{' '}
-                        {dateHeure(t.prochaine)}
+                        {t.derniereExecution
+                          ? `Exécutée ${relatif(t.derniereExecution, maintenant)}${t.dureeS != null ? ` en ${t.dureeS} s` : ''} · `
+                          : 'Jamais exécutée · '}
+                        prochaine {dateHeure(t.prochaine)}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
@@ -950,7 +1212,21 @@ export function VueHebergement({ id }: { id: string }) {
                             action: 'service.admin',
                             ton: v ? 'ok' : 'warn',
                             titre: v ? `« ${t.libelle} » réactivée` : `« ${t.libelle} » désactivée`,
+                            appel: () =>
+                              requete(
+                                `/web/hebergements/${encodeURIComponent(h.id)}/taches/${encodeURIComponent(t.id)}`,
+                                {
+                                  methode: 'PATCH',
+                                  corps: {
+                                    libelle: t.libelle,
+                                    expression: t.expression,
+                                    commande: t.commande,
+                                    actif: v,
+                                  },
+                                },
+                              ),
                             effet: () => toutesTaches.modifier(t.id, { actif: v }),
+                            effetFinal: () => toutesTaches.recharger(),
                           })
                         }
                       />
@@ -961,18 +1237,28 @@ export function VueHebergement({ id }: { id: string }) {
                           ton: 'info',
                           titre: `« ${t.libelle} » lancée`,
                           detail: 'La sortie complète apparaît dans l’onglet Journaux.',
+                          appel: () =>
+                            requete(
+                              `/web/hebergements/${encodeURIComponent(h.id)}/taches/${encodeURIComponent(t.id)}/execution`,
+                              { methode: 'POST' },
+                            ),
                           job: {
                             type: 'cron.run',
                             label: `Exécution · ${t.libelle}`,
                             etapes: ['Lancer la commande', 'Collecter la sortie'],
                             dureeEtapeMs: 900,
                           },
-                          effetFinal: () =>
+                          effetFinal: () => {
+                            if (estActif()) {
+                              toutesTaches.recharger()
+                              return
+                            }
                             toutesTaches.modifier(t.id, {
                               derniereExecution: '2026-08-19T15:20:00Z',
                               statut: 'ok',
                               dureeS: 3,
-                            }),
+                            })
+                          },
                         }}
                       />
                     </div>
@@ -1060,12 +1346,19 @@ export function VueHebergement({ id }: { id: string }) {
                   action: 'service.admin',
                   titre: 'Réglages appliqués',
                   detail: `${cible?.hote} — rechargement de ${h.serveur.serveurWeb} sans coupure.`,
+                  appel: () =>
+                    cible
+                      ? modifierRessource('/web/sites', cible.id, {
+                          phpVersion: phpSite ?? cible.phpVersion,
+                        })
+                      : Promise.resolve(),
                   effet: () =>
                     cible
                       ? tousSites.modifier(cible.id, {
                           phpVersion: phpSite ?? cible.phpVersion,
                         })
                       : undefined,
+                  effetFinal: () => tousSites.recharger(),
                 })
                 setSiteOuvert(null)
               }}
@@ -1102,9 +1395,20 @@ export function VueHebergement({ id }: { id: string }) {
               <Switch
                 checked={siteOuvert.securite.waf}
                 onChange={(v) =>
-                  tousSites.modifier(siteOuvert.id, (x) => ({
-                    securite: { ...x.securite, waf: v },
-                  }))
+                  executer({
+                    action: 'service.admin',
+                    titre: v ? 'Pare-feu applicatif activé' : 'Pare-feu applicatif désactivé',
+                    detail: `${siteOuvert.hote} — rechargement de ${h.serveur.serveurWeb} sans coupure.`,
+                    appel: () =>
+                      modifierRessource('/web/sites', siteOuvert.id, {
+                        securite: { ...siteOuvert.securite, waf: v },
+                      }),
+                    effet: () =>
+                      tousSites.modifier(siteOuvert.id, (x) => ({
+                        securite: { ...x.securite, waf: v },
+                      })),
+                    effetFinal: () => tousSites.recharger(),
+                  })
                 }
                 label="Pare-feu applicatif"
                 description="Règles OWASP adaptées à la solution installée."
@@ -1112,9 +1416,20 @@ export function VueHebergement({ id }: { id: string }) {
               <Switch
                 checked={siteOuvert.securite.bruteForce}
                 onChange={(v) =>
-                  tousSites.modifier(siteOuvert.id, (x) => ({
-                    securite: { ...x.securite, bruteForce: v },
-                  }))
+                  executer({
+                    action: 'service.admin',
+                    titre: v ? 'Anti-force brute activé' : 'Anti-force brute désactivé',
+                    detail: `${siteOuvert.hote} — rechargement de ${h.serveur.serveurWeb} sans coupure.`,
+                    appel: () =>
+                      modifierRessource('/web/sites', siteOuvert.id, {
+                        securite: { ...siteOuvert.securite, bruteForce: v },
+                      }),
+                    effet: () =>
+                      tousSites.modifier(siteOuvert.id, (x) => ({
+                        securite: { ...x.securite, bruteForce: v },
+                      })),
+                    effetFinal: () => tousSites.recharger(),
+                  })
                 }
                 label="Anti-force brute"
                 description="Sur les pages d’authentification et les points d’API."
@@ -1122,9 +1437,20 @@ export function VueHebergement({ id }: { id: string }) {
               <Switch
                 checked={siteOuvert.securite.scanMalware}
                 onChange={(v) =>
-                  tousSites.modifier(siteOuvert.id, (x) => ({
-                    securite: { ...x.securite, scanMalware: v },
-                  }))
+                  executer({
+                    action: 'service.admin',
+                    titre: v ? 'Analyse antimalware activée' : 'Analyse antimalware désactivée',
+                    detail: `${siteOuvert.hote} — rechargement de ${h.serveur.serveurWeb} sans coupure.`,
+                    appel: () =>
+                      modifierRessource('/web/sites', siteOuvert.id, {
+                        securite: { ...siteOuvert.securite, scanMalware: v },
+                      }),
+                    effet: () =>
+                      tousSites.modifier(siteOuvert.id, (x) => ({
+                        securite: { ...x.securite, scanMalware: v },
+                      })),
+                    effetFinal: () => tousSites.recharger(),
+                  })
                 }
                 label="Analyse antimalware quotidienne"
                 description="Mise en quarantaine et alerte, sans suppression automatique."
@@ -1187,7 +1513,7 @@ export function VueHebergement({ id }: { id: string }) {
                 }
                 mono
               />
-              <p className="mt-1.5 text-[12px] text-g-500">
+              <p className="mt-1.5 text-[11.5px] text-g-500">
                 La base n’écoute pas sur l’extérieur. Vos sites l’atteignent en local ; pour un accès
                 distant, il faut ouvrir un tunnel SSH.
               </p>
@@ -1223,6 +1549,20 @@ export function VueHebergement({ id }: { id: string }) {
                   action: 'service.admin',
                   titre: `Export de ${baseOuverte.nom} préparé`,
                   detail: `${baseOuverte.tailleMo} Mo · lien signé valable une heure`,
+                  // `POST /web/bases/{serveur}/bases/{nom}/export` → `202` ; le
+                  // serveur est celui de l’hébergement pour ce moteur.
+                  appel: (() => {
+                    const serveur = serveursBases.items.find(
+                      (x) => x.hebergementId === h.id && x.moteur === baseOuverte.moteur,
+                    )
+                    return serveur
+                      ? () =>
+                          requete(
+                            `/web/bases/${encodeURIComponent(serveur.id)}/bases/${encodeURIComponent(baseOuverte.nom)}/export`,
+                            { methode: 'POST', corps: { format: 'sql_gz' } },
+                          )
+                      : undefined
+                  })(),
                   job: {
                     type: 'base.dump',
                     label: `Export SQL · ${baseOuverte.nom}`,

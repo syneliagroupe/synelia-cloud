@@ -32,8 +32,8 @@ const RESSOURCES_API = [
   {
     groupe: 'Machines virtuelles',
     routes: [
-      { m: 'GET', r: '/v1/espaces/{id}/vms', d: 'Lister les machines d’un espace' },
-      { m: 'POST', r: '/v1/espaces/{id}/vms', d: 'Créer une machine' },
+      { m: 'GET', r: '/v1/vms', d: 'Lister les machines — filtrable par espaceId' },
+      { m: 'POST', r: '/v1/vms', d: 'Créer une machine — espaceId dans le corps' },
       { m: 'POST', r: '/v1/vms/{id}/power', d: 'Démarrer, arrêter, redémarrer' },
       { m: 'PATCH', r: '/v1/vms/{id}/hardware', d: 'Modifier processeur, mémoire, disque' },
       { m: 'DELETE', r: '/v1/vms/{id}', d: 'Supprimer — exige le paramètre confirm=<nom exact>' },
@@ -42,36 +42,36 @@ const RESSOURCES_API = [
   {
     groupe: 'Applications',
     routes: [
-      { m: 'GET', r: '/v1/apps', d: 'Lister les applications' },
-      { m: 'POST', r: '/v1/apps/{id}/deploiements', d: 'Déclencher un déploiement' },
+      { m: 'GET', r: '/v1/applications', d: 'Lister les applications' },
+      { m: 'POST', r: '/v1/deploiements', d: 'Déclencher un déploiement — envId dans le corps' },
       { m: 'POST', r: '/v1/deploiements/{id}/rollback', d: 'Retour arrière vers l’artefact précédent' },
-      { m: 'GET', r: '/v1/deploiements/{id}/logs', d: 'Journaux de build et d’exécution' },
+      { m: 'GET', r: '/v1/deploiements/{id}/journaux', d: 'Journaux de build et d’exécution' },
     ],
   },
   {
     groupe: 'Sauvegarde & reprise',
     routes: [
-      { m: 'GET', r: '/v1/backup/plans', d: 'Lister les plans de sauvegarde' },
-      { m: 'GET', r: '/v1/backup/points', d: 'Points de restauration disponibles' },
-      { m: 'POST', r: '/v1/backup/restore', d: 'Lancer une restauration' },
-      { m: 'GET', r: '/v1/conformite', d: 'Rapport de conformité 3-2-1' },
+      { m: 'GET', r: '/v1/sauvegarde/plans', d: 'Lister les plans de sauvegarde' },
+      { m: 'GET', r: '/v1/sauvegarde/points', d: 'Points de restauration disponibles' },
+      { m: 'POST', r: '/v1/sauvegarde/restaurations', d: 'Lancer une restauration' },
+      { m: 'GET', r: '/v1/sauvegarde/conformite', d: 'Rapport de conformité 3-2-1' },
     ],
   },
   {
     groupe: 'Facturation',
     routes: [
-      { m: 'GET', r: '/v1/factures', d: 'Lister les factures' },
-      { m: 'GET', r: '/v1/factures/{id}', d: 'Détail d’une facture, lignes incluses' },
-      { m: 'GET', r: '/v1/consommation', d: 'Consommation par jour, ventilée par étiquette' },
-      { m: 'GET', r: '/v1/souscriptions', d: 'Souscriptions actives' },
+      { m: 'GET', r: '/v1/facturation/factures', d: 'Lister les factures' },
+      { m: 'GET', r: '/v1/facturation/factures/{id}', d: 'Détail d’une facture, lignes incluses' },
+      { m: 'GET', r: '/v1/facturation/consommation', d: 'Consommation par jour, ventilée par étiquette' },
+      { m: 'GET', r: '/v1/facturation/souscriptions', d: 'Souscriptions actives' },
     ],
   },
   {
     groupe: 'Audit & conformité',
     routes: [
       { m: 'GET', r: '/v1/audit', d: 'Journal d’audit — rôle org_admin ou read_only requis' },
-      { m: 'POST', r: '/v1/audit/exports', d: 'Générer un export signé' },
-      { m: 'GET', r: '/v1/audit/verifier', d: 'Vérifier la chaîne d’empreintes d’un export' },
+      { m: 'POST', r: '/v1/audit/export', d: 'Générer un export signé' },
+      { m: 'GET', r: '/v1/audit/integrite', d: 'Vérifier la chaîne d’empreintes du journal' },
     ],
   },
 ]

@@ -17,17 +17,20 @@ import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction } from '@/components/app/actions'
+import { estActif, modifierRessource } from '@/lib/api/client'
 
 export default function ListeBases() {
+  const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const serveurs = useCollection<ServeurBases>('serveurs-bases', SERVEURS_BASES)
   // Le périmètre de l'organisation vient du jeu de données ; l'état vient de
-  // l'atelier, pour qu'une activation se voie tout de suite.
+  // l'atelier, pour qu'une activation se voie tout de suite. En mode API le
+  // backend filtre déjà, avec des identifiants inconnus du jeu local.
   const perimetre = new Set(serveursBasesDeLOrg().map((m) => m.id))
-  const moteurs = serveurs.items.filter((m) => perimetre.has(m.id))
+  const moteurs = estActif() ? serveurs.items : serveurs.items.filter((m) => perimetre.has(m.id))
   const actifs = moteurs.filter((m) => m.actif)
   const bases = actifs.reduce((a, m) => a + m.bases.length, 0)
 
@@ -37,7 +40,7 @@ export default function ListeBases() {
         fil={[
           { label: 'Espace client', href: '/app' },
           { label: 'Web Cloud', href: '/app/web' },
-          { label: 'Databases' },
+          { label: 'Bases de données' },
         ]}
         titre="Bases de données"
         sousTitre="MariaDB, PostgreSQL et Redis tournent sur le serveur de votre hébergement, à côté d’Apache. Compris dans le prix, sans haute disponibilité — et sans accès depuis l’extérieur."
@@ -115,7 +118,7 @@ export default function ListeBases() {
                   <p className="mt-1 text-[12px] text-g-500">
                     {m.sauvegarde.derniere === '—'
                       ? m.sauvegarde.frequence
-                      : `Sauvegarde ${relatif(m.sauvegarde.derniere)}`}
+                      : `Sauvegarde ${relatif(m.sauvegarde.derniere, maintenant)}`}
                   </p>
                 </>
               ) : (
@@ -132,8 +135,15 @@ export default function ListeBases() {
                       action: 'service.admin',
                       titre: `${MOTEUR_WEB_LABEL[m.moteur]} en cours d’activation`,
                       detail: `Sur ${m.serveur}. Aucun redémarrage du serveur web n’est nécessaire.`,
+                      appel: () => modifierRessource('/web/bases', m.id, { actif: true }),
                       job: { workflow: 'web.db.enable', cible: `${MOTEUR_WEB_LABEL[m.moteur]} · ${m.serveur}` },
-                      effetFinal: () => serveurs.modifier(m.id, { actif: true }),
+                      effetFinal: () => {
+                        if (estActif()) {
+                          serveurs.recharger()
+                          return
+                        }
+                        serveurs.modifier(m.id, { actif: true })
+                      },
                     }}
                   />
                 </>

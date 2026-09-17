@@ -13,6 +13,7 @@ import {
   hebergementById,
   nomServi,
 } from '@/lib/mock'
+import type { WebHosting } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -21,19 +22,25 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif } from '@/lib/api/client'
 
 const TEINTE: Record<string, string> = {
   wordpress: '#21759B',
   prestashop: '#DF0067',
+  ghost: '#15171A',
+  dolibarr: '#243A5E',
   php: '#777BB4',
   statique: '#4B2882',
   laravel: '#FF2D20',
 }
 
+// Le nom (en minuscules, sans espaces ni accents) sert de sous-domaine ET de discriminant
+// applicatif côté backend quand `type` reste générique (`php`) : « Ghost » installe une
+// image `ghost`, « Dolibarr » une image `dolibarr`, jamais la même que « Application PHP ».
 const CATALOGUE = [
   { nom: 'WordPress', type: 'wordpress', phrase: 'Site vitrine, blog, portail éditorial.', php: '8.3' },
   { nom: 'PrestaShop', type: 'prestashop', phrase: 'Boutique en ligne, paiements mobile money.', php: '8.2' },
-  { nom: 'Joomla', type: 'php', phrase: 'Portail à gestion fine des droits.', php: '8.3' },
+  { nom: 'Ghost', type: 'php', phrase: 'Blog et newsletter, édition sobre.', php: '8.3' },
   { nom: 'Dolibarr', type: 'php', phrase: 'Gestion commerciale et facturation.', php: '8.2' },
   { nom: 'Site statique', type: 'statique', phrase: 'HTML généré, déployé par Git.', php: '—' },
 ]
@@ -42,8 +49,16 @@ export default function ListeApplications() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const tousSites = useCollection<SiteWeb>('sites-web', SITES_WEB)
-  const miens = new Set(HEBERGEMENTS.filter((h) => h.orgId === ORG_COURANTE.id).map((h) => h.id))
-  const sites = tousSites.items.filter((s) => miens.has(s.hebergementId))
+  const parcHebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
+  // Le backend filtre déjà par organisation ; la maquette restreint au
+  // périmètre fictif, dont les identifiants sont inconnus du backend.
+  const hebergementsConnus = estActif()
+    ? parcHebergements.items
+    : HEBERGEMENTS.filter((h) => h.orgId === ORG_COURANTE.id)
+  const miens = new Set(hebergementsConnus.map((h) => h.id))
+  const sites = estActif()
+    ? tousSites.items
+    : tousSites.items.filter((s) => miens.has(s.hebergementId))
   const majEnAttente = sites.reduce((a, s) => a + (s.majEnAttente ?? 0), 0)
 
   return (
@@ -71,7 +86,7 @@ export default function ListeApplications() {
                 id: 'hebergement',
                 label: 'Hébergement de destination',
                 type: 'select',
-                options: HEBERGEMENTS.filter((h) => h.orgId === ORG_COURANTE.id).map((h) => ({
+                options: hebergementsConnus.map((h) => ({
                   value: h.id,
                   label: `${h.serveur.nom} · ${h.palier}`,
                 })),
@@ -103,6 +118,16 @@ export default function ListeApplications() {
               return {
                 titre: `Installation de ${v.hote} lancée`,
                 detail: `${v.type} · PHP ${v.php}`,
+                appel: () =>
+                  creerRessource('/web/sites', {
+                    hebergementId: String(v.hebergement),
+                    site: {
+                      hote: String(v.hote),
+                      type: v.type as 'wordpress' | 'prestashop' | 'php' | 'statique' | 'laravel',
+                      phpVersion: String(v.php),
+                      ssl: true,
+                    },
+                  }),
                 effet: () =>
                   tousSites.creer({
                     id: idSite,
@@ -118,11 +143,16 @@ export default function ListeApplications() {
                     statut: 'installation',
                   }),
                 job: { workflow: 'web.app.install', cible: String(v.hote) },
-                effetFinal: () =>
+                effetFinal: () => {
+                  if (estActif()) {
+                    tousSites.recharger()
+                    return
+                  }
                   tousSites.modifier(idSite, {
                     statut: 'en_ligne',
                     ssl: { etat: 'actif', emetteur: 'Let’s Encrypt', expire: '2026-11-17' },
-                  }),
+                  })
+                },
               }
             }}
           />
@@ -274,13 +304,25 @@ export default function ListeApplications() {
                 key={c.nom}
                 type="button"
                 onClick={() => {
-                  const premier = HEBERGEMENTS.find((h) => h.orgId === ORG_COURANTE.id)
+                  const premier = hebergementsConnus[0]
                   const idSite = tousSites.identifiant('site')
                   const hote = `${c.nom.toLowerCase().replace(/[^a-z]/g, '')}.${premier ? nomServi(premier) : 'dba.africa'}`
                   executer({
                     action: 'service.admin',
                     titre: `Installation de ${c.nom} lancée`,
                     detail: `${hote} · PHP ${c.php}. Le contenu s’édite ensuite dans l’application.`,
+                    appel: () =>
+                      premier
+                        ? creerRessource('/web/sites', {
+                            hebergementId: premier.id,
+                            site: {
+                              hote,
+                              type: c.type as SiteWeb['type'],
+                              phpVersion: c.php === '—' ? '8.3' : c.php,
+                              ssl: true,
+                            },
+                          })
+                        : Promise.resolve(),
                     effet: () =>
                       premier
                         ? tousSites.creer({
@@ -298,11 +340,16 @@ export default function ListeApplications() {
                           })
                         : undefined,
                     job: { workflow: 'web.app.install', cible: `${c.nom} · ${hote}` },
-                    effetFinal: () =>
+                    effetFinal: () => {
+                      if (estActif()) {
+                        tousSites.recharger()
+                        return
+                      }
                       tousSites.modifier(idSite, {
                         statut: 'en_ligne',
                         ssl: { etat: 'actif', emetteur: 'Let’s Encrypt', expire: '2026-11-17' },
-                      }),
+                      })
+                    },
                   })
                 }}
                 className="rounded-[8px] border border-g-300 bg-white p-3 text-left transition-colors hover:border-p-400 hover:bg-p-050"

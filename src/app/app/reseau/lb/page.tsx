@@ -1,12 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Plus, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, num, pct } from '@/lib/format'
-import type { LoadBalancer } from '@/lib/types'
-import { K8S_CLUSTERS, LOAD_BALANCERS, PUBLIC_IPS, VMS } from '@/lib/mock'
+import type { LoadBalancer, PublicIP, VM } from '@/lib/types'
+import { LOAD_BALANCERS, PUBLIC_IPS, VMS } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -17,6 +17,8 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { CostPreview, WizardShell } from '@/components/composition/flow'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
+import { useOperation } from '@/components/app/actions'
+import { creerRessource, estActif } from '@/lib/api/client'
 
 export default function LoadBalancers() {
   const espace = useEspace()
@@ -34,7 +36,7 @@ export default function LoadBalancers() {
       cle: (l) => l.nom,
       rendu: (l) => (
         <span className="block">
-          <span className="block font-mono text-[13px] font-semibold text-ink">{l.nom}</span>
+          <span className="block font-mono text-[12.5px] font-semibold text-ink">{l.nom}</span>
           <span className="block text-[11px] text-g-500">
             {l.exposure === 'public' ? 'Exposé sur Internet' : 'Interne'}
           </span>
@@ -128,7 +130,7 @@ export default function LoadBalancers() {
       rendu: (l) => (
         <Link
           href={`/app/reseau/lb/${l.id}`}
-          className="text-[12px] font-semibold text-p-700 hover:underline"
+          className="text-[12px] font-semibold text-p-700 hover:text-m-600"
         >
           Ouvrir →
         </Link>
@@ -160,7 +162,7 @@ export default function LoadBalancers() {
         <StatTile
           libelle="Requêtes par seconde"
           valeur={num(lbs.reduce((a, l) => a + l.metriques.rps, 0))}
-          ton="accent"
+          ton="violet"
         />
         <StatTile
           libelle="Backends sains"
@@ -202,14 +204,15 @@ export default function LoadBalancers() {
           titre: 'Aucun load balancer',
           phrase:
             'Un load balancer répartit le trafic entre plusieurs cibles, termine le TLS et applique un pare-feu applicatif. C’est la brique qui rend une application réellement redondante.',
-          action: { libelle: 'Créer un load balancer', href: '#' },
+          action: { libelle: 'Créer un load balancer', onClick: () => setAssistant(true) },
         }}
       />
 
-      <Callout ton="violet" titre="Le mode drain">
-        Il arrête l’envoi de nouvelles requêtes à une cible tout en laissant finir celles en cours,
-        là où un retrait du pool les coupe. Sur chaque cible, onglet Backends du détail d’un load
-        balancer.
+      <Callout ton="violet" titre="Le mode drain, sous-estimé et essentiel">
+        Retirer brutalement une cible du pool coupe les connexions en cours. Le mode drain arrête de
+        lui envoyer de nouvelles requêtes tout en laissant finir celles en cours : c’est ce qui rend
+        un déploiement réellement sans coupure. Vous le trouverez sur chaque cible, dans l’onglet
+        Backends du détail d’un load balancer.
       </Callout>
     </div>
   )
@@ -228,6 +231,7 @@ const ETAPES = [
 function AssistantLb({ onFermer }: { onFermer: () => void }) {
   const espace = useEspace()
   const { pousser } = useApp()
+  const executer = useOperation()
   const collection = useCollection<LoadBalancer>('load-balancers', LOAD_BALANCERS)
   const { lancerJob } = useAtelier()
   const [etape, setEtape] = useState(1)
@@ -236,16 +240,14 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
   const [layer, setLayer] = useState<'l4' | 'l7'>('l7')
   const [exposure, setExposure] = useState<'public' | 'interne'>('public')
   const [vipMode, setVipMode] = useState<'existante' | 'nouvelle'>('existante')
-  const [vip, setVip] = useState(
-    PUBLIC_IPS.find((i) => i.espaceId === espace.id && !i.attachedTo)?.adresse ?? '',
-  )
+  const [vip, setVip] = useState('')
   const [portHttps, setPortHttps] = useState(443)
   const [tlsMin, setTlsMin] = useState('TLS 1.2')
   const [certAuto, setCertAuto] = useState(true)
   const [redirection, setRedirection] = useState(true)
   const [algo, setAlgo] = useState<LoadBalancer['algo']>('least_conn')
   const [sticky, setSticky] = useState(true)
-  const [cibles, setCibles] = useState<string[]>(['vm-web-01', 'vm-web-02'])
+  const [cibles, setCibles] = useState<string[]>([])
   const [waf, setWaf] = useState(true)
   const [rateLimit, setRateLimit] = useState(1200)
   const [hcChemin, setHcChemin] = useState('/healthz')
@@ -253,14 +255,24 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
   const [hcSeuilKo, setHcSeuilKo] = useState(3)
   const [hcSeuilOk, setHcSeuilOk] = useState(2)
   const [conditions, setConditions] = useState(false)
+  /** Erreurs de champs du backend (`422`) : l’assistant reste ouvert et les affiche. */
+  const [erreurs, setErreurs] = useState<Record<string, string>>({})
 
-  const ipsLibres = PUBLIC_IPS.filter((i) => i.espaceId === espace.id && !i.attachedTo)
-  const vmsEspace = VMS.filter((v) => v.espaceId === espace.id)
-  const k8sEspace = K8S_CLUSTERS.filter((k) => k.espaceId === espace.id)
-  const catalogueCibles = [
-    ...vmsEspace.map((v) => ({ id: v.id, label: v.nom, detail: `${v.ips.find((i) => i.type === 'privee')?.adresse} · ${v.os}` })),
-    ...k8sEspace.map((k) => ({ id: `${k.id}/ingress`, label: `k8s · ${k.nom}`, detail: `Cluster Kubernetes · ${k.version}` })),
-  ]
+  // `ips` et `vms` ont chacun un vrai backend (`/ips`, `/vms`) : lire les
+  // graines `PUBLIC_IPS`/`VMS` directement ici renvoyait toujours des IP et des
+  // VM de démonstration (`vm-web-01`…) même en mode API, où l'Espace réel a
+  // d'autres identifiants — même défaut que `offerId`/`reseauId` sur
+  // `/app/vms/new`, corrigé au même patron : état vide au montage, resynchronisé
+  // par effet dès que la vraie liste charge.
+  const ipsCol = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  const ipsLibres = ipsCol.items.filter((i) => i.espaceId === espace.id && !i.attachedTo)
+  useEffect(() => {
+    if (!vip && ipsLibres.length > 0) setVip(ipsLibres[0].adresse)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ipsLibres.length])
+
+  const vmsCol = useCollection<VM>('vms', VMS)
+  const vmsEspace = vmsCol.items.filter((v) => v.espaceId === espace.id)
 
   const lignesCout = [
     { libelle: `Load balancer ${layer.toUpperCase()}`, detail: nom, montant: 18000 },
@@ -319,7 +331,7 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   ],
                   pool: cibles.map((cible) => ({
                     targetId: cible,
-                    targetLabel: catalogueCibles.find((c) => c.id === cible)?.label ?? cible,
+                    targetLabel: vmsEspace.find((v) => v.id === cible)?.nom ?? cible,
                     poids: 10,
                     sante: 'drain' as const,
                   })),
@@ -342,6 +354,50 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                     taux5xx: 0,
                     connexions: 0,
                   },
+                }
+                // POST /load-balancers — le backend refuse `waf` et `rateLimit`
+                // à la création (501) : ils restent locaux, hors de l’appel.
+                if (estActif()) {
+                  setErreurs({})
+                  executer({
+                    action: 'lb.create',
+                    titre: `Création de ${nom} lancée`,
+                    detail: 'La VIP est réservée, les health checks démarrent dans une minute.',
+                    onErreur: (e) => setErreurs(e.champs ?? {}),
+                    // L’assistant se ferme dès que le `202` est accepté ; sur
+                    // refus il reste ouvert avec les champs en cause.
+                    appel: () =>
+                      creerRessource('/load-balancers', {
+                        espaceId: espace.id,
+                        nom,
+                        layer,
+                        exposure,
+                        algo,
+                        ...(sticky ? { sticky: 'cookie' } : {}),
+                        listeners: [
+                          {
+                            protocole: 'HTTPS',
+                            port: portHttps,
+                            ...(certAuto ? { certId: 'cert-auto' } : {}),
+                            tlsMin,
+                          },
+                          ...(redirection ? [{ protocole: 'HTTP', port: 80 }] : []),
+                        ],
+                        cibles: cibles.map((cible) => ({ targetId: cible, poids: 10 })),
+                        healthCheck: {
+                          protocole: layer === 'l7' ? 'HTTP' : 'TCP',
+                          ...(layer === 'l7' ? { chemin: hcChemin, codeAttendu: 200 } : {}),
+                          intervalleS: hcIntervalle,
+                          seuilKo: hcSeuilKo,
+                          seuilOk: hcSeuilOk,
+                        },
+                      }).then((r) => {
+                        onFermer()
+                        return r
+                      }),
+                    effetFinal: () => collection.recharger(),
+                  })
+                  return
                 }
                 collection.creer(nouveau)
                 pousser({
@@ -398,7 +454,7 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   )}
                 >
                   <span className="type-h3 block">{t}</span>
-                  <span className="mt-1.5 block text-[13px] leading-relaxed text-g-700">{d}</span>
+                  <span className="mt-1.5 block text-[12.5px] leading-relaxed text-g-700">{d}</span>
                 </button>
               ))}
             </div>
@@ -423,7 +479,7 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   )}
                 >
                   <span className="type-h3 block">{t}</span>
-                  <span className="mt-1.5 block text-[13px] leading-relaxed text-g-700">{d}</span>
+                  <span className="mt-1.5 block text-[12.5px] leading-relaxed text-g-700">{d}</span>
                 </button>
               ))}
             </div>
@@ -443,7 +499,7 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
               <Field label="Adresse proposée">
                 <Input value="10.0.2.100" readOnly className="font-mono" />
               </Field>
-              <p className="mt-2 text-[12px] text-g-500">
+              <p className="mt-2 text-[11.5px] text-g-500">
                 L’adresse est réservée dans {espace.cidr} et résolvable par le DNS interne sous{' '}
                 <span className="font-mono">{nom}.{espace.code.toLowerCase()}.interne.synelia.cloud</span>.
                 Aucune IP publique n’est consommée.
@@ -585,32 +641,40 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
               titre="Cibles du pool"
               sousTitre="Machines virtuelles ou workloads Kubernetes. Le mélange est possible — utile pendant une migration."
             />
+            {vmsEspace.length === 0 && (
+              <p className="rounded-[6px] border border-dashed border-g-300 bg-g-050 px-3 py-4 text-center text-[12.5px] text-g-500">
+                Aucune machine virtuelle dans cet Espace pour l’instant — le load balancer se crée
+                sans cible, à compléter depuis sa fiche une fois une VM disponible.
+              </p>
+            )}
             <div className="space-y-2">
-              {catalogueCibles.map((c) => (
+              {vmsEspace.map((v) => (
                 <label
-                  key={c.id}
+                  key={v.id}
                   className={cn(
                     'flex cursor-pointer items-center gap-3 rounded-[6px] border px-3 py-2 transition-colors',
-                    cibles.includes(c.id) ? 'border-p-300 bg-p-050' : 'border-g-300 hover:bg-g-050',
+                    cibles.includes(v.id) ? 'border-p-300 bg-p-050' : 'border-g-300 hover:bg-g-050',
                   )}
                 >
                   <input
                     type="checkbox"
-                    checked={cibles.includes(c.id)}
+                    checked={cibles.includes(v.id)}
                     onChange={() =>
                       setCibles((p) =>
-                        p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p, c.id],
+                        p.includes(v.id) ? p.filter((x) => x !== v.id) : [...p, v.id],
                       )
                     }
                     className="h-3.5 w-3.5 accent-[#4B2882]"
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block font-mono text-[13px] font-medium text-ink">
-                      {c.label}
+                    <span className="block font-mono text-[12.5px] font-medium text-ink">
+                      {v.nom}
                     </span>
-                    <span className="block text-[11px] text-g-500">{c.detail}</span>
+                    <span className="block text-[11px] text-g-500">
+                      {v.ips.find((i) => i.type === 'privee')?.adresse} · {v.os}
+                    </span>
                   </span>
-                  {cibles.includes(c.id) && (
+                  {cibles.includes(v.id) && (
                     <span className="flex shrink-0 items-center gap-2">
                       <span className="text-[11px] text-g-500">Poids</span>
                       <Input
@@ -623,11 +687,6 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   )}
                 </label>
               ))}
-              {catalogueCibles.length === 0 && (
-                <p className="py-4 text-center text-[13px] text-g-500">
-                  Aucune machine ni cluster Kubernetes dans cet Espace.
-                </p>
-              )}
             </div>
           </Card>
 
@@ -689,6 +748,17 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
       {/* Étape 5 — Health check */}
       {etape === 5 && (
         <div className="space-y-4">
+          {Object.keys(erreurs).length > 0 && (
+            <Callout ton="err" titre="Le backend a refusé la demande">
+              <ul className="mt-1 space-y-0.5">
+                {Object.entries(erreurs).map(([champ, message]) => (
+                  <li key={champ}>
+                    <span className="font-mono text-[12px]">{champ}</span> : {message}
+                  </li>
+                ))}
+              </ul>
+            </Callout>
+          )}
           <Card>
             <CardHeader
               titre="Health check"
@@ -807,9 +877,9 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
 function Petit({ cle, valeur, mono }: { cle: string; valeur: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <dt className="shrink-0 text-[12px] text-g-500">{cle}</dt>
+      <dt className="shrink-0 text-[11.5px] text-g-500">{cle}</dt>
       <dd
-        className={cn('truncate text-right text-[12px] font-semibold text-ink', mono && 'font-mono')}
+        className={cn('truncate text-right text-[11.5px] font-semibold text-ink', mono && 'font-mono')}
       >
         {valeur}
       </dd>

@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Clock, Download, Phone, Send } from 'lucide-react'
+import { Clock, Download, Phone, Receipt, Send } from 'lucide-react'
 import { cn, trendSeries } from '@/lib/utils'
 import { dateCourte, MAINTENANT, money, pct } from '@/lib/format'
 import { telechargerCsv } from '@/lib/export'
 import type { Impaye } from '@/lib/mock'
 import {
   IMPAYES,
+  libellePlan,
   MARGE_BACKENDS,
   ORGANISATIONS,
   SYNTHESE_PLATEFORME,
@@ -25,6 +26,7 @@ import { StackedBar, StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'revenus', label: 'Revenus' },
@@ -95,6 +97,17 @@ export default function FacturationAdmin() {
         : suspendre
           ? 'La suspension est consignée avec votre nom : elle arrête l’activité du client.'
           : 'Le dossier est mis à jour et l’action est consignée dans son historique.',
+      // Seule la relance écrite a un équivalent distant (vague de
+      // relances) ; le reste — appel, échelonnement, avoir, promesse,
+      // clôture — vit dans le journal local du dossier.
+      appel:
+        action === 'relance'
+          ? () =>
+              requete('/admin/facturation/impayes/relances', {
+                methode: 'POST',
+                corps: { factures: [relance.facture], niveau: 'rappel' },
+              })
+          : undefined,
       effet: () =>
         clos
           ? impayes.supprimer(relance.id)
@@ -114,10 +127,12 @@ export default function FacturationAdmin() {
                 },
               ],
             })),
+      effetFinal: () => impayes.recharger(),
     })
     setRelanceId(null)
   }
 
+  const api = estActif()
   const caMensuel = SYNTHESE_PLATEFORME.caMensuel
   const impayesTotal = impayes.items.reduce((a, i) => a + i.montant, 0)
   const coutInfra = MARGE_BACKENDS.reduce((a, m) => a + m.coutInfra, 0)
@@ -141,7 +156,8 @@ export default function FacturationAdmin() {
   return (
     <div className="space-y-5">
       <PageHeader
-        titre="Facturation de la plateforme"
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Facturation & marge' }]}
+        titre="Facturation & marge"
         sousTitre="Revenus par canal, cycle d’émission, recouvrement et rentabilité par socle. Le recouvrement se fait par appel et échelonnement avant de parler de suspension : une entreprise dont la trésorerie est tendue reste un client, pas un problème."
         actions={
           <BoutonFormulaire
@@ -234,6 +250,7 @@ export default function FacturationAdmin() {
           libelle="CA mensuel récurrent"
           valeur={money(caMensuel)}
           ton="ok"
+          detail={api ? 'Démonstration — pas encore une lecture réelle' : undefined}
           serie={trendSeries('admin-ca', 12, caMensuel * 0.68, caMensuel)}
         />
         <StatTile
@@ -284,7 +301,7 @@ export default function FacturationAdmin() {
                   </span>
                 ))}
               </div>
-              <div className="mt-2 flex justify-between text-[11px] text-g-500">
+              <div className="mt-2 flex justify-between text-[10.5px] text-g-500">
                 <span>Sept. 2025</span>
                 <span>Août 2026</span>
               </div>
@@ -378,21 +395,21 @@ export default function FacturationAdmin() {
                           <td className="px-3 py-2.5">
                             <Link
                               href={`/admin/organisations/${o.id}`}
-                              className="text-[13px] font-semibold text-ink hover:text-p-700"
+                              className="text-[12.5px] font-semibold text-ink hover:text-p-700"
                             >
                               {o.nom}
                             </Link>
                           </td>
-                          <td className="px-3 py-2.5 text-[12px] text-g-700">
+                          <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                             {o.secteur ?? '—'}
                           </td>
-                          <td className="px-3 py-2.5 text-[12px] text-g-700">
-                            {o.tenantPlan ?? '—'}
+                          <td className="px-3 py-2.5 text-[11.5px] text-g-700">
+                            {libellePlan(o.tenantPlan)}
                           </td>
                           <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
                             {o.espaces ?? 0}
                           </td>
-                          <td className="tnum px-3 py-2.5 text-[13px] font-bold text-ink">
+                          <td className="tnum px-3 py-2.5 text-[12.5px] font-bold text-ink">
                             {money(o.caMensuel ?? 0)}
                           </td>
                           <td className="w-40 px-3 py-2.5">
@@ -406,7 +423,7 @@ export default function FacturationAdmin() {
                                   style={{ width: `${Math.min(100, part * 3)}%` }}
                                 />
                               </span>
-                              <span className="tnum shrink-0 text-[12px] text-g-700">
+                              <span className="tnum shrink-0 text-[11.5px] text-g-700">
                                 {pct(part, 1)}
                               </span>
                             </span>
@@ -444,9 +461,9 @@ export default function FacturationAdmin() {
           </Card>
 
           <Callout ton="warn" titre="Une organisation représente plus d’un quart du revenu">
-            Son départ, ou une renégociation à la baisse, se verrait immédiatement dans les comptes.
-            Le canal indirect est le levier de diversification : des clients plus petits, plus
-            nombreux.
+            C’est un risque de concentration qu’il faut regarder en face : son départ, ou une simple
+            renégociation à la baisse, se verrait immédiatement dans les comptes. Diversifier passe par
+            le canal indirect, qui apporte des clients plus petits mais plus nombreux.
           </Callout>
         </div>
       )}
@@ -507,13 +524,13 @@ export default function FacturationAdmin() {
                   key={x.j}
                   className={cn(
                     'flex flex-wrap items-start gap-3 rounded-[6px] border px-3 py-2.5',
-                    x.auto ? 'border-g-300' : 'border-warn/40',
+                    x.auto ? 'border-g-300' : 'border-warn/40 bg-warn-bg',
                   )}
                 >
-                  <span className="w-32 shrink-0 text-[12px] font-semibold text-p-700">{x.j}</span>
+                  <span className="w-32 shrink-0 text-[11.5px] font-semibold text-p-700">{x.j}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] font-semibold text-ink">{x.t}</span>
-                    <span className="block text-[12px] leading-relaxed text-g-700">{x.d}</span>
+                    <span className="block text-[12.5px] font-semibold text-ink">{x.t}</span>
+                    <span className="block text-[11.5px] leading-relaxed text-g-700">{x.d}</span>
                   </span>
                   <Badge tone={x.auto ? 'ok' : 'warn'} size="sm">
                     {x.auto ? 'Automatique' : 'Intervention humaine'}
@@ -521,9 +538,11 @@ export default function FacturationAdmin() {
                 </div>
               ))}
             </div>
-            <Callout ton="violet" className="mt-4" titre="Chaque anomalie est revue à la main">
-              Une facture qui triple d’un mois sur l’autre peut venir d’un gros traitement lancé par le
-              client comme d’un compteur défaillant de notre côté. Les deux se ressemblent.
+            <Callout ton="violet" className="mt-4" titre="La revue des anomalies n’est pas automatisable">
+              Une facture qui triple d’un mois sur l’autre peut être légitime — le client a lancé un
+              gros traitement — ou refléter un compteur défaillant de notre côté. Envoyer la facture
+              sans vérifier, c’est risquer de facturer une erreur à un client, ce qui coûte bien plus
+              cher en confiance qu’en trésorerie.
             </Callout>
           </Card>
 
@@ -548,7 +567,7 @@ export default function FacturationAdmin() {
                     key={x.l}
                     className="flex items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                   >
-                    <span className="text-[13px] text-ink">{x.l}</span>
+                    <span className="text-[12.5px] text-ink">{x.l}</span>
                     <Badge tone={x.t} size="sm">
                       {x.v}
                     </Badge>
@@ -559,16 +578,16 @@ export default function FacturationAdmin() {
                 className={cn(
                   'mt-3.5 rounded-[6px] border px-3 py-2.5',
                   anomalie === 'ouverte'
-                    ? 'border-warn/40'
+                    ? 'border-warn/40 bg-warn-bg'
                     : anomalie === 'verifiee'
-                      ? 'border-ok/40'
-                      : 'border-g-300',
+                      ? 'border-ok/40 bg-ok-bg'
+                      : 'border-info/40 bg-info-bg',
                 )}
               >
-                <p className="text-[13px] font-semibold text-ink">
+                <p className="text-[12.5px] font-semibold text-ink">
                   Anomalie : AMUGA, + 214 % sur le transfert sortant
                 </p>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">
                   {anomalie === 'ouverte'
                     ? '1,8 To de transfert sortant contre 580 Go le mois dernier. À vérifier avant émission : soit le client a mis en ligne un catalogue média, soit un compteur double-compte.'
                     : anomalie === 'verifiee'
@@ -692,11 +711,12 @@ export default function FacturationAdmin() {
 
       {onglet === 'recouvrement' && (
         <div className="space-y-4">
-          <Callout ton="violet" titre="Politique de recouvrement">
+          <Callout ton="violet" titre="Notre politique de recouvrement, écrite noir sur blanc">
             Relance automatique à trois jours, relance écrite à quinze, appel téléphonique à trente,
             proposition d’échelonnement systématique. La suspension n’intervient qu’après un rappel
-            écrit et quinze jours de plus, et reste une décision humaine consignée — jamais un
-            traitement automatique.
+            écrit et un délai de quinze jours supplémentaires, et c’est une décision humaine consignée.
+            Couper le service d’une entreprise, c’est arrêter son activité : nous ne le faisons pas par
+            traitement automatique nocturne.
           </Callout>
 
           <Card padding={false}>
@@ -731,7 +751,7 @@ export default function FacturationAdmin() {
                     .map((i) => (
                       <tr key={i.id} className="border-b border-g-100 last:border-0">
                         <td className="px-3 py-2.5">
-                          <span className="block text-[13px] font-semibold text-ink">{i.org}</span>
+                          <span className="block text-[12.5px] font-semibold text-ink">{i.org}</span>
                           {(i.echelonnement || i.suspendu) && (
                             <span className="mt-0.5 flex flex-wrap gap-1">
                               {i.echelonnement && (
@@ -748,10 +768,10 @@ export default function FacturationAdmin() {
                           )}
                         </td>
                         <td className="px-3 py-2.5 font-mono text-[12px] text-g-700">{i.facture}</td>
-                        <td className="tnum px-3 py-2.5 text-[13px] font-bold text-ink">
+                        <td className="tnum px-3 py-2.5 text-[12.5px] font-bold text-ink">
                           {money(i.montant)}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                           {dateCourte(i.echeance)}
                         </td>
                         <td className="px-3 py-2.5">
@@ -765,7 +785,7 @@ export default function FacturationAdmin() {
                           </Badge>
                         </td>
                         <td className="tnum px-3 py-2.5 text-[12px] text-g-700">{i.relances}</td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">
                           {i.echelonnement
                             ? 'Échelonnement en cours, relances suspendues'
                             : i.retardJours > 60
@@ -774,7 +794,7 @@ export default function FacturationAdmin() {
                                 ? 'Appel téléphonique'
                                 : 'Relance écrite'}
                           {i.prochaineRelance && (
-                            <span className="block text-[11px] text-g-500">
+                            <span className="block text-[10.5px] text-g-500">
                               Prévue le {dateCourte(i.prochaineRelance)}
                             </span>
                           )}
@@ -825,8 +845,9 @@ export default function FacturationAdmin() {
                   { cle: 'Créances passées en perte', valeur: money(0) },
                 ]}
               />
-              <Callout ton="ok" className="mt-4" titre="Six échelonnements accordés, six respectés">
-                Aucun n’a débouché sur une suspension.
+              <Callout ton="ok" className="mt-4" titre="L’échelonnement marche mieux que la menace">
+                Six échelonnements accordés, six respectés. Un client à qui l’on propose une solution
+                paie ; un client menacé de coupure cherche un autre fournisseur et laisse sa dette.
               </Callout>
             </Card>
 
@@ -845,10 +866,10 @@ export default function FacturationAdmin() {
                 ].map((x) => (
                   <div key={x.m}>
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="min-w-0 text-[13px] font-semibold text-ink">
+                      <span className="min-w-0 text-[12.5px] font-semibold text-ink">
                         {MOYEN_LABEL[x.m]}
                       </span>
-                      <span className="tnum shrink-0 text-[13px] font-bold text-ink">
+                      <span className="tnum shrink-0 text-[12.5px] font-bold text-ink">
                         {pct(x.pct)}
                       </span>
                     </div>
@@ -858,7 +879,7 @@ export default function FacturationAdmin() {
                         style={{ width: `${x.pct}%` }}
                       />
                     </span>
-                    <p className="mt-0.5 text-[11px] text-g-500">{x.n}</p>
+                    <p className="mt-0.5 text-[10.5px] text-g-500">{x.n}</p>
                   </div>
                 ))}
               </div>
@@ -924,11 +945,11 @@ export default function FacturationAdmin() {
                         <td className="px-3 py-2.5 font-mono text-[12px] font-semibold text-ink">
                           {m.backend}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{m.type}</td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{m.type}</td>
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {money(m.coutInfra)}
                         </td>
-                        <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
+                        <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                           {money(m.revenu)}
                         </td>
                         <td className="tnum px-3 py-2.5 text-[12px] font-bold text-ink">
@@ -992,6 +1013,7 @@ export default function FacturationAdmin() {
               <CardHeader
                 titre="Structure de coûts"
                 sousTitre="Ce qui compose le coût d’infrastructure mensuel."
+                actions={<Receipt size={15} className="text-p-700" />}
               />
               <div className="space-y-2.5">
                 {[
@@ -1022,8 +1044,9 @@ export default function FacturationAdmin() {
                 ))}
               </div>
               <Callout ton="warn" className="mt-4" titre="Les licences pèsent presque autant que le matériel">
-                24 % du coût d’infrastructure part en licences pour la couche de virtualisation. La
-                trajectoire de sortie supprime cette ligne au fil des migrations.
+                24 % du coût d’infrastructure part en licences pour la couche de virtualisation, sans
+                que le client en retire quoi que ce soit qu’un socle libre ne fournirait pas. C’est la
+                dépense la plus facile à supprimer, et c’est ce que fait la trajectoire de sortie.
               </Callout>
             </Card>
           </div>
@@ -1158,10 +1181,10 @@ export default function FacturationAdmin() {
                   className="rounded-[6px] border border-g-300 px-3 py-2.5"
                 >
                   <span className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-[13px] font-semibold text-ink">{e.action}</span>
+                    <span className="text-[12.5px] font-semibold text-ink">{e.action}</span>
                     <span className="tnum text-[11px] text-g-500">{dateCourte(e.date)}</span>
                   </span>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">{e.note}</p>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">{e.note}</p>
                 </li>
               ))}
             </ol>

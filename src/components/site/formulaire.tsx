@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/composition/card'
+import { ApiError } from '@/lib/api/client'
 
 /**
  * Formulaire de la vitrine — envoi simulé, mais réellement traité.
@@ -22,6 +23,7 @@ export function FormulaireSite({
   phraseSucces,
   suite,
   complement,
+  envoi,
 }: {
   children: ReactNode
   libelle: string
@@ -31,8 +33,16 @@ export function FormulaireSite({
   suite: string[]
   /** Badges ou mentions affichés sous le bouton. */
   complement?: ReactNode
+  /**
+   * Envoi réel (`POST /public/contact|devis`) depuis le formulaire : renvoie
+   * la référence d’accusé de réception. Absent = maquette (référence locale
+   * et mention « aucun courriel ne part »).
+   */
+  envoi?: (formulaire: HTMLFormElement) => Promise<string>
 }) {
   const [reference, setReference] = useState<string | null>(null)
+  const [erreur, setErreur] = useState<string | null>(null)
+  const [envoiEnCours, setEnvoiEnCours] = useState(false)
 
   if (reference) {
     return (
@@ -55,11 +65,13 @@ export function FormulaireSite({
             </li>
           ))}
         </ol>
-        <Callout ton="info" titre="Cette maquette n’envoie aucun courriel">
-          Le formulaire est fonctionnel à l’écran — champs obligatoires, accusé de réception,
-          référence — mais aucune donnée ne quitte votre navigateur : il n’y a pas de serveur derrière
-          cette démonstration.
-        </Callout>
+        {!envoi && (
+          <Callout ton="info" titre="Cette maquette n’envoie aucun courriel">
+            Le formulaire est fonctionnel à l’écran — champs obligatoires, accusé de réception,
+            référence — mais aucune donnée ne quitte votre navigateur : il n’y a pas de serveur
+            derrière cette démonstration.
+          </Callout>
+        )}
         <Button variant="secondary" fullWidth onClick={() => setReference(null)}>
           Remplir une autre demande
         </Button>
@@ -67,18 +79,42 @@ export function FormulaireSite({
     )
   }
 
+  const soumettre = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!envoi) {
+      compteur += 1
+      setReference(`SYN-2026-${String(4180 + compteur).padStart(4, '0')}`)
+      return
+    }
+    setErreur(null)
+    setEnvoiEnCours(true)
+    envoi(e.currentTarget).then(
+      (ref) => {
+        setEnvoiEnCours(false)
+        setReference(ref)
+      },
+      (err: unknown) => {
+        setEnvoiEnCours(false)
+        setErreur(
+          err instanceof ApiError
+            ? `${err.message}${err.correlationId ? ` Référence ${err.correlationId}.` : ''}`
+            : 'Le serveur ne répond pas. Réessayez dans un moment.',
+        )
+      },
+    )
+  }
+
   return (
-    <form
-      className="space-y-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        compteur += 1
-        setReference(`SYN-2026-${String(4180 + compteur).padStart(4, '0')}`)
-      }}
-    >
+    <form className="space-y-4" onSubmit={soumettre}>
       {children}
-      <Button type="submit" size="lg" fullWidth>
-        {libelle}
+      {erreur && (
+        <p className="flex items-start gap-1.5 rounded-[6px] border border-err/40 bg-err-bg px-3 py-2 text-[12px] leading-relaxed text-ink">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-err" />
+          {erreur}
+        </p>
+      )}
+      <Button type="submit" size="lg" fullWidth disabled={envoiEnCours}>
+        {envoiEnCours ? 'Envoi en cours…' : libelle}
       </Button>
       {complement}
     </form>

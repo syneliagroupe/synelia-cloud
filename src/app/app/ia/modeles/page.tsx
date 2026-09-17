@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
+import { useCollection } from '@/components/app/atelier'
 
 /** Requête de référence pour comparer les tarifs : 2 000 jetons entrent, 400 sortent. */
 const REFERENCE = { entree: 2_000, sortie: 400, requetes: 1_000 }
@@ -20,8 +21,10 @@ function coutReference(m: ModeleIA): number {
 }
 
 export default function CatalogueModeles() {
-  const souverains = MODELES_IA.filter((m) => m.hebergement === 'souverain')
-  const texte = [...MODELES_IA]
+  const modelesCol = useCollection<ModeleIA>('modeles-ia', MODELES_IA)
+  const modeles = modelesCol.items
+  const souverains = modeles.filter((m) => m.hebergement === 'souverain')
+  const texte = [...modeles]
     .filter((m) => m.famille === 'texte')
     .sort((a, b) => coutReference(a) - coutReference(b))
   const moinsCher = texte[0]
@@ -40,7 +43,7 @@ export default function CatalogueModeles() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile libelle="Modèles au catalogue" valeur={MODELES_IA.length} />
+        <StatTile libelle="Modèles au catalogue" valeur={modeles.length} />
         <StatTile
           libelle="Servis depuis nos datacenters"
           valeur={souverains.length}

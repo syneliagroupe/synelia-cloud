@@ -133,8 +133,10 @@ export const parametres = {
     required: false,
     description:
       "Langue des libellés renvoyés par l'API (messages, intitulés de catalogue). " +
-      '`fr` par défaut ; `en` prévu. Les identifiants et les codes ne sont jamais traduits.',
-    schema: liste(['fr', 'en'], undefined, { default: 'fr' }),
+      "Chaîne libre (l'API accepte toute étiquette de langue RFC 5646 envoyée par un client HTTP réel) ; " +
+      "seul `fr` est effectivement traduit aujourd'hui, tout le reste retombe sur `fr`. " +
+      'Les identifiants et les codes ne sont jamais traduits.',
+    schema: chaine(undefined, { default: 'fr' }),
   },
   Page: {
     name: 'page',
@@ -288,7 +290,12 @@ export function op({
     reponsesOp['403'] = R('Interdit')
   }
   if (tous.some((p) => p.in === 'path')) reponsesOp['404'] = R('Introuvable')
-  if (corps || destructif) reponsesOp['422'] = R('Invalidee')
+  // `parPage` (entre autres) porte des bornes (`minimum`/`maximum`) que l'API fait
+  // vraiment respecter : une pagination hors bornes ou un paramètre requis absent
+  // renvoient un 422, tout comme un corps de requête invalide.
+  if (corps || destructif || paginee || tous.some((p) => p.in === 'query' && p.required)) {
+    reponsesOp['422'] = R('Invalidee')
+  }
   for (const e of erreurs) reponsesOp[e] = R(NOM_ERREUR[e])
   reponsesOp['429'] = R('TropDeRequetes')
   reponsesOp['500'] = R('Serveur')
@@ -318,6 +325,7 @@ const NOM_ERREUR = {
   409: 'Conflit',
   402: 'Quota',
   424: 'Degrade',
+  404: 'Introuvable',
 }
 
 /** Paramètre de chemin. */
@@ -330,11 +338,11 @@ export const chemin = (nom, description, exemple) => ({
   ...(exemple ? { example: exemple } : {}),
 })
 
-/** Paramètre de filtre en requête. */
-export const filtre = (nom, schema, description) => ({
+/** Paramètre de filtre en requête. `requis` pour les rares paramètres que l'API exige vraiment. */
+export const filtre = (nom, schema, description, requis = false) => ({
   name: nom,
   in: 'query',
-  required: false,
+  required: requis,
   description,
   schema,
 })
@@ -363,6 +371,7 @@ export function crud({
   sansSuppression = false,
   sansCreation = false,
   sansModification = false,
+  erreursCreation = [],
   idsOperations = {},
 }) {
   const P0 = idsOperations
@@ -393,7 +402,7 @@ export function crud({
       ok: creationAsync ? ref('TravailProvisioning') : ref(schema),
       code: creationAsync ? 202 : 201,
       rbac: rbacEcriture,
-      erreurs: creationAsync ? [409, 402] : [409],
+      erreurs: [...(creationAsync ? [409, 402] : [409]), ...erreursCreation],
     })
   }
 

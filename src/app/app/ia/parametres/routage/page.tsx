@@ -80,7 +80,13 @@ export default function ReglesRoutage() {
               sousTitre="La première règle qui correspond gagne. Une requête qui n’en satisfait aucune part sur le modèle par défaut de sa clé."
               actions={
                 <GatedAction autorise={peutModifier} message={refus('ia.routing.update')}>
-                  <Button size="sm" variant="secondary" iconBefore={<Plus size={13} />}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    iconBefore={<Plus size={13} />}
+                    disabled
+                    title="La création d’une règle de routage n’a pas encore de contrepartie côté backend — cette liste reste fixe pour l’instant."
+                  >
                     Ajouter une règle
                   </Button>
                 </GatedAction>
@@ -127,7 +133,8 @@ export default function ReglesRoutage() {
                             label={`Remonter la règle ${r.nom}`}
                             variant="ghost"
                             size="sm"
-                            disabled={i === 0}
+                            disabled
+                            title="Réordonner les règles n’a pas encore de contrepartie côté backend."
                           >
                             <ArrowUp size={13} />
                           </IconButton>
@@ -137,7 +144,8 @@ export default function ReglesRoutage() {
                             label={`Descendre la règle ${r.nom}`}
                             variant="ghost"
                             size="sm"
-                            disabled={i === REGLES_ROUTAGE.length - 1}
+                            disabled
+                            title="Réordonner les règles n’a pas encore de contrepartie côté backend."
                           >
                             <ArrowDown size={13} />
                           </IconButton>

@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2 } from 'lucide-react'
 import { money } from '@/lib/format'
 import { ESPACES, PROJETS, SERVICES_PROJET } from '@/lib/mock'
-import type { Projet, ServiceProjet } from '@/lib/types'
+import type { EspaceCloud, Projet, ServiceProjet } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -15,17 +15,26 @@ import { ConfirmDialog } from '@/components/ui/overlay'
 import { EnteteProjet, ProjetIntrouvable } from '@/components/business/projets'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { useServicesProjet } from '@/lib/api/services-projet'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { estActif, modifierRessource, requete, supprimerRessource } from '@/lib/api/client'
 
 export function VueParametres({ id }: { id: string }) {
   const router = useRouter()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
+  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
   const executer = useOperation()
   const { autorise, refus } = useApp()
 
   const projet = lesProjets.items.find((p) => p.id === id)
-  const services = lesServices.items.filter((x) => x.projetId === id)
+  // Avec l’API, la liste vient de `GET /projets/{id}/services` (route nichée,
+  // hors registre) ; en maquette, du filtre local.
+  const { distants: servicesDistants } = useServicesProjet(id)
+  const services = useMemo(
+    () => servicesDistants ?? lesServices.items.filter((x) => x.projetId === id),
+    [servicesDistants, lesServices.items, id],
+  )
   const [suppression, setSuppression] = useState(false)
   const [nom, setNom] = useState(projet?.nom ?? '')
   const [description, setDescription] = useState(projet?.description ?? '')
@@ -77,7 +86,7 @@ export function VueParametres({ id }: { id: string }) {
               hint="Détermine le quota consommé et le site physique par défaut des services."
             >
               <Select value={espaceId} onChange={(e) => setEspaceId(e.target.value)}>
-                {ESPACES.map((e) => (
+                {espacesCol.items.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.code} — {e.offreNom}
                   </option>
@@ -105,12 +114,20 @@ export function VueParametres({ id }: { id: string }) {
               action: 'app.deploy',
               titre: `Paramètres de ${nom.trim()} enregistrés`,
               detail: 'Aucun service n’a été redémarré : ces réglages sont de l’identité, pas de la configuration d’exécution.',
+              appel: () =>
+                modifierRessource('/projets', projet.id, {
+                  nom: nom.trim(),
+                  description: description.trim(),
+                  espaceId,
+                  environnements: projet.environnements,
+                }),
               effet: () =>
                 lesProjets.modifier(projet.id, {
                   nom: nom.trim(),
                   description: description.trim(),
                   espaceId,
                 }),
+              effetFinal: () => lesProjets.recharger(),
             }}
           />
         </Card>
@@ -174,10 +191,17 @@ export function VueParametres({ id }: { id: string }) {
               operation={(v) => ({
                 titre: `Environnement « ${v.nom} » ajouté`,
                 detail: 'Il est vide : déployez-y un service pour qu’il commence à exister.',
+                appel: () =>
+                  modifierRessource('/projets', projet.id, {
+                    nom: projet.nom,
+                    espaceId: projet.espaceId,
+                    environnements: [...projet.environnements, String(v.nom).trim()],
+                  }),
                 effet: () =>
                   lesProjets.modifier(projet.id, (p) => ({
                     environnements: [...p.environnements, String(v.nom).trim()],
                   })),
+                effetFinal: () => lesProjets.recharger(),
               })}
             />
           </Card>
@@ -216,18 +240,33 @@ export function VueParametres({ id }: { id: string }) {
         open={suppression}
         onClose={() => setSuppression(false)}
         onConfirm={() => {
+          // DELETE /projets/{id} refuse un projet non vide (`409`) : les
+          // services partent d’abord, un par un, puis le projet. `202` suivi.
+          const viderPuisSupprimer = async () => {
+            for (const s of services) {
+              await requete(
+                `/projets/${encodeURIComponent(projet.id)}/services/${encodeURIComponent(s.id)}`,
+                { methode: 'DELETE', query: { confirmation: s.nom } },
+              )
+            }
+            return supprimerRessource('/projets', projet.id, projet.nom)
+          }
           executer({
             action: 'app.deploy',
             ton: 'warn',
             titre: `Projet ${projet.nom} supprimé`,
             detail: `${services.length} service(s) arrêté(s) puis détruit(s). Les sauvegardes suivent leur rétention légale, puis disparaissent.`,
+            ...(estActif() ? { appel: viderPuisSupprimer } : {}),
             effet: () => {
               lesServices.supprimer(services.map((x) => x.id))
               lesProjets.supprimer(projet.id)
             },
+            effetFinal: () => {
+              lesProjets.recharger()
+              router.push('/app/applications/projets')
+            },
           })
           setSuppression(false)
-          router.push('/app/applications/projets')
         }}
         titre="Supprimer le projet"
         ressource={projet.nom}

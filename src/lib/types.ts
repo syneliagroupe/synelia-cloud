@@ -1,6 +1,7 @@
 /**
  * Modèle de données — Synelia Cloud (spécification Partie 9).
- * Toutes les données de l'application sont fictives (Partie 11).
+ * Modèle de données partagé par la maquette (`src/lib/mock/`) et le contrat
+ * d'API (`docs/api/openapi.json`) ; les noms de champs y font foi.
  */
 
 export type Site = 'ABJ' | 'GBM'
@@ -96,6 +97,8 @@ export interface Membership {
   scopeType: ScopeType
   scopeId?: string
   scopeLabel?: string
+  /** Utilisateur embarqué par le backend (`GET /membres`) ; absent côté maquette. */
+  utilisateur?: User
 }
 
 // ─── IaaS ─────────────────────────────────────────────────────────────
@@ -307,6 +310,7 @@ export interface Volume {
 export interface Bucket {
   id: string
   orgId: string
+  espaceId: string
   nom: string
   region: Site
   classe: 'chaud' | 'froid'
@@ -416,7 +420,7 @@ export interface Application {
   id: string
   espaceId: string
   nom: string
-  source: 'git' | 'image' | 'canvas'
+  source: 'git' | 'image'
   repo?: { provider: 'github' | 'gitlab'; url: string; branche: string }
   builder?: 'nixpacks' | 'dockerfile' | 'image'
   cible: 'vm' | 'k8s'
@@ -509,14 +513,29 @@ export interface Projet {
   nom: string
   description: string
   espaceId: string
-  /** Un projet est toujours un cluster Kubernetes dédié — jamais des machines virtuelles. */
-  clusterId: string
-  /** Un load balancer L7 dédié, provisionné automatiquement à la création — c'est la porte d'entrée du projet. */
-  lbId: string
   cree: string
-  tags?: string[]
-  /** Un même projet se décline par environnement, chacun avec ses services. Un nouveau projet ne porte que « Production ». */
+  /** Ventilation de la dépense et recherche — pas de rôle fonctionnel. */
+  etiquettes: string[]
+  /**
+   * Le cluster Kubernetes qui héberge les services du projet — dédié
+   * (provisionné avec le projet) ou partagé avec d'autres projets du même
+   * Espace. Un projet ne consomme rien par lui-même : c'est ce cluster, et le
+   * load balancer qui pointe dessus, qui sont facturés dès la création.
+   */
+  clusterId: string
+  /**
+   * Le load balancer L7 dédié, provisionné avec le projet — la porte d'entrée
+   * de ses services. Optionnel : un projet servi par le backend n'en déclare
+   * pas toujours un, et la vue ne doit pas s'y fier.
+   */
+  lbId?: string
+  /** Un même projet se décline par environnement, chacun avec ses services. */
   environnements: string[]
+  /**
+   * Cible de calcul, fixée à la création (`k8s` par défaut) : servie par le
+   * backend, pas encore affichée côté maquette.
+   */
+  cible?: 'vm' | 'k8s'
   /** Variables partagées par tous les services du projet, par environnement. */
   variables: Array<{
     cle: string
@@ -535,6 +554,8 @@ export interface ServiceProjet {
   id: string
   projetId: string
   nom: string
+  /** Saisie à la création, à côté du nom — pas de rôle fonctionnel. */
+  description?: string
   type: TypeServiceProjet
   environnement: string
   statut: 'running' | 'building' | 'stopped' | 'degraded' | 'failed'
@@ -671,6 +692,11 @@ export interface CatalogService {
    * pas la nôtre. Les initiales et la teinte restent le repli.
    */
   icone: string
+  /**
+   * URL de logo servie par le backend — approche différente de `icone` (nom
+   * de pictogramme local), pas encore réconciliée entre maquette et contrat.
+   */
+  logoUrl?: string
   /** Couleur d'accent du logo de la solution, pour la vignette. */
   logoTeinte: string
   logoInitiales: string
@@ -739,6 +765,8 @@ export interface Seat {
   id: string
   managedServiceId: string
   userId: string
+  /** Utilisateur embarqué par le backend ; absent côté maquette. */
+  utilisateur?: User
   statut: 'actif' | 'suspendu'
   quotaUtilise?: number
   quotaTotal?: number
@@ -770,14 +798,14 @@ export interface WebHosting {
     ramGo: number
     diskGo: number
     ip: string
-    ipv6: string
+    ipv6?: string
     site: Site
     os: string
     serveurWeb: string
     statut: 'en_ligne' | 'maintenance' | 'redemarrage'
-    chargeCpuPct: number
-    ramUtiliseePct: number
-    uptimeJours: number
+    chargeCpuPct?: number
+    ramUtiliseePct?: number
+    uptimeJours?: number
   }
   php: {
     versionDefaut: string
@@ -800,8 +828,8 @@ export interface WebHosting {
     retentionJours: number
     destination: string
     immuable: boolean
-    derniere: string
-    taille: string
+    derniere?: string
+    taille?: string
     statut: 'ok' | 'echec' | 'en_cours'
   }
   statut: 'en_ligne' | 'maintenance' | 'suspendu'
@@ -863,8 +891,8 @@ export interface TachePlanifieeWeb {
   lisible: string
   commande: string
   siteId?: string
-  derniereExecution: string
-  dureeS: number
+  derniereExecution?: string
+  dureeS?: number
   statut: 'ok' | 'echec'
   prochaine: string
   actif: boolean
@@ -919,6 +947,8 @@ export interface Domaine {
   whoisProtege: boolean
   verrouTransfert: boolean
   zoneId?: string
+  /** Serveur attaché — un domaine est attaché à un serveur et à un seul. */
+  hebergementId?: string
 }
 
 // ─── Commerce & exploitation ──────────────────────────────────────────
@@ -998,6 +1028,8 @@ export interface Devis {
   validite: string
   statut: 'envoye' | 'accepte' | 'refuse' | 'expire'
   createdAt: string
+  /** Servi par le backend une fois le devis édité ; absent côté maquette. */
+  pdfUrl?: string
 }
 
 export interface Ticket {
@@ -1200,6 +1232,12 @@ export interface ModeleIA {
   finDeVie?: string
   usages: string[]
   description: string
+  /**
+   * Réellement appelable sur la route chat de la passerelle (`/ia/agents/{id}/invoquer`) —
+   * porté par le backend, absent de la maquette : `undefined` en mode maquette, où
+   * seuls des modèles de génération de texte figurent de toute façon.
+   */
+  invocable?: boolean
 }
 
 export interface CleIA {
@@ -1275,28 +1313,6 @@ export interface BaseConnaissance {
   erreur?: string
 }
 
-export interface PointInference {
-  id: string
-  nom: string
-  modeleId: string
-  espaceId: string
-  site: Site
-  gpu: 'L40S' | 'H100' | 'A100'
-  gpuParReplica: number
-  replicas: number
-  replicasMin: number
-  replicasMax: number
-  /** Une mise à l'échelle jusqu'à zéro économise, au prix d'un démarrage à froid. */
-  veilleAutorisee: boolean
-  demarrageAFroidS: number
-  utilisationGpuPct: number
-  latenceP50Ms: number
-  debitJetonsSec: number
-  coutHeure: number
-  statut: 'en_ligne' | 'demarrage' | 'en_veille' | 'erreur'
-  creeLe: string
-}
-
 // ─── Agents et orchestration (CDC MIA, FONC-01 à FONC-06) ─────────────
 
 /**
@@ -1337,6 +1353,10 @@ export interface AgentIA {
   id: string
   slug: string
   nom: string
+  /** Le backend réel ne porte que dix champs — celui-ci en fait partie mais
+   * n'existe pas côté maquette : la démonstration a une date de création
+   * implicite (la graine), pas un horodatage. */
+  createdAt?: string
   /** Deux lettres et une teinte tiennent lieu d'icône — pas de téléversement. */
   initiales: string
   teinte: string
@@ -1511,6 +1531,11 @@ export interface EtapeFlux {
   detail: string
   agentId?: string
   outilId?: string
+  /**
+   * Connaissance : quelle base interroger. Ajouté pour que l'exécution réelle sache où
+   * chercher — les champs `source`/`detail` restent du texte descriptif, pas un identifiant.
+   */
+  connaissanceId?: string
   /** Étape conditionnelle : sautée quand la condition n'est pas remplie. */
   condition?: string
   /**

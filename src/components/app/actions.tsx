@@ -8,6 +8,7 @@ import { ConfirmDialog, Modal } from '@/components/ui/overlay'
 import type { AuditEvent } from '@/lib/types'
 import { UTILISATEUR_COURANT } from '@/lib/mock/orgs'
 import { libelleWorkflow, workflowById } from '@/lib/workflows'
+import { ApiError, estActif, estTravail, suivreTravail } from '@/lib/api/client'
 import { useApp } from './contexte'
 import { useAtelier, type SpecJob } from './atelier'
 
@@ -27,12 +28,28 @@ export interface SpecOperation {
   titre: string
   detail?: string
   ton?: 'ok' | 'info' | 'warn' | 'err'
-  /** Mutation immédiate de l'atelier. */
+  /** Mutation immédiate de l'atelier. En mode API avec `appel`, elle est
+   * sautée : l’appel réel a déjà muté le backend (la rejouer doublerait
+   * l’écriture, la collection distante `POST` à nouveau). */
   effet?: () => void
-  /** Job de provisionnement affiché dans le centre de tâches. */
+  /** Job de provisionnement affiché dans le centre de tâches. Mode maquette
+   * uniquement quand `appel` est fourni et l’API active. */
   job?: Omit<SpecJob, 'alFin' | 'alEchec'>
-  /** Mutation appliquée à la fin du job — bascule d'état, par exemple. */
+  /** Réconciliation après l’appel réel (recharger, naviguer) ou mutation
+   * appliquée à la fin du job simulé. Court dans les deux modes. */
   effetFinal?: () => void
+  /**
+   * Appel réel au backend, utilisé quand l’API est active. S’il renvoie un
+   * travail de provisioning (`202`), le job existant est piloté par ses
+   * `taches` ; sinon `effetFinal` s’applique au retour. En mode maquette,
+   * `effet` + `job` gardent leur comportement simulé.
+   */
+  appel?: () => Promise<unknown>
+  /**
+   * Rappelé sur `ApiError` en mode API, avant le toast : le site d’appel y
+   * accroche ses erreurs de champs (`422`, `e.champs`) sans rouvrir la modale.
+   */
+  onErreur?: (e: ApiError) => void
   /**
    * Ce qu'on écrit au journal d'audit. Par défaut l'opération est journalisée
    * en déduisant l'action de `action` et la cible de `titre` ; `audit: false`
@@ -51,7 +68,7 @@ export interface SpecOperation {
 
 export function useOperation() {
   const { pousser, autorise, role } = useApp()
-  const { lancerJob, journaliser } = useAtelier()
+  const { lancerJob, integrerTravail, journaliser } = useAtelier()
 
   const executer = useCallback(
     (spec: SpecOperation) => {
@@ -81,6 +98,76 @@ export function useOperation() {
         return
       }
 
+      // Mode API : l’appel réel remplace la simulation. Un refus ou un échec
+      // métier arrive en `ApiError` et se dit avec les mots du backend.
+      if (estActif() && spec.appel) {
+        const echec = (e: unknown) => {
+          if (e instanceof ApiError) {
+            spec.onErreur?.(e)
+            const complements = [
+              e.rolesRequis && e.rolesRequis.length > 0
+                ? `Rôle requis : ${e.rolesRequis.join(' ou ')}.`
+                : undefined,
+              e.champs
+                ? Object.entries(e.champs)
+                    .map(([champ, message]) => `${champ} : ${message}`)
+                    .join(' ')
+                : undefined,
+              e.correlationId ? `Référence ${e.correlationId}.` : undefined,
+            ].filter(Boolean)
+            pousser({
+              ton: 'err',
+              titre: spec.titre,
+              detail: [e.message, ...complements].join(' '),
+            })
+            trace(e.statut === 403 ? 'refuse' : 'erreur', e.message)
+          } else {
+            pousser({ ton: 'err', titre: spec.titre, detail: 'Le backend ne répond pas.' })
+            trace('erreur', 'Le backend ne répond pas.')
+          }
+        }
+        spec.appel().then(
+          (resultat) => {
+            if (estTravail(resultat)) {
+              const id = integrerTravail(resultat)
+              suivreTravail(id, (travail) => {
+                integrerTravail(travail)
+                if (travail.statut === 'done') {
+                  spec.effetFinal?.()
+                  pousser({
+                    ton: 'ok',
+                    titre: travail.label,
+                    detail: 'Opération terminée. Suivi dans le centre de tâches.',
+                  })
+                } else if (travail.statut === 'failed' || travail.statut === 'rolled_back') {
+                  pousser({
+                    ton: 'err',
+                    titre: `Échec · ${travail.label}`,
+                    detail: travail.erreur
+                      ? `${travail.erreur.message} Référence ${travail.erreur.correlationId}.`
+                      : 'Diagnostic et reprise dans le centre de tâches.',
+                  })
+                }
+              })
+              trace('ok')
+              pousser({
+                ton: spec.ton ?? 'ok',
+                titre: spec.titre,
+                detail: spec.detail ?? 'Opération acceptée. Suivi dans le centre de tâches.',
+              })
+            } else {
+              // Réponse directe (ressource créée, `204`) : l’écriture a eu
+              // lieu côté backend, on réconcilie sans rejouer `effet`.
+              spec.effetFinal?.()
+              trace('ok')
+              pousser({ ton: spec.ton ?? 'ok', titre: spec.titre, detail: spec.detail })
+            }
+          },
+          (e: unknown) => echec(e),
+        )
+        return
+      }
+
       spec.effet?.()
 
       // Quand l'opération vient du catalogue, c'est lui qui fournit les phrases
@@ -91,7 +178,10 @@ export function useOperation() {
         ? libelleWorkflow(def, spec.job?.cible ?? '')
         : (spec.job?.label ?? spec.titre)
 
-      if (spec.job) {
+      // En mode API sans `appel`, on n'affiche pas de faux job local puisque
+      // le centre de tâches lit `GET /travaux` et le job local n'y apparaîtrait jamais.
+      // `lancerJob` ne crée que pour la maquette ou pour l'API quand il y a un `appel` réel.
+      if (spec.job && !estActif()) {
         lancerJob({
           ...spec.job,
           alFin: def
@@ -119,14 +209,14 @@ export function useOperation() {
         titre: spec.titre,
         detail:
           spec.detail ??
-          (def
+          (def && !estActif()
             ? `${def.lancement} Suivi dans le centre de tâches.`
-            : spec.job
+            : spec.job && !estActif()
               ? 'Avancement suivi dans le centre de tâches.'
               : undefined),
       })
     },
-    [autorise, journaliser, lancerJob, pousser, role],
+    [autorise, integrerTravail, journaliser, lancerJob, pousser, role],
   )
 
   return executer
@@ -243,6 +333,8 @@ export function ModaleFormulaire({
   taille = 'md',
   onValider,
   complement,
+  erreurs,
+  fermetureAuto = true,
 }: {
   ouvert: boolean
   onFermer: () => void
@@ -255,6 +347,10 @@ export function ModaleFormulaire({
   onValider: (valeurs: ValeursFormulaire) => void
   /** Bloc libre affiché sous les champs — aperçu de coût, avertissement. */
   complement?: (valeurs: ValeursFormulaire) => ReactNode
+  /** Erreurs de champs renvoyées par l’API (`422`) : affichées sous le champ. */
+  erreurs?: Record<string, string>
+  /** Faux quand le site d’appel ferme lui-même, après le succès de l’appel. */
+  fermetureAuto?: boolean
 }) {
   const depart = useMemo(() => valeursInitiales(champs, valeursDepart), [champs, valeursDepart])
   const [valeurs, setValeurs] = useState<ValeursFormulaire>(depart)
@@ -291,7 +387,7 @@ export function ModaleFormulaire({
             disabled={!complet}
             onClick={() => {
               onValider(valeurs)
-              onFermer()
+              if (fermetureAuto) onFermer()
             }}
           >
             {libelleValider}
@@ -306,6 +402,7 @@ export function ModaleFormulaire({
             label={c.label}
             hint={c.hint}
             required={c.obligatoire}
+            error={erreurs?.[c.id]}
             className={c.demi ? 'sm:col-span-1' : 'sm:col-span-2'}
           >
             {c.type === 'select' ? (
@@ -371,6 +468,8 @@ export function BoutonFormulaire({
   className,
   operation,
   complement,
+  ouvert: ouvertControle,
+  onOuvertChange,
 }: {
   libelle: ReactNode
   titre: string
@@ -388,11 +487,45 @@ export function BoutonFormulaire({
   className?: string
   operation: (valeurs: ValeursFormulaire) => SpecOperation
   complement?: (valeurs: ValeursFormulaire) => ReactNode
+  /**
+   * Ouverture pilotée depuis l'appelant (ex. l'action d'un `DataTable` en état
+   * vide, qui n'a pas de référence vers le bouton du bandeau) : non fourni, la
+   * modale garde son état interne comme avant.
+   */
+  ouvert?: boolean
+  onOuvertChange?: (v: boolean) => void
 }) {
   const { autorise, refus } = useApp()
   const executer = useOperation()
-  const [ouvert, setOuvert] = useState(false)
+  const [ouvertInterne, setOuvertInterne] = useState(false)
+  const ouvert = ouvertControle ?? ouvertInterne
+  const setOuvert = onOuvertChange ?? setOuvertInterne
+  const [erreurs, setErreurs] = useState<Record<string, string>>({})
   const permis = action ? autorise(action) : true
+
+  /**
+   * En mode API avec `appel`, la modale reste ouverte jusqu’au succès : un
+   * `422` y affiche ses erreurs de champs au lieu de se perdre dans un toast
+   * sur un écran déjà refermé. En maquette elle se referme aussitôt, comme avant.
+   */
+  const valider = (valeurs: ValeursFormulaire) => {
+    const spec = operation(valeurs)
+    if (estActif() && spec.appel) {
+      setErreurs({})
+      executer({
+        action,
+        ...spec,
+        onErreur: (e) => setErreurs(e.champs ?? {}),
+        effetFinal: () => {
+          spec.effetFinal?.()
+          setOuvert(false)
+        },
+      })
+      return
+    }
+    executer({ action, ...spec })
+    setOuvert(false)
+  }
 
   return (
     <>
@@ -403,7 +536,10 @@ export function BoutonFormulaire({
           iconBefore={icone}
           fullWidth={fullWidth}
           className={className}
-          onClick={() => setOuvert(true)}
+          onClick={() => {
+            setErreurs({})
+            setOuvert(true)
+          }}
         >
           {libelle}
         </Button>
@@ -418,7 +554,9 @@ export function BoutonFormulaire({
         libelleValider={libelleValider}
         taille={taille}
         complement={complement}
-        onValider={(valeurs) => executer({ action, ...operation(valeurs) })}
+        erreurs={erreurs}
+        fermetureAuto={false}
+        onValider={valider}
       />
     </>
   )

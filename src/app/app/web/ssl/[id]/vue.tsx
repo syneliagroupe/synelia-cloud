@@ -22,6 +22,7 @@ import { CarteAbonnement } from '@/components/business/abonnement'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
+import { estActif, modifierRessource, requete, supprimerRessource } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'apercu', label: 'Vue d’ensemble' },
@@ -79,14 +80,23 @@ export function VueCertificat({ id }: { id: string }) {
                 action: 'service.admin',
                 ton: 'info',
                 titre: 'Renouvellement lancé',
+                appel: () =>
+                  requete(`/web/ssl/${encodeURIComponent(c.id)}/renouvellement`, {
+                    methode: 'POST',
+                  }),
                 effet: () => certificats.modifier(c.id, { etat: 'en_emission' }),
                 job: { workflow: 'web.ssl.renew', cible: c.hote },
-                effetFinal: () =>
+                effetFinal: () => {
+                  if (estActif()) {
+                    certificats.recharger()
+                    return
+                  }
                   certificats.modifier(c.id, {
                     etat: 'actif',
                     emisLe: MAINTENANT.slice(0, 10),
                     expire: '2026-11-17',
-                  }),
+                  })
+                },
               }}
             />
             <BoutonAction
@@ -184,7 +194,9 @@ export function VueCertificat({ id }: { id: string }) {
                     detail: v
                       ? 'Réémission 30 jours avant l’échéance.'
                       : 'À l’échéance, les navigateurs afficheront un avertissement de sécurité.',
+                    appel: () => modifierRessource('/web/ssl', c.id, { renouvellementAuto: v }),
                     effet: () => certificats.modifier(c.id, { renouvellementAuto: v }),
+                    effetFinal: () => certificats.recharger(),
                   })
                 }
               />
@@ -230,6 +242,10 @@ export function VueCertificat({ id }: { id: string }) {
                     ton: 'info',
                     titre: `Réémission de ${c.hote}`,
                     detail: 'Une nouvelle clé est générée : l’ancienne cesse d’être utilisée.',
+                    appel: () =>
+                      requete(`/web/ssl/${encodeURIComponent(c.id)}/renouvellement`, {
+                        methode: 'POST',
+                      }),
                     effet: () => certificats.modifier(c.id, { etat: 'en_emission' }),
                     job: {
                       type: 'certificat.reissue',
@@ -237,7 +253,13 @@ export function VueCertificat({ id }: { id: string }) {
                       etapes: ['Générer une nouvelle clé', 'Valider le domaine', 'Installer le certificat'],
                       dureeEtapeMs: 1100,
                     },
-                    effetFinal: () => certificats.modifier(c.id, { etat: 'actif' }),
+                    effetFinal: () => {
+                      if (estActif()) {
+                        certificats.recharger()
+                        return
+                      }
+                      certificats.modifier(c.id, { etat: 'actif' })
+                    },
                   }}
                 />
                 <BoutonAction
@@ -261,7 +283,9 @@ export function VueCertificat({ id }: { id: string }) {
                     ton: 'err',
                     titre: `Certificat de ${c.hote} révoqué`,
                     detail: 'Le HTTPS est coupé sur les hôtes couverts jusqu’à l’émission d’un nouveau certificat.',
+                    appel: () => supprimerRessource('/web/ssl', c.id, c.hote),
                     effet: () => certificats.modifier(c.id, { etat: 'revoque' }),
+                    effetFinal: () => certificats.recharger(),
                   }}
                   confirmation={{
                     ressource: c.hote,

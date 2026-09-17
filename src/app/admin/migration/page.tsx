@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowRight, MoveRight, PlayCircle } from 'lucide-react'
+import { ArrowRight, CalendarClock, MoveRight, PlayCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, dateHeure, dureeMin, money, num, pct } from '@/lib/format'
 import { BACKENDS, TRAJECTOIRE_SORTIE, VMS } from '@/lib/mock'
-import { BACKEND_LABEL, SITE_COURT } from '@/lib/types'
+import { BACKEND_LABEL, SITE_COURT, type Backend } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
@@ -17,6 +17,7 @@ import { Timeline } from '@/components/composition/flow'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'trajectoire', label: 'Trajectoire de sortie' },
@@ -127,14 +128,65 @@ const TON_STATUT: Record<Vague['statut'], 'ok' | 'info' | 'neutral' | 'warn'> = 
   a_planifier: 'warn',
 }
 
+/** Forme distante d’une campagne (`GET /admin/migration/campagnes`). */
+interface CampagneMigrationDistante {
+  id: string
+  nom: string
+  backendSource: string
+  backendCible: string
+  ressources: number
+  migrees: number
+  fenetre: string
+  statut: 'planifiee' | 'en_cours' | 'terminee' | 'suspendue' | 'echec'
+}
+
+/**
+ * Ramène une campagne du backend à la forme locale d’une vague : mêmes
+ * champs, mêmes statuts affichables. Une campagne suspendue redevient à
+ * planifier-explicite (`planifiee`), un échec reste à replanifier.
+ */
+function normaliserCampagne(v: Vague): Vague {
+  const distante = v as unknown as Partial<CampagneMigrationDistante>
+  if (!distante.backendSource) return v
+  const ressources = distante.ressources ?? 0
+  return {
+    id: v.id,
+    nom: distante.nom ?? v.nom,
+    source: distante.backendSource,
+    cible: distante.backendCible ?? v.cible,
+    machines: ressources,
+    organisations: [],
+    fenetre: distante.fenetre ?? v.fenetre,
+    mode: 'mixte',
+    statut:
+      distante.statut === 'en_cours'
+        ? 'en_cours'
+        : distante.statut === 'terminee'
+          ? 'terminee'
+          : distante.statut === 'echec'
+            ? 'a_planifier'
+            : 'planifiee',
+    avancement: ressources > 0 ? Math.round(((distante.migrees ?? 0) / ressources) * 100) : 0,
+  }
+}
+
 export default function Migration() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
-  const vagues = useCollection<Vague>('vagues-migration', VAGUES)
+  const vaguesBrutes = useCollection<Vague>('vagues-migration', VAGUES)
+  // En mode API le backend renvoie des campagnes de migration, pas des
+  // vagues : on les ramène à la forme locale pour l’affichage.
+  const vagues = {
+    ...vaguesBrutes,
+    items: estActif() ? vaguesBrutes.items.map(normaliserCampagne) : vaguesBrutes.items,
+  }
+  // Les socles en sortie aussi : les codes backend sont inconnus du jeu local.
+  const socles = useCollection<Backend>('backends', BACKENDS)
+  const SOCLES = estActif() ? socles.items : BACKENDS
   const [onglet, setOnglet] = useState('trajectoire')
   const [lancement, setLancement] = useState<Vague | null>(null)
 
-  const enSortie = BACKENDS.filter((b) => b.enSortie?.actif)
+  const enSortie = SOCLES.filter((b) => b.enSortie?.actif)
   const migrees = vagues.items
     .filter((v) => v.statut === 'terminee')
     .reduce((a, v) => a + v.machines, 0)
@@ -144,12 +196,95 @@ export default function Migration() {
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Migration entre socles' }]}
         titre="Migration entre socles"
         sousTitre="Nous exploitons encore des hyperviseurs propriétaires, et nous le disons. Voici le calendrier de sortie, son avancement réel, et ce qui reste à faire. Cette page a son équivalent public : nous ne communiquons pas un chiffre différent à l’extérieur."
         actions={
-          <ButtonLink variant="secondary" external href="/souverainete">
-            Voir la page publique
-          </ButtonLink>
+          <>
+            <BoutonFormulaire
+              libelle="Nouvelle campagne"
+              size="md"
+              icone={<CalendarClock size={14} />}
+              action="capacity.manage"
+              titre="Planifier une campagne de migration"
+              description="Une campagne déplace les ressources d’un socle en sortie vers un socle libre, dans une fenêtre annoncée aux organisations concernées sept jours avant. Le retour arrière reste possible sept jours."
+              libelleValider="Planifier"
+              champs={[
+                {
+                  id: 'nom',
+                  label: 'Nom',
+                  placeholder: 'Vague 7 — bases de données restantes',
+                  obligatoire: true,
+                },
+                {
+                  id: 'backendSource',
+                  label: 'Socle source',
+                  type: 'select',
+                  demi: true,
+                  options: (enSortie.length > 0 ? enSortie : SOCLES).map((b) => ({
+                    value: b.code,
+                    label: `${b.code} · ${SITE_COURT[b.site]}`,
+                  })),
+                },
+                {
+                  id: 'backendCible',
+                  label: 'Socle cible',
+                  type: 'select',
+                  demi: true,
+                  options: SOCLES.filter((b) => !b.enSortie?.actif).map((b) => ({
+                    value: b.code,
+                    label: `${b.code} · ${SITE_COURT[b.site]}`,
+                  })),
+                },
+                {
+                  id: 'fenetre',
+                  label: 'Fenêtre',
+                  type: 'select',
+                  options: [
+                    { value: 'Samedi 22h00 – 02h00', label: 'Samedi 22h00 – 02h00' },
+                    { value: 'Dimanche 02h00 – 06h00', label: 'Dimanche 02h00 – 06h00' },
+                    { value: 'Nuit de semaine 23h00 – 04h00', label: 'Nuit de semaine 23h00 – 04h00' },
+                  ],
+                },
+                {
+                  id: 'notifierClients',
+                  label: 'Prévenir les organisations concernées',
+                  type: 'switch',
+                  placeholder: 'Avis envoyé sept jours avant',
+                },
+              ]}
+              valeursDepart={{ notifierClients: true }}
+              operation={(v) => ({
+                titre: `${v.nom} planifiée`,
+                detail: `${v.backendSource} → ${v.backendCible} · ${v.fenetre}.`,
+                appel: () =>
+                  creerRessource('/admin/migration/campagnes', {
+                    nom: String(v.nom).trim(),
+                    backendSource: String(v.backendSource),
+                    backendCible: String(v.backendCible),
+                    fenetre: String(v.fenetre),
+                    notifierClients: Boolean(v.notifierClients),
+                  }),
+                effet: () =>
+                  vaguesBrutes.creer({
+                    id: vaguesBrutes.identifiant('v'),
+                    nom: String(v.nom).trim(),
+                    source: String(v.backendSource),
+                    cible: String(v.backendCible),
+                    machines: 0,
+                    organisations: [],
+                    fenetre: String(v.fenetre),
+                    mode: 'mixte',
+                    statut: 'planifiee',
+                    avancement: 0,
+                  }),
+                effetFinal: () => vaguesBrutes.recharger(),
+              })}
+            />
+            <ButtonLink variant="secondary" external href="/souverainete">
+              Voir la page publique
+            </ButtonLink>
+          </>
         }
         meta={
           <>
@@ -491,6 +626,37 @@ export default function Migration() {
                       />
                     </GatedAction>
                   )}
+                  {(v.statut === 'en_cours' || v.statut === 'terminee') && (
+                    <BoutonAction
+                      libelle="Revenir en arrière"
+                      variant="ghost"
+                      fullWidth
+                      confirmation={{
+                        ressource: v.nom,
+                        titre: `Revenir en arrière sur ${v.nom} ?`,
+                        pertes: [
+                          'Les machines déjà migrées repassent sur le socle source',
+                          'Les données écrites depuis la migration sont conservées',
+                          'La vague repasse à planifier, à relancer dans une nouvelle fenêtre',
+                        ],
+                        libelleAction: 'Revenir en arrière',
+                      }}
+                      operation={{
+                        action: 'capacity.manage',
+                        ton: 'warn',
+                        titre: `${v.nom} : retour arrière lancé`,
+                        detail:
+                          'Le disque source a été conservé : les machines repassent dessus, sans transfert.',
+                        appel: () =>
+                          requete(
+                            `/admin/migration/campagnes/${encodeURIComponent(v.id)}/rollback`,
+                            { methode: 'POST' },
+                          ),
+                        effet: () => vagues.modifier(v.id, { statut: 'planifiee', avancement: 0 }),
+                        effetFinal: () => vagues.recharger(),
+                      }}
+                    />
+                  )}
                   {v.statut === 'en_cours' && (
                     <BoutonAction
                       libelle="Suspendre la vague"
@@ -502,7 +668,13 @@ export default function Migration() {
                         titre: `${v.nom} suspendue`,
                         detail:
                           'Les machines déjà migrées restent sur le socle cible ; les suivantes attendent une reprise explicite.',
+                        appel: () =>
+                          requete(
+                            `/admin/migration/campagnes/${encodeURIComponent(v.id)}/suspension`,
+                            { methode: 'POST' },
+                          ),
                         effet: () => vagues.modifier(v.id, { statut: 'planifiee' }),
+                        effetFinal: () => vagues.recharger(),
                       }}
                     />
                   )}
@@ -753,10 +925,20 @@ export default function Migration() {
               action: 'capacity.manage',
               ton: 'info',
               titre: `${cible.nom} lancée`,
+              appel: () =>
+                requete(
+                  `/admin/migration/campagnes/${encodeURIComponent(cible.id)}/lancement`,
+                  { methode: 'POST' },
+                ),
               effet: () => vagues.modifier(cible.id, { statut: 'en_cours', avancement: 4 }),
               job: { workflow: 'migration.lot', cible: cible.nom },
-              effetFinal: () =>
-                vagues.modifier(cible.id, { statut: 'terminee', avancement: 100 }),
+              effetFinal: () => {
+                // En maquette, le job simulé se termine ici ; en mode API,
+                // c’est le rechargement qui rapporte l’état réel.
+                if (!estActif())
+                  vagues.modifier(cible.id, { statut: 'terminee', avancement: 100 })
+                vagues.recharger()
+              },
             })
           }
           setLancement(null)

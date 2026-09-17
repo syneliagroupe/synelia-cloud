@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { Building2, Globe, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Building2, Globe, Palette, Terminal, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, money } from '@/lib/format'
-import { ESPACES, MES_ORGANISATIONS, ORG_COURANTE } from '@/lib/mock'
-import { ROLE_LABEL, SITE_LABEL } from '@/lib/types'
+import { ESPACES, ORG_COURANTE } from '@/lib/mock'
+import { ROLE_LABEL, SITE_LABEL, type EspaceCloud, type Organisation, type Role } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -16,14 +16,30 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, modifierRessource, requete } from '@/lib/api/client'
+
+/** `GET/PUT /moi/preferences` — préférences du membre connecté, pas de l'organisation
+ * (le sous-titre le dit : « chaque membre peut les surcharger dans son profil »). */
+interface Preferences {
+  langue?: 'fr' | 'en'
+  fuseau?: string
+  sitePrefere?: 'ABJ' | 'GBM'
+  deviseAffichee?: 'XOF' | 'EUR' | 'USD'
+  formatCompact?: boolean
+}
 
 interface Jeton {
   id: string
   nom: string
-  role: string
-  portee: string
-  cree: string
-  dernier: string
+  role?: string
+  portee?: string | string[]
+  cree?: string
+  creeLe?: string
+  dernier?: string
+  derniereUtilisation?: string | null
+  /** Backend : préfixe public affiché à la place du secret. */
+  prefixe?: string
+  statut?: string
 }
 
 const JETONS: Jeton[] = [
@@ -31,6 +47,33 @@ const JETONS: Jeton[] = [
   { id: 'tok-2', nom: 'ci-deploiement', role: 'Administrateur d’application', portee: 'Organisation', cree: '2026-02-08', dernier: 'il y a 28 min' },
   { id: 'tok-3', nom: 'export-facturation', role: 'Responsable facturation', portee: 'Organisation', cree: '2026-06-01', dernier: 'il y a 3 j' },
 ]
+
+/**
+ * Libellé du formulaire → identifiants d’actions RBAC acceptés par
+ * `POST /securite/cles-api` (inclus dans les permissions d’un org admin).
+ */
+const PORTEE_JETON: Record<string, string[]> = {
+  'Lecture seule': ['org.dashboard.view', 'invoice.view', 'audit.view'],
+  'Administrateur d’application': [
+    'app.deploy',
+    'app.rollback',
+    'component.restart',
+    'marketplace.subscribe',
+    'seat.assign',
+    'service.open',
+  ],
+  'Administrateur d’infrastructure': [
+    'vm.create_delete',
+    'vm.power',
+    'vm.hardware.update',
+    'network.manage',
+    'lb.create',
+    'backup.plan.write',
+    'backup.restore',
+    'espace.create',
+  ],
+  'Responsable facturation': ['invoice.view', 'payment.update'],
+}
 
 const ONGLETS = [
   { id: 'organisation', label: 'Organisation' },
@@ -41,9 +84,38 @@ const ONGLETS = [
 ]
 
 export default function Parametres() {
-  const { autorise, refus, pousser } = useApp()
+  const { autorise, refus, pousser, organisations, organisationId } = useApp()
+  const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
+  // `organisations` (contexte) ne porte que `{ id, nom, role }`, tiré de la session : les
+  // autres champs (pays, secteur, contribuable, domaine) venaient toujours de la graine
+  // `ORG_COURANTE`, même en mode API. `GET /organisations/{id}` existe déjà (lecture ouverte
+  // à `org.dashboard.view`, que porte déjà cette même page).
+  const [orgDetail, setOrgDetail] = useState<Organisation | null>(null)
+  useEffect(() => {
+    if (!estActif() || !organisationId) return
+    requete<Organisation>(`/organisations/${organisationId}`).then(setOrgDetail, () => {})
+  }, [organisationId])
+  const orgReelle: Organisation =
+    orgDetail ?? (orgActive ? { ...ORG_COURANTE, id: orgActive.id, nom: orgActive.nom } : ORG_COURANTE)
   const executer = useOperation()
   const jetons = useCollection<Jeton>('jetons-api', JETONS)
+  // Même collection que `/app/espaces` : le nombre d'Espaces Cloud affiché ici
+  // doit suivre le backend, pas rester figé sur la graine.
+  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
+  // Formulaire d'identité : contrôlé pour pouvoir se resynchroniser quand `orgDetail`
+  // arrive après le premier rendu (un `defaultValue` figerait la graine au montage).
+  const [nomOrg, setNomOrg] = useState(orgReelle.nom)
+  const [secteurOrg, setSecteurOrg] = useState(orgReelle.secteur ?? '')
+  const [tvaOrg, setTvaOrg] = useState(orgReelle.tva ?? '')
+  useEffect(() => {
+    if (!orgDetail) return
+    setNomOrg(orgDetail.nom)
+    setSecteurOrg(orgDetail.secteur ?? '')
+    setTvaOrg(orgDetail.tva ?? '')
+  }, [orgDetail])
+
+  /** Secret renvoyé une seule fois à la création — jamais réaffiché ensuite. */
+  const [secretCree, setSecretCree] = useState<string | null>(null)
   const [onglet, setOnglet] = useState('organisation')
   const [fermeture, setFermeture] = useState(false)
 
@@ -53,6 +125,23 @@ export default function Parametres() {
   const [siteDefaut, setSiteDefaut] = useState('ABJ')
   const [horsTaxes, setHorsTaxes] = useState(true)
   const [densiteCompacte, setDensiteCompacte] = useState(false)
+
+  // Les préférences existent réellement côté backend (`GET/PUT /moi/preferences`)
+  // mais n'étaient jamais lues ni écrites depuis cet écran — la graine locale
+  // s'affichait, le bouton « Enregistrer » ne faisait qu'un toast. Chargé une
+  // fois au montage, en mode API seulement.
+  useEffect(() => {
+    if (!estActif()) return
+    requete<Preferences>('/moi/preferences').then((p) => {
+      if (p.langue) setLangue(p.langue)
+      if (p.fuseau === 'Africa/Abidjan' || p.fuseau === 'Africa/Dakar' || p.fuseau === 'Africa/Lagos' || p.fuseau === 'Europe/Paris' || p.fuseau === 'UTC') {
+        setFuseau(p.fuseau)
+      }
+      if (p.sitePrefere) setSiteDefaut(p.sitePrefere)
+      if (p.deviseAffichee) setDevise(p.deviseAffichee)
+      if (typeof p.formatCompact === 'boolean') setDensiteCompacte(p.formatCompact)
+    }, () => {})
+  }, [])
 
   const [mailTechnique, setMailTechnique] = useState('ops@dba.africa')
   const [mailFacturation, setMailFacturation] = useState('compta@dba.africa')
@@ -70,10 +159,10 @@ export default function Parametres() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {ORG_COURANTE.nom}
+              {orgReelle.nom}
             </Badge>
             <Badge tone="neutral" size="sm">
-              Cliente depuis {dateCourte(ORG_COURANTE.createdAt)}
+              Cliente depuis {dateCourte(ORG_COURANTE.createdAt)} (démonstration)
             </Badge>
             <Badge tone={ORG_COURANTE.statut === 'active' ? 'ok' : 'warn'} dot size="sm">
               {ORG_COURANTE.statut === 'active' ? 'Active' : ORG_COURANTE.statut}
@@ -93,11 +182,11 @@ export default function Parametres() {
             />
             <div className="space-y-4">
               <Field label="Raison sociale">
-                <Input defaultValue={ORG_COURANTE.nom} />
+                <Input value={nomOrg} onChange={(e) => setNomOrg(e.target.value)} />
               </Field>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Pays">
-                  <Select defaultValue={ORG_COURANTE.pays}>
+                  <Select defaultValue={orgReelle.pays}>
                     <option value="Côte d’Ivoire">Côte d’Ivoire</option>
                     <option value="Sénégal">Sénégal</option>
                     <option value="Bénin">Bénin</option>
@@ -107,34 +196,47 @@ export default function Parametres() {
                   </Select>
                 </Field>
                 <Field label="Secteur">
-                  <Input defaultValue={ORG_COURANTE.secteur ?? ''} />
+                  <Input value={secteurOrg} onChange={(e) => setSecteurOrg(e.target.value)} />
                 </Field>
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Numéro de contribuable" hint="figure sur la facture, sert au régime de TVA">
-                  <Input defaultValue={ORG_COURANTE.tva ?? ''} />
+                  <Input value={tvaOrg} onChange={(e) => setTvaOrg(e.target.value)} />
                 </Field>
                 <Field label="Domaine principal" hint="utilisé pour la découverte de la fédération d’identité">
-                  <Input defaultValue={ORG_COURANTE.domaine ?? 'dba.africa'} />
+                  <Input defaultValue={orgReelle.domaine ?? 'dba.africa'} />
                 </Field>
               </div>
               <Field label="Adresse de facturation">
                 <Textarea rows={3} defaultValue={'Plateau, Boulevard de la République\nImmeuble Alpha 2000, 8e étage\nAbidjan, Côte d’Ivoire'} />
               </Field>
             </div>
-            <GatedAction autorise={autorise('sso.configure')} message={refus('sso.configure')}>
-              <Button
+            {/* `PATCH /organisations/{id}` exige `org.manage` — réservé à l'équipe Synelia
+             (`ligne('org.manage', …, '●—————————')` dans `rbac.ts` : aucun rôle d'organisation
+             cliente ne l'a). Le bouton se désactive donc pour tout rôle client, avec l'infobulle
+             qui nomme le rôle requis, plutôt que d'appeler un endpoint qui répondrait 403 — et
+             plutôt que le faux succès d'avant, qui ne postait jamais rien. Seuls les champs que
+             le contrat accepte (`nom`, `secteur`, `tva`) partent ; pays/domaine/adresse restent
+             en lecture, faute d'équivalent côté backend. */}
+            <GatedAction autorise={autorise('org.manage')} message={refus('org.manage')}>
+              <BoutonAction
+                libelle="Enregistrer"
+                size="md"
                 className="mt-4"
-                onClick={() =>
-                  pousser({
-                    ton: 'ok',
-                    titre: 'Informations enregistrées',
-                    detail: 'Elles seront reprises sur votre prochaine facture.',
-                  })
-                }
-              >
-                Enregistrer
-              </Button>
+                operation={{
+                  action: 'org.manage',
+                  titre: 'Informations enregistrées',
+                  detail: 'Elles seront reprises sur votre prochaine facture.',
+                  appel: () =>
+                    modifierRessource('/organisations', orgReelle.id, {
+                      nom: nomOrg,
+                      secteur: secteurOrg || undefined,
+                      tva: tvaOrg || undefined,
+                    }),
+                  effetFinal: () =>
+                    requete<Organisation>(`/organisations/${orgReelle.id}`).then(setOrgDetail, () => {}),
+                }}
+              />
             </GatedAction>
           </Card>
 
@@ -144,11 +246,11 @@ export default function Parametres() {
               <KeyValueList
                 colonnes={1}
                 items={[
-                  { cle: 'Identifiant d’organisation', valeur: ORG_COURANTE.id },
+                  { cle: 'Identifiant d’organisation', valeur: orgReelle.id },
                   { cle: 'Contrat', valeur: 'Direct avec Synelia Cloud' },
-                  { cle: 'Plan de service', valeur: ORG_COURANTE.tenantPlan ?? 'Standard' },
-                  { cle: 'Espaces Cloud', valeur: String(ESPACES.length) },
-                  { cle: 'Cliente depuis', valeur: dateCourte(ORG_COURANTE.createdAt) },
+                  { cle: 'Plan de service', valeur: orgReelle.tenantPlan ?? 'Standard' },
+                  { cle: 'Espaces Cloud', valeur: String(espacesCol.items.length) },
+                  { cle: 'Cliente depuis (démonstration)', valeur: dateCourte(ORG_COURANTE.createdAt) },
                   {
                     cle: 'Dépense mensuelle',
                     valeur: ORG_COURANTE.caMensuel ? money(ORG_COURANTE.caMensuel) : '—',
@@ -165,24 +267,30 @@ export default function Parametres() {
             <Card>
               <CardHeader titre="Organisations auxquelles vous appartenez" sousTitre="Basculez sans vous reconnecter." />
               <div className="space-y-2">
-                {MES_ORGANISATIONS.map(({ org, role }) => (
+                {/* `organisations` (contexte) vient déjà de la session réelle en mode API
+                 (`GET /moi`, mêmes appartenances) : la graine `MES_ORGANISATIONS` qui était
+                 lue ici restait figée même en mode API, alors que `orgActive` juste au-dessus
+                 s'en servait déjà pour la même carte. */}
+                {organisations.map((org) => (
                   <div
                     key={org.id}
                     className={cn(
                       'flex flex-wrap items-center justify-between gap-3 rounded-[6px] border px-3 py-2.5',
-                      org.id === ORG_COURANTE.id ? 'border-p-700 bg-p-050' : 'border-g-300',
+                      org.id === orgReelle.id ? 'border-p-700 bg-p-050' : 'border-g-300',
                     )}
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <Building2 size={13} className="shrink-0 text-p-700" />
                       <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-semibold text-ink">
+                        <span className="block truncate text-[12.5px] font-semibold text-ink">
                           {org.nom}
                         </span>
-                        <span className="block text-[11px] text-g-500">{ROLE_LABEL[role]}</span>
+                        <span className="block text-[11px] text-g-500">
+                          {ROLE_LABEL[org.role as Role] ?? org.role}
+                        </span>
                       </span>
                     </span>
-                    {org.id === ORG_COURANTE.id ? (
+                    {org.id === orgReelle.id ? (
                       <Badge tone="violet" size="sm">
                         Organisation active
                       </Badge>
@@ -265,6 +373,17 @@ export default function Parametres() {
               operation={{
                 titre: 'Préférences enregistrées',
                 detail: `${devise} · ${langue === 'fr' ? 'français' : 'anglais'} · ${fuseau} · site ${siteDefaut} par défaut`,
+                appel: () =>
+                  requete('/moi/preferences', {
+                    methode: 'PUT',
+                    corps: {
+                      langue,
+                      fuseau,
+                      sitePrefere: siteDefaut,
+                      deviseAffichee: devise,
+                      formatCompact: densiteCompacte,
+                    },
+                  }),
               }}
             />
           </Card>
@@ -336,6 +455,7 @@ export default function Parametres() {
               <CardHeader
                 titre="Personnalisation visuelle"
                 sousTitre="Logo et couleur affichés dans votre espace client."
+                actions={<Palette size={15} className="text-p-700" />}
               />
               <div className="space-y-4">
                 <Field label="Logo de l’organisation" hint="PNG ou SVG, fond transparent, 200 × 60 px minimum">
@@ -369,16 +489,19 @@ export default function Parametres() {
                   <div key={j.id} className="rounded-[6px] border border-g-300 px-3 py-2.5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <span className="min-w-0">
-                        <span className="block font-mono text-[13px] font-semibold text-ink">
+                        <span className="block font-mono text-[12.5px] font-semibold text-ink">
                           {j.nom}
+                          {j.prefixe && (
+                            <span className="ml-1.5 font-normal text-g-500">{j.prefixe}…</span>
+                          )}
                         </span>
                         <span className="block text-[11px] text-g-500">
-                          {j.role} · portée {j.portee}
+                          {Array.isArray(j.portee) ? j.portee.join(' · ') : (j.role ? `${j.role} · ` : '') + (j.portee ?? '')}
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-1.5">
                         <Badge tone="neutral" size="sm">
-                          {j.dernier}
+                          {j.dernier ?? (j.derniereUtilisation ? `utilisé ${j.derniereUtilisation}` : 'jamais utilisé')}
                         </Badge>
                         <BoutonAction
                           libelle="Révoquer"
@@ -389,6 +512,7 @@ export default function Parametres() {
                             titre: `Jeton ${j.nom} révoqué`,
                             detail: 'Toute automatisation qui l’utilise cessera de fonctionner immédiatement.',
                             effet: () => jetons.supprimer(j.id),
+                            effetFinal: () => jetons.recharger(),
                           }}
                           confirmation={{
                             ressource: j.nom,
@@ -431,7 +555,7 @@ export default function Parametres() {
                     type: 'select',
                     options: [
                       { value: 'Organisation', label: 'Toute l’organisation' },
-                      ...ESPACES.map((e) => ({ value: e.code, label: `Espace ${e.code}` })),
+                      ...espacesCol.items.map((e) => ({ value: e.code, label: `Espace ${e.code}` })),
                     ],
                   },
                   { id: 'expiration', label: 'Expire dans', type: 'nombre', demi: true, min: 1, max: 730, suffixe: 'jours' },
@@ -441,6 +565,18 @@ export default function Parametres() {
                 operation={(v) => ({
                   titre: `Jeton ${v.nom} créé`,
                   detail: 'La valeur du jeton est affichée une seule fois : copiez-la maintenant.',
+                  // Le backend attend des identifiants d’actions RBAC, pas le
+                  // libellé du rôle : la correspondance vit ici, au seul
+                  // endroit où ce formulaire existe.
+                  appel: () =>
+                    creerRessource('/securite/cles-api', {
+                      nom: String(v.nom),
+                      portee: PORTEE_JETON[String(v.role)] ?? ['org.dashboard.view'],
+                    }).then((reponse) => {
+                      const secret = (reponse as { secret?: unknown } | null)?.secret
+                      if (typeof secret === 'string') setSecretCree(secret)
+                      return reponse
+                    }),
                   effet: () =>
                     jetons.creer({
                       id: jetons.identifiant('tok'),
@@ -450,6 +586,7 @@ export default function Parametres() {
                       cree: MAINTENANT.slice(0, 10),
                       dernier: 'jamais utilisé',
                     }),
+                  effetFinal: () => jetons.recharger(),
                 })}
               />
               <Callout ton="warn" className="mt-4" titre="Un jeton n’a pas de deuxième facteur">
@@ -458,16 +595,33 @@ export default function Parametres() {
                 quand c’est faisable, et faites-les tourner. Un jeton d’administrateur d’organisation
                 dans un fichier de configuration est un incident en attente.
               </Callout>
+              {secretCree && (
+                <div className="mt-4 rounded-[8px] border border-err/40 bg-err-bg px-3.5 py-3">
+                  <p className="text-[12.5px] font-bold text-ink">
+                    Copiez ce secret maintenant — il ne sera plus jamais affiché
+                  </p>
+                  <p className="mt-1 font-mono text-[12px] break-all text-ink">{secretCree}</p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="mt-2"
+                    onClick={() => setSecretCree(null)}
+                  >
+                    Je l’ai copié, masquer
+                  </Button>
+                </div>
+              )}
             </Card>
 
             <Card>
               <CardHeader
                 titre="Utiliser l’interface programmatique"
                 sousTitre="API REST documentée, plus une interface en ligne de commande."
+                actions={<Terminal size={15} className="text-p-700" />}
               />
               <div className="space-y-3">
                 <CopyField label="Adresse de l’API" value="https://api.synelia.cloud/v1" />
-                <CopyField label="Organisation" value={ORG_COURANTE.id} />
+                <CopyField label="Organisation" value={orgReelle.id} />
               </div>
               <MicroLabel className="mt-4 mb-2">Exemple</MicroLabel>
               <CodeBlock
@@ -502,9 +656,13 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
               <StatTile libelle="Lectures" valeur="600" unite="/min" detail="Par jeton" />
               <StatTile libelle="Écritures" valeur="60" unite="/min" detail="Par jeton" />
               <StatTile libelle="Actions destructives" valeur="10" unite="/min" detail="Par organisation" ton="warn" />
-              <StatTile libelle="Appels aujourd’hui" valeur="8 412" detail="Sur 3 jetons" />
+              <StatTile
+                libelle="Appels aujourd’hui"
+                valeur="8 412"
+                detail={`Sur ${jetons.items.length} jeton${jetons.items.length > 1 ? 's' : ''}`}
+              />
             </div>
-            <p className="mt-3.5 text-[12px] leading-relaxed text-g-500">
+            <p className="mt-3.5 text-[11.5px] leading-relaxed text-g-500">
               Un dépassement renvoie un code 429 avec un en-tête indiquant le délai d’attente. Les
               actions destructives sont plus limitées que les autres : une boucle qui supprime est
               plus coûteuse à réparer qu’une boucle qui lit.
@@ -518,7 +676,7 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
           <Card>
             <CardHeader
               titre="Ce que nous vous envoyons"
-              sousTitre="Chaque catégorie est réglable séparément, par canal."
+              sousTitre="Nous préférons une alerte utile à dix notifications ignorées. Chaque catégorie est réglable séparément."
             />
             <div className="space-y-3.5">
               {[
@@ -663,7 +821,7 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
           <Card>
             <CardHeader
               titre="Réversibilité"
-              sousTitre="Ce que vous pouvez récupérer, dans quel format et par quel moyen."
+              sousTitre="Ce que vous pouvez récupérer, et par quel moyen. Nous préférons écrire cette page franchement plutôt que la rendre introuvable."
             />
             <div className="overflow-x-auto rounded-[8px] border border-g-300">
               <table className="w-full min-w-max border-collapse">
@@ -693,8 +851,8 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                     <tr key={x.d} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2 text-[12px] font-semibold text-ink">{x.d}</td>
                       <td className="px-3 py-2 font-mono text-[11px] text-g-700">{x.f}</td>
-                      <td className="px-3 py-2 text-[12px] text-g-700">{x.m}</td>
-                      <td className="px-3 py-2 text-[12px] text-g-500">{x.t}</td>
+                      <td className="px-3 py-2 text-[11.5px] text-g-700">{x.m}</td>
+                      <td className="px-3 py-2 text-[11.5px] text-g-500">{x.t}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -702,7 +860,8 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
             </div>
             <Callout ton="violet" className="mt-4" titre="Aucun format propriétaire">
               Rien de ce que nous stockons pour vous n’est enfermé dans un format que nous serions
-              seuls à savoir lire : chaque export utilise le format natif de l’outil d’origine.
+              seuls à savoir lire. C’est un choix d’architecture, pas une faveur : nous préférons vous
+              garder parce que le service est bon, pas parce que partir serait coûteux.
             </Callout>
           </Card>
 
@@ -741,7 +900,7 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                   job: { workflow: 'export.donnees', cible: 'données de l’organisation' },
                 }}
               />
-              <p className="mt-3 text-[12px] leading-relaxed text-g-500">
+              <p className="mt-3 text-[11.5px] leading-relaxed text-g-500">
                 Un export complet est gratuit une fois par an, et à la clôture du contrat. Au-delà,
                 seul le coût du transfert sortant est facturé, au tarif du catalogue.
               </p>
@@ -762,7 +921,7 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                 ].map((e) => (
                   <div key={e.j} className="rounded-[6px] border border-g-300 px-3 py-2">
                     <p className="text-[12px] font-bold text-ink">{e.j}</p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">{e.d}</p>
+                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">{e.d}</p>
                   </div>
                 ))}
               </div>
@@ -776,7 +935,7 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                   Demander la clôture
                 </Button>
               </GatedAction>
-              <p className="mt-3 text-[12px] leading-relaxed text-g-500">
+              <p className="mt-3 text-[11.5px] leading-relaxed text-g-500">
                 Aucune pénalité de sortie, aucun préavis contractuel au-delà du mois en cours. Le
                 prorata du mois entamé reste dû, rien de plus.
               </p>
@@ -789,10 +948,10 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
         open={fermeture}
         onClose={() => setFermeture(false)}
         titre="Demander la clôture de l’organisation"
-        ressource={ORG_COURANTE.nom}
+        ressource={orgReelle.nom}
         libelleAction="Enregistrer la demande de clôture"
         pertes={[
-          `${ESPACES.length} Espaces Cloud et toutes leurs ressources, arrêtés au jour 30`,
+          `${espacesCol.items.length} Espaces Cloud et toutes leurs ressources, arrêtés au jour 30`,
           'Toutes les données, effacées définitivement au jour 60',
           'Les accès de tous les membres de l’organisation',
           'Les domaines non transférés reviendront au registre à leur échéance',

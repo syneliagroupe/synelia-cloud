@@ -7,7 +7,7 @@ import { dateHeure, MAINTENANT, relatif } from '@/lib/format'
 import type { MembreEquipe } from '@/lib/mock'
 import { EQUIPE_SYNELIA, TICKETS_PLATEFORME } from '@/lib/mock'
 import { MATRICE_RBAC, ROLES_SUPER_ADMIN, can } from '@/lib/rbac'
-import { ROLE_LABEL, type Role } from '@/lib/types'
+import { ROLE_LABEL, type Role, type Ticket } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Avatar, GatedAction, Tabs } from '@/components/ui/display'
@@ -16,9 +16,16 @@ import { ConfirmDialog, Drawer, Modal } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { RoleMatrix } from '@/components/business/rbac-canvas'
-import { useApp } from '@/components/app/contexte'
+import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import {
+  creerRessource,
+  estActif,
+  modifierRessource,
+  requete,
+  supprimerRessource,
+} from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'membres', label: 'Membres de l’équipe' },
@@ -95,12 +102,16 @@ const POLITIQUE = [
 ]
 
 export default function Equipe() {
+  const maintenant = useMaintenant()
   // Le journal vit dans l'atelier : les actions faites pendant la session s'y
   // ajoutent, refus compris. Sans atelier touché, il retombe sur la graine.
   const { journal: AUDIT } = useAtelier()
 
   const { autorise, refus } = useApp()
   const equipe = useCollection<MembreEquipe>('equipe-synelia', EQUIPE_SYNELIA)
+  // En mode API, les tickets en cours d’un membre se comptent sur la
+  // collection distante (identifiants backend inconnus du jeu local).
+  const ticketsDistants = useCollection<Ticket>('tickets-plateforme', TICKETS_PLATEFORME)
   const executer = useOperation()
   const [onglet, setOnglet] = useState('membres')
   const [detailId, setDetailId] = useState<string | null>(null)
@@ -125,26 +136,38 @@ export default function Equipe() {
   const elevationsActives = equipe.items.filter((m) => m.elevation?.active)
   const equipes = [...new Set(equipe.items.map((m) => m.equipe))]
 
-  const ticketsDe = (nom: string) =>
-    TICKETS_PLATEFORME.filter((t) => t.assigneA === nom && !['resolu', 'ferme'].includes(t.statut))
+  const ticketsDe = (nom: string) => {
+    const file = estActif() ? ticketsDistants.items : TICKETS_PLATEFORME
+    return file.filter((t) => t.assigneA === nom && !['resolu', 'ferme'].includes(t.statut))
+  }
 
   const ajouterMembre = () => {
     const courrielFinal = courriel.trim() || `${nom.trim().toLowerCase().replace(/\s+/g, '.')}@synelia.tech`
+    const equipeChoisie = equipeNouvelle || (astreinteNouvelle ? 'NOC Abidjan · astreinte' : 'NOC Abidjan')
     executer({
       action: 'org.manage',
       titre: `${nom.trim()} ajouté à l’équipe`,
       detail:
         'L’invitation est envoyée. Le deuxième facteur devra être enregistré avant tout accès au portail.',
+      appel: () =>
+        creerRessource('/admin/equipe', {
+          nom: nom.trim(),
+          email: courrielFinal,
+          role: roleNouveau,
+          equipe: equipeChoisie,
+          privilegie: privilegieNouveau,
+        }),
       effet: () =>
         equipe.creer({
           id: equipe.identifiant('syn'),
           nom: nom.trim(),
           email: courrielFinal,
           role: roleNouveau,
-          equipe: equipeNouvelle || (astreinteNouvelle ? 'NOC Abidjan · astreinte' : 'NOC Abidjan'),
+          equipe: equipeChoisie,
           dernierAcces: MAINTENANT,
           privilegie: privilegieNouveau,
         }),
+      effetFinal: () => equipe.recharger(),
     })
     setNom('')
     setCourriel('')
@@ -158,7 +181,8 @@ export default function Equipe() {
   return (
     <div className="space-y-5">
       <PageHeader
-        titre="Équipe Synelia"
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Équipe & rôles' }]}
+        titre="Équipe & rôles"
         sousTitre="Qui a accès à quoi, du côté super admin. Les rôles sont volontairement étroits : un opérateur qui exploite la capacité n’a pas besoin de pouvoir modifier le catalogue, et personne n’a d’accès permanent aux données d’un client."
         actions={
           <GatedAction autorise={autorise('org.manage')} message={refus('org.manage')}>
@@ -246,14 +270,14 @@ export default function Equipe() {
                           <span className="flex items-center gap-2.5">
                             <Avatar nom={m.nom} size="sm" />
                             <span className="min-w-0">
-                              <span className="block text-[13px] font-semibold text-ink">
+                              <span className="block text-[12.5px] font-semibold text-ink">
                                 {m.nom}
                               </span>
-                              <span className="block text-[11px] text-g-500">{m.email}</span>
+                              <span className="block text-[10.5px] text-g-500">{m.email}</span>
                             </span>
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-700">{m.equipe}</td>
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{m.equipe}</td>
                         <td className="px-3 py-2.5">
                           <Badge tone={m.privilegie ? 'violet' : 'neutral'} size="sm">
                             {ROLE_LABEL[m.role] ?? m.role}
@@ -265,7 +289,7 @@ export default function Equipe() {
                               Oui
                             </Badge>
                           ) : (
-                            <span className="text-[12px] text-g-500">Non</span>
+                            <span className="text-[11.5px] text-g-500">Non</span>
                           )}
                         </td>
                         <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
@@ -282,11 +306,11 @@ export default function Equipe() {
                               Active
                             </Badge>
                           ) : (
-                            <span className="text-[12px] text-g-500">—</span>
+                            <span className="text-[11.5px] text-g-500">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 text-[12px] text-g-500">
-                          {relatif(m.dernierAcces)}
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-500">
+                          {relatif(m.dernierAcces, maintenant)}
                         </td>
                         <td className="px-3 py-2.5 text-right">
                           <span className="flex items-center justify-end gap-1.5">
@@ -328,8 +352,8 @@ export default function Equipe() {
                       className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
                     >
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold text-ink">{e}</span>
-                        <span className="block text-[11px] text-g-500">
+                        <span className="block text-[12.5px] font-semibold text-ink">{e}</span>
+                        <span className="block text-[10.5px] text-g-500">
                           {membres.map((m) => m.nom.split(' ')[0]).join(', ')}
                         </span>
                       </span>
@@ -365,7 +389,7 @@ export default function Equipe() {
                       <span className="min-w-0">
                         <span className="text-[12px] font-semibold text-ink">{a.actor.nom}</span>
                         <span className="ml-2 font-mono text-[11px] text-p-700">{a.action}</span>
-                        <span className="block text-[11px] text-g-500">
+                        <span className="block text-[10.5px] text-g-500">
                           {a.orgNom ?? 'Plateforme'} · {a.scope.label}
                         </span>
                       </span>
@@ -376,7 +400,7 @@ export default function Equipe() {
                         >
                           {a.result === 'ok' ? 'Succès' : a.result === 'refuse' ? 'Refusé' : 'Erreur'}
                         </Badge>
-                        <span className="text-[11px] text-g-500">{relatif(a.ts)}</span>
+                        <span className="text-[10.5px] text-g-500">{relatif(a.ts, maintenant)}</span>
                       </span>
                     </div>
                   ))}
@@ -423,7 +447,7 @@ export default function Equipe() {
                           </Badge>
                         </span>
                       </div>
-                      <p className="mt-1.5 text-[12px] leading-relaxed text-g-700">
+                      <p className="mt-1.5 text-[11.5px] leading-relaxed text-g-700">
                         {r === 'super_admin'
                           ? 'Pilotage complet de la plateforme : capacité, catalogue, organisations clientes, finance. Le rôle le plus étendu, réservé à deux ou trois personnes.'
                           : 'Exploitation quotidienne : capacité, provisionnements, tickets, supervision. Ne peut ni modifier le catalogue et la tarification, ni créer ou suspendre une organisation cliente.'}
@@ -466,12 +490,12 @@ export default function Equipe() {
                     d: 'Aucun rôle ne le permet, y compris l’administrateur de plateforme. Le chaînage cryptographique rend l’opération techniquement impossible.',
                   },
                 ].map((x) => (
-                  <div key={x.r} className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                    <p className="flex items-start gap-1.5 text-[13px] font-semibold text-ink">
+                  <div key={x.r} className="rounded-[6px] border border-p-300 bg-p-050 px-3 py-2.5">
+                    <p className="flex items-start gap-1.5 text-[12.5px] font-semibold text-ink">
                       <ShieldCheck size={12} className="mt-0.5 shrink-0 text-p-700" />
                       {x.r}
                     </p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">{x.d}</p>
+                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">{x.d}</p>
                   </div>
                 ))}
               </div>
@@ -509,7 +533,7 @@ export default function Equipe() {
                     { s: '3 – 9 août', n1: 'Cheick Coulibaly', n2: 'Marina Gbagbo', n: 1, statut: 'terminée' },
                   ].map((x) => (
                     <tr key={x.s} className="border-b border-g-100 last:border-0">
-                      <td className="px-3 py-2.5 text-[13px] font-semibold text-ink">{x.s}</td>
+                      <td className="px-3 py-2.5 text-[12.5px] font-semibold text-ink">{x.s}</td>
                       <td className="px-3 py-2.5">
                         <span className="flex items-center gap-2">
                           <Avatar nom={x.n1} size="sm" />
@@ -528,7 +552,7 @@ export default function Equipe() {
                             {x.n} appel{x.n > 1 ? 's' : ''}
                           </Badge>
                         ) : (
-                          <span className="text-[12px] text-g-500">—</span>
+                          <span className="text-[11.5px] text-g-500">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5">
@@ -548,8 +572,10 @@ export default function Equipe() {
               </table>
             </div>
             <Callout ton="warn" className="mt-4" titre="Quatre sollicitations en une semaine">
-              La semaine du 10 août, l’astreinte a été appelée quatre fois, dont deux la même nuit
-              pour la même alerte mal calibrée.
+              La semaine du 10 août, l’astreinte a été appelée quatre fois, dont deux la même nuit.
+              C’est le signe d’un problème de fond, pas d’une malchance : deux de ces appels
+              concernaient la même alerte mal calibrée. Une astreinte trop sollicitée finit par ne plus
+              répondre, ou par démissionner.
             </Callout>
           </Card>
 
@@ -583,8 +609,8 @@ export default function Equipe() {
                   },
                 ].map((x) => (
                   <div key={x.r} className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                    <p className="text-[13px] font-semibold text-ink">{x.r}</p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-g-700">{x.d}</p>
+                    <p className="text-[12.5px] font-semibold text-ink">{x.r}</p>
+                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">{x.d}</p>
                   </div>
                 ))}
               </div>
@@ -626,7 +652,7 @@ export default function Equipe() {
                     key={x.q}
                     className={cn(
                       'rounded-[6px] border px-3 py-2.5',
-                      x.j ? 'border-g-300' : 'border-warn/40',
+                      x.j ? 'border-g-300' : 'border-warn/40 bg-warn-bg',
                     )}
                   >
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -635,7 +661,7 @@ export default function Equipe() {
                         {x.j ? 'Justifiée' : 'Non justifiée'}
                       </Badge>
                     </div>
-                    <p className="mt-0.5 text-[11px] text-g-500">
+                    <p className="mt-0.5 text-[10.5px] text-g-500">
                       {x.qui} · {dateHeure(x.q)}
                     </p>
                   </div>
@@ -692,13 +718,13 @@ export default function Equipe() {
                 {privilegies.map((m) => (
                   <div
                     key={m.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-g-300 px-3 py-2.5"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-p-300 bg-p-050 px-3 py-2.5"
                   >
                     <span className="flex min-w-0 items-center gap-2.5">
                       <Avatar nom={m.nom} size="sm" />
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-semibold text-ink">{m.nom}</span>
-                        <span className="block text-[11px] text-g-500">
+                        <span className="block text-[12.5px] font-semibold text-ink">{m.nom}</span>
+                        <span className="block text-[10.5px] text-g-500">
                           {m.equipe} · {ROLE_LABEL[m.role] ?? m.role}
                         </span>
                       </span>
@@ -742,11 +768,17 @@ export default function Equipe() {
                             v.issue === 'retire'
                               ? 'Le compte garde son rôle mais perd l’accès plateforme complet. La revue est consignée au journal d’audit.'
                               : 'La revue est consignée au journal d’audit, avec son motif et la date du prochain réexamen.',
+                          appel: () =>
+                            modifierRessource('/admin/equipe', m.id, {
+                              privilegie: v.issue !== 'retire',
+                              revuLe: MAINTENANT,
+                            }),
                           effet: () =>
                             equipe.modifier(m.id, {
                               privilegie: v.issue !== 'retire',
                               revuLe: MAINTENANT,
                             }),
+                          effetFinal: () => equipe.recharger(),
                         })}
                       />
                     </span>
@@ -776,10 +808,10 @@ export default function Equipe() {
                   'Consignation dans le journal d’audit, avec la date et l’auteur de l’opération',
                 ].map((x, i) => (
                   <li key={x} className="flex gap-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-p-050 text-[11px] font-bold text-p-700">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-p-050 text-[10px] font-bold text-p-700">
                       {i + 1}
                     </span>
-                    <span className="text-[12px] leading-relaxed text-ink">{x}</span>
+                    <span className="text-[11.5px] leading-relaxed text-ink">{x}</span>
                   </li>
                 ))}
               </ol>
@@ -826,7 +858,7 @@ export default function Equipe() {
                 { cle: 'Équipe', valeur: detail.equipe },
                 { cle: 'Rôle', valeur: ROLE_LABEL[detail.role] ?? detail.role },
                 { cle: 'Compte privilégié', valeur: detail.privilegie ? 'Oui' : 'Non' },
-                { cle: 'Dernier accès', valeur: `${dateHeure(detail.dernierAcces)} (${relatif(detail.dernierAcces)})` },
+                { cle: 'Dernier accès', valeur: `${dateHeure(detail.dernierAcces)} (${relatif(detail.dernierAcces, maintenant)})` },
                 { cle: 'Deuxième facteur', valeur: 'Actif — obligatoire' },
                 {
                   cle: 'Tickets en cours',
@@ -864,7 +896,7 @@ export default function Equipe() {
                       key={a.id}
                       className="flex items-center justify-between gap-3 rounded-[5px] bg-g-050 px-2.5 py-1.5"
                     >
-                      <span className="min-w-0 truncate text-[12px] text-ink">{a.libelle}</span>
+                      <span className="min-w-0 truncate text-[11.5px] text-ink">{a.libelle}</span>
                       <Badge
                         tone={can(detail.role, a.id) === 'full' ? 'ok' : 'neutral'}
                         size="sm"
@@ -909,14 +941,20 @@ export default function Equipe() {
                 operation={(v) => ({
                   titre: `${detail.nom} est désormais ${ROLE_LABEL[v.role as Role]}`,
                   detail: 'Le changement est journalisé avec le nom de son auteur.',
+                  appel: () =>
+                    modifierRessource('/admin/equipe', detail.id, {
+                      role: v.role,
+                      equipe: String(v.equipe),
+                    }),
                   effet: () =>
                     equipe.modifier(detail.id, {
                       role: v.role as Role,
                       equipe: String(v.equipe),
                     }),
+                  effetFinal: () => equipe.recharger(),
                 })}
               />
-              {detail.elevation?.active && (
+              {detail.elevation?.active ? (
                 <BoutonAction
                   libelle="Révoquer l’élévation"
                   variant="ghost"
@@ -926,8 +964,77 @@ export default function Equipe() {
                     ton: 'info',
                     titre: `Élévation de ${detail.nom} révoquée`,
                     detail: 'L’accès est coupé immédiatement et la révocation est journalisée.',
+                    // `DELETE /admin/equipe/{id}/elevation` → `204`, sans
+                    // confirmation : l’identifiant du membre suffit.
+                    appel: () =>
+                      requete(
+                        `/admin/equipe/${encodeURIComponent(detail.id)}/elevation`,
+                        { methode: 'DELETE' },
+                      ),
                     effet: () => equipe.modifier(detail.id, { elevation: { active: false } }),
+                    effetFinal: () => equipe.recharger(),
                   }}
+                />
+              ) : (
+                <BoutonFormulaire
+                  libelle="Demander une élévation"
+                  variant="ghost"
+                  icone={<KeyRound size={12} />}
+                  action="org.manage"
+                  titre={`Élévation temporaire de ${detail.nom}`}
+                  description="Nominative, motivée et bornée : huit heures au plus, chaque action tracée dans le journal d’audit de l’organisation concernée."
+                  champs={[
+                    {
+                      id: 'role',
+                      label: 'Rôle accordé',
+                      type: 'select',
+                      options: ROLES_SUPER_ADMIN.map((r) => ({
+                        value: r,
+                        label: ROLE_LABEL[r] ?? r,
+                      })),
+                    },
+                    {
+                      id: 'dureeMin',
+                      label: 'Durée',
+                      type: 'nombre',
+                      demi: true,
+                      min: 30,
+                      max: 480,
+                      suffixe: 'minutes',
+                    },
+                    {
+                      id: 'motif',
+                      label: 'Motif',
+                      type: 'zone',
+                      placeholder: 'Incident en cours, accès aux journaux du client pour…',
+                      obligatoire: true,
+                    },
+                  ]}
+                  valeursDepart={{ role: 'super_admin', dureeMin: 240 }}
+                  libelleValider="Accorder l’élévation"
+                  operation={(v) => ({
+                    titre: `Élévation accordée à ${detail.nom}`,
+                    detail: `${ROLE_LABEL[v.role as Role] ?? v.role} pendant ${v.dureeMin} minutes. Expire d’elle-même.`,
+                    appel: () =>
+                      creerRessource(`/admin/equipe/${encodeURIComponent(detail.id)}/elevation`, {
+                        role: v.role,
+                        motif: String(v.motif),
+                        dureeMin: Number(v.dureeMin),
+                      }),
+                    effet: () =>
+                      equipe.modifier(detail.id, {
+                        elevation: {
+                          active: true,
+                          justification: String(v.motif),
+                          jusqua: new Date(
+                            new Date(MAINTENANT).getTime() + Number(v.dureeMin) * 60000,
+                          )
+                            .toISOString()
+                            .replace('.000', ''),
+                        },
+                      }),
+                    effetFinal: () => equipe.recharger(),
+                  })}
                 />
               )}
               <BoutonAction
@@ -938,6 +1045,8 @@ export default function Equipe() {
                   ton: 'warn',
                   titre: `Sessions de ${detail.nom} fermées`,
                   detail: 'La personne devra se reconnecter, deuxième facteur compris, sur tous ses appareils.',
+                  // Pas d’appel : la révocation de sessions vit côté client
+                  // (`DELETE /securite/sessions`), pas côté équipe.
                   effet: () => equipe.modifier(detail.id, { dernierAcces: MAINTENANT }),
                 }}
               />
@@ -951,7 +1060,13 @@ export default function Equipe() {
                     titre: `${detail.nom} passe en compte privilégié`,
                     detail:
                       'Le compte entre dans la revue trimestrielle : sans réexamen, le privilège devient un angle mort.',
+                    appel: () =>
+                      modifierRessource('/admin/equipe', detail.id, {
+                        privilegie: true,
+                        revuLe: MAINTENANT,
+                      }),
                     effet: () => equipe.modifier(detail.id, { privilegie: true, revuLe: MAINTENANT }),
+                    effetFinal: () => equipe.recharger(),
                   }}
                 />
               )}
@@ -1065,7 +1180,12 @@ export default function Equipe() {
             titre: `${retrait.nom} retiré de l’équipe`,
             detail:
               'Accès coupés et jetons révoqués. Pensez à faire tourner les secrets partagés : cette étape n’est pas automatique.',
+            // Le backend n’exige aucune confirmation sur cette route : le
+            // dialogue de saisie reste une discipline d’interface, pas un
+            // paramètre d’API.
+            appel: () => supprimerRessource('/admin/equipe', retrait.id),
             effet: () => equipe.supprimer(retrait.id),
+            effetFinal: () => equipe.recharger(),
           })
           setDetailId((id) => (id === retrait.id ? null : id))
           setRetraitId(null)

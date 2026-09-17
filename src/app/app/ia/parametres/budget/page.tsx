@@ -14,6 +14,7 @@ import {
   QUOTAS_DEPARTEMENT,
   modeleParSlug,
 } from '@/lib/mock'
+import type { AlerteRegle } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -23,6 +24,39 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { QuotaBar, StackedBar, StatTile } from '@/components/composition/metrics'
 import { PermissionDenied } from '@/components/composition/states'
 import { useApp } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
+import { BoutonFormulaire } from '@/components/app/actions'
+import { creerRessource } from '@/lib/api/client'
+
+/** Mêmes champs que le formulaire d'alerte d'Observabilité (`/observabilite/alertes`) :
+ * une alerte de budget IA est une règle d'alerte comme une autre, seule sa cible diffère. */
+const CHAMPS_ALERTE_BUDGET = [
+  { id: 'metrique', label: 'Métrique', placeholder: 'Dépense mensuelle IA', obligatoire: true },
+  { id: 'cible', label: 'Portée', placeholder: 'Organisation, une clé, un agent…', obligatoire: true },
+  { id: 'seuil', label: 'Seuil', placeholder: '80 % du plafond', demi: true, obligatoire: true },
+  {
+    id: 'plage',
+    label: 'Plage horaire',
+    type: 'select' as const,
+    demi: true,
+    options: [
+      { value: '24 h / 24', label: '24 h / 24' },
+      { value: 'Heures ouvrées', label: 'Heures ouvrées' },
+    ],
+  },
+  {
+    id: 'canal',
+    label: 'Canal de notification',
+    type: 'select' as const,
+    options: [
+      { value: 'email', label: 'Courriel' },
+      { value: 'sms', label: 'SMS' },
+      { value: 'whatsapp', label: 'WhatsApp' },
+      { value: 'webhook', label: 'Webhook' },
+    ],
+  },
+  { id: 'actif', label: 'Active', type: 'switch' as const, placeholder: 'Alerte armée' },
+]
 
 interface LigneJour {
   id: string
@@ -41,6 +75,7 @@ export default function BudgetEtAlertes() {
   const [plafond, setPlafond] = useState(BUDGET_IA.plafondMensuel)
   const [bloquer, setBloquer] = useState(BUDGET_IA.bloquerAuPlafond)
   const peutBudgeter = autorise('ia.budget.update')
+  const alertes = useCollection<AlerteRegle>('regles-alertes', ALERTES_IA)
 
   const controlesBudget = (
     <>
@@ -178,7 +213,7 @@ export default function BudgetEtAlertes() {
             />
           </div>
           <div className="divide-y divide-g-100">
-            {ALERTES_IA.map((a) => (
+            {alertes.items.map((a) => (
               <div key={a.id} className="px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <span className="min-w-0">
@@ -212,11 +247,44 @@ export default function BudgetEtAlertes() {
             ))}
           </div>
           <div className="border-t border-g-100 px-4 py-3">
-            <GatedAction autorise={peutBudgeter} message={refus('ia.budget.update')}>
-              <Button size="sm" variant="secondary">
-                Ajouter une alerte
-              </Button>
-            </GatedAction>
+            <BoutonFormulaire
+              libelle="Ajouter une alerte"
+              size="sm"
+              variant="secondary"
+              action="ia.budget.update"
+              titre="Ajouter une alerte de seuil"
+              description="Une règle d’alerte comme les autres — la même mécanique que celle utilisée par Observabilité, ici appliquée à un seuil de dépense ou de quota IA."
+              champs={CHAMPS_ALERTE_BUDGET}
+              valeursDepart={{ plage: '24 h / 24', canal: 'email', actif: true }}
+              libelleValider="Ajouter"
+              operation={(v) => {
+                const idAlerte = alertes.identifiant('alerte')
+                return {
+                  titre: `Alerte « ${v.metrique} » ajoutée`,
+                  detail: `${v.seuil} · ${v.canal}`,
+                  appel: () =>
+                    creerRessource('/observabilite/alertes', {
+                      cible: String(v.cible),
+                      metrique: String(v.metrique),
+                      seuil: String(v.seuil),
+                      canaux: [v.canal as AlerteRegle['canaux'][number]],
+                      plage: String(v.plage),
+                      actif: Boolean(v.actif),
+                    }),
+                  effet: () =>
+                    alertes.creer({
+                      id: idAlerte,
+                      cible: String(v.cible),
+                      metrique: String(v.metrique),
+                      seuil: String(v.seuil),
+                      canaux: [v.canal as AlerteRegle['canaux'][number]],
+                      plage: String(v.plage),
+                      actif: Boolean(v.actif),
+                    }),
+                  effetFinal: () => alertes.recharger(),
+                }
+              }}
+            />
           </div>
         </Card>
       </div>

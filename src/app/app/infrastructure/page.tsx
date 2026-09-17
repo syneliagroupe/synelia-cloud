@@ -4,6 +4,17 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, ArrowRight, Plus } from 'lucide-react'
 import { num, pct, toHumain } from '@/lib/format'
+import { ApiError, estActif } from '@/lib/api/client'
+import type {
+  Bucket,
+  DRPlan,
+  EspaceCloud,
+  K8sCluster,
+  LoadBalancer,
+  ManagedDatabase,
+  VM,
+  Volume,
+} from '@/lib/types'
 import { SITE_COURT } from '@/lib/types'
 import {
   BASES_MANAGEES,
@@ -13,7 +24,6 @@ import {
   K8S_CLUSTERS,
   LOAD_BALANCERS,
   ORG_COURANTE,
-  SYNTHESE_CLIENT,
   VMS,
   VOLUMES,
 } from '@/lib/mock'
@@ -22,7 +32,9 @@ import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
+import { DegradedState } from '@/components/composition/states'
 import { useApp } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
 
 /**
  * Accueil de l'univers Infrastructure.
@@ -35,8 +47,48 @@ import { useApp } from '@/components/app/contexte'
 export default function AccueilInfrastructure() {
   const { espaceId, setEspaceId, autorise, refus } = useApp()
   const router = useRouter()
-  const espaces = ESPACES.filter((e) => e.orgId === ORG_COURANTE.id)
-  const s = SYNTHESE_CLIENT
+  // Espaces Cloud, machines, clusters, répartiteurs, volumes, bases et plans de
+  // reprise ont chacun un vrai backend (`/espaces`, `/vms`, `/kubernetes`,
+  // `/load-balancers`, `/volumes`, `/bases`, `/pra`) : `useCollection` en sert
+  // les données réelles quand l'API est active, et retombe sur la graine sinon
+  // — même mécanisme que `tableau-de-bord.tsx`.
+  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
+  const vmsCol = useCollection<VM>('vms', VMS)
+  const clustersCol = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
+  const lbCol = useCollection<LoadBalancer>('load-balancers', LOAD_BALANCERS)
+  const volumesCol = useCollection<Volume>('volumes', VOLUMES)
+  const basesCol = useCollection<ManagedDatabase>('bases-managees', BASES_MANAGEES)
+  const bucketsCol = useCollection<Bucket>('buckets', BUCKETS)
+  const drPlansCol = useCollection<DRPlan>('plans-pra', DR_PLANS)
+
+  // En mode API, le backend filtre déjà par organisation (et ses identifiants
+  // sont inconnus du jeu local) : la maquette seule restreint au périmètre
+  // fictif de la démonstration.
+  const espaces = estActif()
+    ? espacesCol.items
+    : espacesCol.items.filter((e) => e.orgId === ORG_COURANTE.id)
+  const vms = vmsCol.items
+  const clusters = clustersCol.items
+  const lb = lbCol.items
+  const volumes = volumesCol.items
+  const bases = basesCol.items
+  const buckets = bucketsCol.items
+  const drPlans = drPlansCol.items
+
+  // Somme des quotas/usages réels des Espaces, pour la tuile de stockage :
+  // `SYNTHESE_CLIENT` était un agrégat figé, faux dès la première création.
+  const quotaStockageTo = Math.round(espaces.reduce((a, e) => a + e.quota.stockageTo, 0) * 10) / 10
+  const usageStockageTo = Math.round(espaces.reduce((a, e) => a + e.usage.stockageTo, 0) * 10) / 10
+
+  // `useCollection` retombe silencieusement sur la graine pour tout échec —
+  // sauf le `424` (intégration amont muette), qu'il faut nommer plutôt que de
+  // laisser les quotas et la liste « à surveiller » mentir avec des chiffres
+  // qu'on ne sait plus dater. Le même motif que sur le tableau de bord client.
+  const erreurEspaces = espacesCol.erreur
+  const espacesDegrade =
+    erreurEspaces instanceof ApiError && erreurEspaces.statut === 424
+      ? { integration: erreurEspaces.integration, dateDonnees: erreurEspaces.dateDonnees }
+      : null
 
   const ouvrir = (id: string) => {
     setEspaceId(id)
@@ -62,12 +114,12 @@ export default function AccueilInfrastructure() {
           'À ce niveau, une création de machine peut être refusée. L’extension s’applique à chaud.',
         href: `/app/espaces/${e.id}`,
       })),
-    ...VMS.filter((v) => !v.backupPlanId).map((v) => ({
+    ...vms.filter((v) => !v.backupPlanId).map((v) => ({
       quoi: `${v.nom} — aucun plan de sauvegarde`,
       detail: 'La machine tourne, mais rien n’en garde de copie restaurable.',
       href: `/app/vms/${v.id}`,
     })),
-    ...DR_PLANS.filter((p) => p.exercices.length === 0).map((p) => ({
+    ...drPlans.filter((p) => p.exercices.length === 0).map((p) => ({
       quoi: `${p.nom} — jamais testé`,
       detail: 'Un plan de reprise qu’on n’a jamais joué est une intention, pas une garantie.',
       href: `/app/pra/${p.id}`,
@@ -110,6 +162,14 @@ export default function AccueilInfrastructure() {
         </Callout>
       )}
 
+      {espacesDegrade && (
+        <DegradedState
+          source="infrastructure"
+          integration={espacesDegrade.integration}
+          dateDonnees={espacesDegrade.dateDonnees}
+        />
+      )}
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           libelle="Espaces Cloud"
@@ -118,17 +178,17 @@ export default function AccueilInfrastructure() {
         />
         <StatTile
           libelle="Machines virtuelles"
-          valeur={VMS.length}
-          detail={`${VMS.filter((v) => v.statut === 'running').length} en marche`}
+          valeur={vms.length}
+          detail={`${vms.filter((v) => v.statut === 'running').length} en marche`}
         />
         <StatTile
           libelle="Clusters Kubernetes"
-          valeur={K8S_CLUSTERS.length}
-          detail={`${LOAD_BALANCERS.length} répartiteur(s) de charge`}
+          valeur={clusters.length}
+          detail={`${lb.length} répartiteur(s) de charge`}
         />
         <StatTile
           libelle="Stockage consommé"
-          valeur={`${s.usage.stockageTo}/${s.quota.stockageTo}`}
+          valeur={`${usageStockageTo}/${quotaStockageTo}`}
           unite="To"
           ton="warn"
           detail="Premier facteur limitant"
@@ -137,11 +197,11 @@ export default function AccueilInfrastructure() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {espaces.map((e) => {
-          const machines = VMS.filter((v) => v.espaceId === e.id)
-          const clusters = K8S_CLUSTERS.filter((c) => c.espaceId === e.id)
-          const repartiteurs = LOAD_BALANCERS.filter((l) => l.espaceId === e.id)
-          const volumes = VOLUMES.filter((v) => v.espaceId === e.id)
-          const bases = BASES_MANAGEES.filter((b) => b.espaceId === e.id)
+          const machines = vms.filter((v) => v.espaceId === e.id)
+          const clustersEspace = clusters.filter((c) => c.espaceId === e.id)
+          const repartiteurs = lb.filter((l) => l.espaceId === e.id)
+          const volumesEspace = volumes.filter((v) => v.espaceId === e.id)
+          const basesEspace = bases.filter((b) => b.espaceId === e.id)
           const courant = e.id === espaceId
 
           return (
@@ -180,10 +240,10 @@ export default function AccueilInfrastructure() {
               <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-g-100 pt-3 text-[12px]">
                 {[
                   ['Machines', machines.length],
-                  ['Clusters', clusters.length],
+                  ['Clusters', clustersEspace.length],
                   ['Répartiteurs', repartiteurs.length],
-                  ['Volumes', volumes.length],
-                  ['Bases managées', bases.length],
+                  ['Volumes', volumesEspace.length],
+                  ['Bases managées', basesEspace.length],
                   ['Projets', e.projets],
                 ].map(([libelle, valeur]) => (
                   <div key={libelle} className="flex items-baseline justify-between gap-2">
@@ -216,10 +276,10 @@ export default function AccueilInfrastructure() {
           />
           <dl className="mt-3 space-y-1.5 text-[13px]">
             {[
-              ['Machines sans plan de sauvegarde', VMS.filter((v) => !v.backupPlanId).length],
-              ['Plans de reprise', DR_PLANS.length],
-              ['Plans jamais testés', DR_PLANS.filter((p) => p.exercices.length === 0).length],
-              ['Compartiments S3 verrouillés (WORM)', BUCKETS.filter((b) => b.objectLock?.actif).length],
+              ['Machines sans plan de sauvegarde', vms.filter((v) => !v.backupPlanId).length],
+              ['Plans de reprise', drPlans.length],
+              ['Plans jamais testés', drPlans.filter((p) => p.exercices.length === 0).length],
+              ['Compartiments S3 verrouillés (WORM)', buckets.filter((b) => b.objectLock?.actif).length],
             ].map(([libelle, valeur]) => (
               <div key={libelle} className="flex items-baseline justify-between gap-2">
                 <dt className="text-g-500">{libelle}</dt>

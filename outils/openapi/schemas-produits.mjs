@@ -272,6 +272,18 @@ const projets = {
       espaceId: chaine(),
       cree: horodatage(),
       environnements: tableau(chaine()),
+      etiquettes: tableau(chaine(), 'Ventilation de la dépense et recherche — pas de rôle fonctionnel.'),
+      clusterId: chaine(
+        "Le cluster Kubernetes qui héberge les services du projet — dédié ou partagé avec d'autres projets du même Espace.",
+      ),
+      lbId: chaine(
+        'Le load balancer L7 dédié provisionné avec le projet, quand il y en a un — la porte d’entrée de ses services.',
+      ),
+      cible: liste(
+        ['vm', 'k8s'],
+        'Cible de calcul du projet : `k8s` (namespace sur le cluster PaaS partagé, par défaut) ou `vm` (une VM Nova dédiée, ses services en conteneurs Docker Compose). Fixée à la création.',
+        { default: 'k8s' },
+      ),
       variables: tableau(
         objet(
           {
@@ -286,7 +298,7 @@ const projets = {
         'Variables partagées par tous les services du projet, par environnement.',
       ),
     },
-    ['id', 'nom', 'description', 'espaceId', 'cree', 'environnements', 'variables'],
+    ['id', 'nom', 'description', 'espaceId', 'cree', 'environnements', 'etiquettes', 'clusterId', 'variables'],
   ),
 
   ProjetCreation: objet(
@@ -295,6 +307,12 @@ const projets = {
       description: chaine(),
       espaceId: chaine(),
       environnements: tableau(chaine(), 'Par défaut `production`.'),
+      // Envoyés par l'assistant de création (`/app/applications/nouveau`) : les étiquettes
+      // choisies et le cluster retenu (existant, ou celui qu'elle vient de créer). Optionnels
+      // ici — une création minimale sans étiquette ni cluster explicite reste valide.
+      etiquettes: tableau(chaine(), 'Ventilation de la dépense et recherche.'),
+      clusterId: chaine('Cluster Kubernetes à rattacher, existant ou en cours de provisioning.'),
+      cible: liste(['vm', 'k8s'], 'Par défaut `k8s`. Ignoré en modification (non modifiable après création).'),
     },
     ['nom', 'espaceId'],
   ),
@@ -304,6 +322,7 @@ const projets = {
       id: chaine(),
       projetId: chaine(),
       nom: chaine(),
+      description: chaine('Saisie à la création, à côté du nom — pas de rôle fonctionnel.'),
       type: liste(['application', 'base', 'statique', 'cron', 'worker']),
       environnement: chaine(),
       statut: liste(['running', 'building', 'stopped', 'degraded', 'failed']),

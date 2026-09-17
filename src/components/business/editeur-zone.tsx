@@ -1,7 +1,7 @@
 'use client'
 
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Clock,
   Download,
@@ -27,9 +27,34 @@ import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
 import type { DnsZone } from '@/lib/types'
 
 type Enregistrement = DnsZone['enregistrements'][number]
+
+/** Modèle tel que l’écran le montre — `GET /web/dns/modeles` est ramené à cette forme. */
+interface ModeleDns {
+  id: string
+  nom: string
+  description: string
+  enregistrements: string[]
+}
+
+interface ModeleDnsDistant {
+  id: string
+  nom: string
+  description?: string
+  enregistrements: Array<{ type: string; nom: string; valeur: string; ttl?: number; priorite?: number }>
+}
+
+/** Corps d’un enregistrement pour `PUT /web/dns/{zone}/enregistrements` (sans identifiant). */
+const versContrat = (r: Enregistrement) => ({
+  type: r.type,
+  nom: r.nom,
+  valeur: r.valeur,
+  ttl: r.ttl,
+  ...(r.priorite === undefined ? {} : { priorite: r.priorite }),
+})
 
 /** Valeurs créées par un modèle rapide, une fois les jokers résolus. */
 const ENREGISTREMENTS_MODELE: Record<string, Enregistrement[]> = {
@@ -77,6 +102,26 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
   const [ajout, setAjout] = useState(false)
   const [modele, setModele] = useState<string | null>(null)
   const [suppression, setSuppression] = useState<Enregistrement | null>(null)
+  /** Modèles du backend (mode API) ; ceux de la maquette sinon. */
+  const [modelesDistants, setModelesDistants] = useState<ModeleDns[] | null>(null)
+  useEffect(() => {
+    if (!estActif()) return
+    requete<ModeleDnsDistant[]>('/web/dns/modeles').then(
+      (liste) =>
+        setModelesDistants(
+          liste.map((m) => ({
+            id: m.id,
+            nom: m.nom,
+            description: m.description ?? '',
+            enregistrements: m.enregistrements.map(
+              (e) => `${e.type} ${e.nom} → ${e.valeur}${e.priorite !== undefined ? ` (${e.priorite})` : ''}`,
+            ),
+          })),
+        ),
+      () => setModelesDistants([]),
+    )
+  }, [])
+  const modeles: ModeleDns[] = estActif() ? (modelesDistants ?? []) : MODELES_DNS
 
   const zone = zones.items.find((z) => z.id === zoneId) as DnsZone
   const domaines = zones.items.map((z) => z.domaine)
@@ -120,12 +165,35 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
       titre: edition ? 'Enregistrement modifié' : 'Enregistrement créé',
       detail:
         'Publié sur les trois serveurs de noms. Visible partout après expiration du TTL.',
+      appel: () =>
+        edition
+          ? requete(
+              `/web/dns/${encodeURIComponent(zone.id)}/enregistrements/${encodeURIComponent(edition)}`,
+              {
+                methode: 'PATCH',
+                corps: {
+                  type: f.type,
+                  nom: f.nom || '@',
+                  valeur: f.valeur,
+                  ttl: f.ttl,
+                  ...(f.priorite === '' ? {} : { priorite: Number(f.priorite) }),
+                },
+              },
+            )
+          : creerRessource(`/web/dns/${encodeURIComponent(zone.id)}/enregistrements`, {
+              type: f.type,
+              nom: f.nom || '@',
+              valeur: f.valeur,
+              ttl: f.ttl,
+              ...(f.priorite === '' ? {} : { priorite: Number(f.priorite) }),
+            }),
       effet: () =>
         zones.modifier(zone.id, (z) => ({
           enregistrements: edition
             ? z.enregistrements.map((x) => (x.id === edition ? patch : x))
             : [...z.enregistrements, patch],
         })),
+      effetFinal: () => zones.recharger(),
     })
     setAjout(false)
     setEdition(null)
@@ -254,10 +322,22 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                 operation={(v) => ({
                   titre: `TTL de la zone porté à ${v.ttl} s`,
                   detail: `${zone.enregistrements.length} enregistrements modifiés.`,
+                  // `PUT …/enregistrements` remplace la zone entière : on la
+                  // renvoie telle quelle, TTL changé.
+                  appel: () =>
+                    requete(`/web/dns/${encodeURIComponent(zone.id)}/enregistrements`, {
+                      methode: 'PUT',
+                      corps: {
+                        enregistrements: zone.enregistrements.map((r) =>
+                          versContrat({ ...r, ttl: Number(v.ttl) }),
+                        ),
+                      },
+                    }),
                   effet: () =>
                     zones.modifier(zone.id, (z) => ({
                       enregistrements: z.enregistrements.map((r) => ({ ...r, ttl: Number(v.ttl) })),
                     })),
+                  effetFinal: () => zones.recharger(),
                 })}
               />
               <BoutonAction
@@ -313,57 +393,73 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                     .split('\n')
                     .map((l) => l.trim())
                     .filter((l) => l && !l.startsWith(';') && !l.startsWith('$'))
+                  const importes = lignesImport.flatMap((ligne) => {
+                    const parts = ligne.split(/\s+/)
+                    const iType = parts.findIndex((x) => (TYPES as readonly string[]).includes(x))
+                    if (iType < 0) return []
+                    return [
+                      {
+                        id: zones.identifiant('rr'),
+                        type: parts[iType] as Enregistrement['type'],
+                        nom: parts[0] || '@',
+                        valeur: parts.slice(iType + 1).join(' '),
+                        ttl: Number(parts[1]) || 3600,
+                      } as Enregistrement,
+                    ]
+                  })
+                  // Même nom et même type : l’import remplace ; le reste est conservé.
+                  const fusion = [
+                    ...zone.enregistrements.filter(
+                      (r) => !importes.some((i) => i.type === r.type && i.nom === r.nom),
+                    ),
+                    ...importes,
+                  ]
                   return {
                     titre: `${lignesImport.length} ligne(s) importée(s)`,
                     detail: 'Les enregistrements non reconnus sont ignorés plutôt que devinés.',
+                    appel: () =>
+                      requete(`/web/dns/${encodeURIComponent(zone.id)}/enregistrements`, {
+                        methode: 'PUT',
+                        corps: { enregistrements: fusion.map(versContrat) },
+                      }),
                     effet: () =>
-                      zones.modifier(zone.id, (z) => ({
-                        enregistrements: [
-                          ...z.enregistrements,
-                          ...lignesImport.flatMap((ligne) => {
-                            const parts = ligne.split(/\s+/)
-                            const iType = parts.findIndex((x) => (TYPES as readonly string[]).includes(x))
-                            if (iType < 0) return []
-                            return [
-                              {
-                                id: zones.identifiant('rr'),
-                                type: parts[iType] as Enregistrement['type'],
-                                nom: parts[0] || '@',
-                                valeur: parts.slice(iType + 1).join(' '),
-                                ttl: Number(parts[1]) || 3600,
-                              },
-                            ]
-                          }),
-                        ],
-                      })),
+                      zones.modifier(zone.id, () => ({ enregistrements: fusion })),
+                    effetFinal: () => zones.recharger(),
                   }
                 }}
               />
-              <BoutonAction
-                libelle="Réinitialiser"
-                variant="ghost"
-                icone={<RotateCcw size={12} />}
-                operation={{
-                  action: 'network.manage',
-                  ton: 'warn',
-                  titre: `Zone ${zone.domaine} réinitialisée`,
-                  detail: 'La zone revient au dernier point de reprise publié.',
-                  effet: () =>
-                    zones.modifier(zone.id, () => ({
-                      enregistrements:
-                        ZONES_DNS.find((z) => z.id === zone.id)?.enregistrements ?? [],
-                    })),
-                }}
-                confirmation={{
-                  ressource: zone.domaine,
-                  titre: 'Réinitialiser la zone ?',
-                  pertes: [
-                    'Toutes les modifications non publiées seront perdues',
-                    'La zone revient à son dernier point de reprise',
-                  ],
-                  libelleAction: 'Réinitialiser la zone',
-                }}
-              />
+              {/* Aucun endpoint backend n'a de notion de « point de reprise » sur une zone
+                  Designate réelle — `zones.modifier` sans `appel` déclenchait un `PATCH
+                  /web/dns/{id}` inexistant (405, avalé par `.then(recharger, recharger)`)
+                  tout en affichant un succès : un faux succès en mode API. Réservé à la
+                  maquette, où ce point de reprise existe vraiment (la graine importée). */}
+              {!estActif() && (
+                <BoutonAction
+                  libelle="Réinitialiser"
+                  variant="ghost"
+                  icone={<RotateCcw size={12} />}
+                  operation={{
+                    action: 'network.manage',
+                    ton: 'warn',
+                    titre: `Zone ${zone.domaine} réinitialisée`,
+                    detail: 'La zone revient au dernier point de reprise publié.',
+                    effet: () =>
+                      zones.modifier(zone.id, () => ({
+                        enregistrements:
+                          ZONES_DNS.find((z) => z.id === zone.id)?.enregistrements ?? [],
+                      })),
+                  }}
+                  confirmation={{
+                    ressource: zone.domaine,
+                    titre: 'Réinitialiser la zone ?',
+                    pertes: [
+                      'Toutes les modifications non publiées seront perdues',
+                      'La zone revient à son dernier point de reprise',
+                    ],
+                    libelleAction: 'Réinitialiser la zone',
+                  }}
+                />
+              )}
             </div>
           </div>
 
@@ -455,7 +551,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
 
       {onglet === 'modeles' && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {MODELES_DNS.map((m) => (
+          {modeles.map((m) => (
             <Card key={m.id} hover className="flex flex-col">
               <CardHeader
                 titre={m.nom}
@@ -505,6 +601,11 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                   detail: v
                     ? 'La publication de l’enregistrement DS au registre prend quelques heures.'
                     : 'Le retrait du DS au registre doit précéder la dépublication des signatures, sinon la zone devient invalidable.',
+                  appel: () =>
+                    requete(`/web/dns/${encodeURIComponent(zone.id)}/dnssec`, {
+                      methode: 'PUT',
+                      corps: { actif: v },
+                    }),
                   job: {
                     type: 'dns.dnssec',
                     label: `${v ? 'Activation' : 'Désactivation'} DNSSEC · ${zone.domaine}`,
@@ -513,7 +614,12 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                       : ['Retirer le DS au registre', 'Attendre l’expiration des caches', 'Dépublier les signatures'],
                     dureeEtapeMs: 1100,
                   },
-                  effetFinal: () => zones.modifier(zone.id, { dnssec: v }),
+                  effetFinal: () => {
+                    // PUT /web/dns/{id}/dnssec a déjà persisté : en maquette on
+                    // rejoue la bascule en local, avec l’API on relit la zone.
+                    if (!estActif()) zones.modifier(zone.id, { dnssec: v })
+                    zones.recharger()
+                  },
                 })
               }
               label="DNSSEC"
@@ -632,14 +738,9 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
               titre="Délégation d’un sous-domaine"
               sousTitre="Confier un sous-domaine à d’autres serveurs de noms — par exemple pour un service tiers ou une filiale."
             />
-            <div className="space-y-4">
-              <Field label="Sous-domaine" hint={`sera délégué sous ${zone.domaine}`}>
-                <Input placeholder="labs" />
-              </Field>
-              <Field label="Serveurs de noms cibles" hint="un par ligne">
-                <MonoTextarea rows={3} placeholder={'ns1.exemple-tiers.com\nns2.exemple-tiers.com'} />
-              </Field>
-            </div>
+            {/* Pas de champs affichés ici : le formulaire (mêmes deux champs) est dans la
+                modale ouverte par le bouton — deux jeux de champs pour une seule action
+                aurait laissé le premier saisi puis ignoré au clic. */}
             <GatedAction autorise={autorise('network.manage')} message={refus('network.manage')}>
               <BoutonFormulaire
                 libelle="Créer la délégation"
@@ -658,6 +759,19 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                   ton: 'warn',
                   titre: `${v.sous}.${zone.domaine} délégué`,
                   detail: 'Ses enregistrements ne sont plus gérés depuis ce portail.',
+                  appel: async () => {
+                    for (const ns of [v.ns1, v.ns2].filter(Boolean)) {
+                      await creerRessource(
+                        `/web/dns/${encodeURIComponent(zone.id)}/enregistrements`,
+                        {
+                          type: 'NS',
+                          nom: String(v.sous),
+                          valeur: `${String(ns).replace(/\.$/, '')}.`,
+                          ttl: 3600,
+                        },
+                      )
+                    }
+                  },
                   effet: () =>
                     zones.modifier(zone.id, (z) => ({
                       enregistrements: [
@@ -673,6 +787,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                           })),
                       ],
                     })),
+                  effetFinal: () => zones.recharger(),
                 })}
               />
             </GatedAction>
@@ -840,15 +955,27 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                 executer({
                   action: 'network.manage',
                   titre: 'Modèle appliqué',
-                  detail: ajouts.length
-                    ? `${ajouts.length} enregistrements créés. Les existants n’ont pas été touchés.`
-                    : 'Ce modèle demande des valeurs propres à votre infrastructure : les enregistrements ont été préparés, à compléter un par un.',
+                  detail: estActif()
+                    ? 'Les enregistrements du modèle sont publiés sur la zone.'
+                    : ajouts.length
+                      ? `${ajouts.length} enregistrements créés. Les existants n’ont pas été touchés.`
+                      : 'Ce modèle demande des valeurs propres à votre infrastructure : les enregistrements ont été préparés, à compléter un par un.',
+                  // `POST /web/dns/{zone}/modeles/{modele}` — les identifiants de
+                  // modèle sont ceux de `GET /web/dns/modeles`.
+                  appel: modele
+                    ? () =>
+                        requete(
+                          `/web/dns/${encodeURIComponent(zone.id)}/modeles/${encodeURIComponent(modele)}`,
+                          { methode: 'POST', corps: {} },
+                        )
+                    : undefined,
                   effet: () =>
                     ajouts.length
                       ? zones.modifier(zone.id, (z) => ({
                           enregistrements: [...z.enregistrements, ...ajouts],
                         }))
                       : undefined,
+                  effetFinal: () => zones.recharger(),
                 })
                 setModele(null)
               }}
@@ -861,12 +988,12 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
         {modele && (
           <div className="space-y-4">
             <p className="text-[13px] leading-relaxed text-g-700">
-              {MODELES_DNS.find((m) => m.id === modele)?.description}
+              {modeles.find((m) => m.id === modele)?.description}
             </p>
             <div>
               <MicroLabel className="mb-1.5">Ce qui sera créé</MicroLabel>
               <ul className="space-y-1">
-                {MODELES_DNS.find((m) => m.id === modele)?.enregistrements.map((e) => (
+                {modeles.find((m) => m.id === modele)?.enregistrements.map((e) => (
                   <li
                     key={e}
                     className="rounded-[5px] bg-g-050 px-2.5 py-1.5 font-mono text-[11px] text-ink"
@@ -908,10 +1035,16 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
               ton: 'err',
               titre: 'Enregistrement supprimé',
               detail: 'Vous pouvez le recréer depuis l’historique de la zone dans les sept jours.',
+              appel: () =>
+                requete(
+                  `/web/dns/${encodeURIComponent(zone.id)}/enregistrements/${encodeURIComponent(cible.id)}`,
+                  { methode: 'DELETE' },
+                ),
               effet: () =>
                 zones.modifier(zone.id, (z) => ({
                   enregistrements: z.enregistrements.filter((x) => x.id !== cible.id),
                 })),
+              effetFinal: () => zones.recharger(),
             })
           }
           setSuppression(null)

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { AppProvider } from '@/components/app/contexte'
+import { AppProvider, GardeAuth } from '@/components/app/contexte'
 import { TopBar } from '@/components/app/topbar'
 import { ToastHost } from '@/components/app/toasts'
 import { ConteneurAdmin } from '@/components/app/conteneur'
@@ -17,6 +17,7 @@ export default function EspaceSuperAdminLayout({ children }: { children: React.R
     // `AppProvider` monte déjà l'atelier : un second fournisseur ici créerait
     // un état parallèle, invisible depuis les écrans montés au-dessus.
     <AppProvider roleInitial="super_admin">
+      <GardeAuth />
       <div className="min-h-screen bg-white">
         <TopBar portee="super_admin" />
         <main className="bg-g-050">

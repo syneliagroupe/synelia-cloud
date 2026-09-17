@@ -1,8 +1,10 @@
 # API Synelia Cloud — contrat backend
 
-`openapi.json` décrit **tout ce que le portail attend du backend** : 514 opérations
-sur 364 chemins, 218 schémas. Document OpenAPI 3.0.3 valide, directement
-exploitable par Swagger UI, Redoc ou un générateur de client.
+`openapi.json` décrit **tout ce que le portail attend du backend** : 546 opérations
+sur 381 chemins, 242 schémas (compte affiché par `bun run api:spec` à chaque
+exécution — ne le recopiez pas en dur ailleurs, il dérive). Document
+OpenAPI 3.0.3 valide, directement exploitable par Swagger UI, Redoc ou un
+générateur de client.
 
 Le backend est à construire séparément : cette spécification ne présume rien de
 l'implémentation. Les hyperviseurs, l'orchestrateur, l'annuaire et les solutions
@@ -35,8 +37,15 @@ Vérifier et consommer :
 ```bash
 bunx @redocly/cli lint docs/api/openapi.json
 bunx @redocly/cli preview-docs docs/api/openapi.json
-bunx openapi-typescript docs/api/openapi.json -o src/lib/api/types.d.ts
+bun run api:derive   # dérive types.ts ↔ contrat — ne générez pas de types sous src/
 ```
+
+`api:derive` compare `src/lib/types.ts` au contrat par une table de
+correspondance (`outils/contrat/correspondances.ts`, les noms diffèrent :
+`VM`↔`Vm`, `K8sCluster`↔`ClusterK8s`…) plutôt qu'un diff textuel. Informatif
+par défaut ; `CONTRAT_STRICT=1` le rend bloquant sur le niveau 1 (clés en trop
+ou manquantes). Le niveau 2 (assignabilité bidirectionnelle) reste informatif
+plus longtemps — voir `outils/contrat/derive.mjs`.
 
 ## Conventions
 

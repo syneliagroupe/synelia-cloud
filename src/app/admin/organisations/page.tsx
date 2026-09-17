@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Building2, Plus, UserCog } from 'lucide-react'
+import { Building2, Plus, ShieldAlert, UserCog } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, MAINTENANT, money, num, relatif } from '@/lib/format'
-import { ELEVATIONS, EQUIPE_SYNELIA, IMPAYES, ORGANISATIONS, USERS } from '@/lib/mock'
-import type { Elevation } from '@/lib/mock'
+import { ELEVATIONS, EQUIPE_SYNELIA, IMPAYES, libellePlan, ORGANISATIONS, USERS } from '@/lib/mock'
+import type { Elevation, Impaye } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -20,10 +20,12 @@ import { useApp } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire, useOperation } from '@/components/app/actions'
 import type { Organisation } from '@/lib/types'
+import { creerRessource, requete } from '@/lib/api/client'
 
 export default function Organisations() {
   const { autorise, refus, pousser } = useApp()
   const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
+  const impayes = useCollection<Impaye>('impayes', IMPAYES)
   const atelier = useAtelier()
   const executer = useOperation()
 
@@ -50,6 +52,18 @@ export default function Organisations() {
         adminCourriel.trim() || 'l’administrateur'
       } est envoyée.`,
       job: { workflow: 'org.create', cible: nom.trim() },
+      appel: () =>
+        creerRessource('/organisations', {
+          nom: nom.trim(),
+          pays,
+          secteur: secteur.trim() || undefined,
+          tva: tva.trim() || undefined,
+          tenantPlan: plan,
+          administrateur: adminCourriel.trim()
+            ? { email: adminCourriel.trim(), nom: adminCourriel.trim().split('@')[0] }
+            : undefined,
+        }),
+      effetFinal: () => orgs.recharger(),
       effet: () =>
         orgs.creer({
           id: orgs.identifiant('org'),
@@ -75,11 +89,12 @@ export default function Organisations() {
   const actives = orgs.items.filter((o) => o.statut === 'active')
   const suspendues = orgs.items.filter((o) => o.statut === 'suspendue')
   const caTotal = orgs.items.reduce((a, o) => a + (o.caMensuel ?? 0), 0)
-  const orgsImpayees = new Set(IMPAYES.map((i) => i.org))
+  const orgsImpayees = new Set(impayes.items.map((i) => i.org))
 
   return (
     <div className="space-y-5">
       <PageHeader
+        fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Organisations' }]}
         titre="Organisations"
         sousTitre="Chaque organisation est un cloisonnement complet : ses espaces, ses membres, ses données et sa facturation. Aucune donnée ne traverse la frontière entre deux organisations, y compris pour nos propres équipes."
         actions={
@@ -115,8 +130,8 @@ export default function Organisations() {
         <StatTile libelle="Organisations actives" valeur={actives.length} ton="ok" />
         <StatTile
           libelle="Secteurs représentés"
-          valeur={new Set(ORGANISATIONS.map((o) => o.secteur ?? o.pays)).size}
-          ton="accent"
+          valeur={new Set(orgs.items.map((o) => o.secteur ?? o.pays)).size}
+          ton="violet"
           detail={`sur ${orgs.items.length} organisations`}
         />
         <StatTile
@@ -160,7 +175,7 @@ export default function Organisations() {
                 libelle: 'Secteur',
                 options: [
                   { value: 'tous', label: 'Tous les secteurs' },
-                  ...[...new Set(ORGANISATIONS.map((o) => o.secteur).filter(Boolean))].map(
+                  ...[...new Set(orgs.items.map((o) => o.secteur).filter(Boolean))].map(
                     (sect) => ({ value: sect as string, label: sect as string }),
                   ),
                 ],
@@ -198,7 +213,7 @@ export default function Organisations() {
                       <Building2 size={13} />
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-semibold text-ink">
+                      <span className="block truncate text-[12.5px] font-semibold text-ink">
                         {o.nom}
                       </span>
                       <span className="block truncate text-[11px] text-g-500">
@@ -214,7 +229,7 @@ export default function Organisations() {
                 entete: 'Secteur',
                 cle: (o) => o.secteur ?? '',
                 rendu: (o) => (
-                  <span className="text-[12px] text-g-700">{o.secteur ?? '—'}</span>
+                  <span className="text-[11.5px] text-g-700">{o.secteur ?? '—'}</span>
                 ),
               },
               {
@@ -223,7 +238,7 @@ export default function Organisations() {
                 cle: (o) => o.tenantPlan ?? '',
                 masquable: true,
                 rendu: (o) => (
-                  <span className="text-[12px] text-g-700">{o.tenantPlan ?? '—'}</span>
+                  <span className="text-[11.5px] text-g-700">{libellePlan(o.tenantPlan)}</span>
                 ),
               },
               {
@@ -299,7 +314,7 @@ export default function Organisations() {
                 masquable: true,
                 masqueeParDefaut: true,
                 rendu: (o) => (
-                  <span className="text-[12px] text-g-500">{dateCourte(o.createdAt)}</span>
+                  <span className="text-[11.5px] text-g-500">{dateCourte(o.createdAt)}</span>
                 ),
               },
               {
@@ -357,6 +372,19 @@ export default function Organisations() {
                         titre: `Élévation de ${v.duree} h demandée sur ${o.nom}`,
                         detail:
                           'Une entrée apparaît immédiatement dans le journal d’audit du client, avec votre nom et le motif.',
+                        // Même appel réel que le bouton équivalent de la fiche organisation
+                        // (`[id]/vue.tsx`) : sans `appel`, ce bouton se contentait d'écrire dans
+                        // l'atelier local (mode maquette) même en mode API — aucune ligne
+                        // `sessions_auth` ni entrée d'audit ne partait réellement côté backend.
+                        appel: () =>
+                          requete(`/organisations/${encodeURIComponent(o.id)}/emprunt-identite`, {
+                            methode: 'POST',
+                            corps: {
+                              motif: String(v.motif),
+                              ecriture: v.perimetre === 'intervention',
+                              dureeMin: Number(v.duree) * 60,
+                            },
+                          }),
                         effet: () =>
                           creerElevation(o.id, {
                             id: `elv-${o.id}-${v.duree}`,
@@ -381,9 +409,17 @@ export default function Organisations() {
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Callout ton="violet" titre="Le cloisonnement s’applique aussi à nous">
+          Un membre de nos équipes ne voit pas les données d’une organisation sans élévation
+          nominative, bornée dans le temps, et visible dans le journal d’audit du client. Ce n’est pas
+          une politique interne que nous vous demandons de croire : c’est le mécanisme technique, et
+          le client le constate lui-même dans son propre journal.
+        </Callout>
         <Callout ton="info" titre="Suspendre n’est jamais automatique">
           Aucun impayé, aucun dépassement de quota, aucun signalement d’abus ne suspend une
-          organisation sans décision humaine, consignée avec un nom, une date et un motif.
+          organisation sans décision humaine. Couper le service d’une entreprise, c’est arrêter son
+          activité : cela mérite un nom, une date et un motif consignés, pas un traitement par lot
+          nocturne.
         </Callout>
       </div>
 

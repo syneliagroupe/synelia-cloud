@@ -6,6 +6,7 @@ import { cn, surfaceMarque } from '@/lib/utils'
 import type { SiteWeb } from '@/lib/types'
 import { num, relatif } from '@/lib/format'
 import {
+  DOMAINES,
   HEBERGEMENTS,
   ORG_COURANTE,
   SITES_WEB,
@@ -13,7 +14,7 @@ import {
   hebergementById,
   nomServi,
 } from '@/lib/mock'
-import type { WebHosting } from '@/lib/types'
+import type { Domaine, WebHosting } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -60,6 +61,13 @@ export default function ListeApplications() {
     ? tousSites.items
     : tousSites.items.filter((s) => miens.has(s.hebergementId))
   const majEnAttente = sites.reduce((a, s) => a + (s.majEnAttente ?? 0), 0)
+  // Domaines possédés : « Nom d'hôte » propose les domaines connus (plus
+  // « + Nouveau… ») pour éviter de retaper un nom qu'on a déjà enregistré.
+  const lesDomaines = useCollection<Domaine>('domaines', DOMAINES)
+  const domainesConnus = estActif()
+    ? lesDomaines.items
+    : DOMAINES.filter((d) => d.orgId === ORG_COURANTE.id)
+  const optionsDomaines = domainesConnus.map((d) => ({ value: d.nom, label: d.nom }))
 
   return (
     <div className="space-y-5">
@@ -81,7 +89,15 @@ export default function ListeApplications() {
             titre="Installer une application"
             description="Nous posons le socle, les mises à jour et les sauvegardes. Le contenu s’édite ensuite dans l’application : le portail ne réimplémente pas son écran d’administration."
             champs={[
-              { id: 'hote', label: 'Nom d’hôte', placeholder: 'boutique.dba.africa', obligatoire: true },
+              {
+                id: 'hote',
+                label: 'Nom d’hôte',
+                type: 'select_ou_nouveau',
+                options: optionsDomaines,
+                hint: 'Choisissez un domaine existant ou « + Nouveau… » pour un sous-domaine ou un hôte précis.',
+                placeholder: 'boutique.dba.africa',
+                obligatoire: true,
+              },
               {
                 id: 'hebergement',
                 label: 'Hébergement de destination',

@@ -7,12 +7,15 @@ import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, money } from '@/lib/format'
 import {
   CERTIFICATS,
+  DOMAINES,
   OFFRES_CERTIFICAT,
+  SITES_WEB,
   TYPE_CERTIFICAT_LABEL,
   joursAvant,
   type Certificat,
   type TypeCertificat,
 } from '@/lib/mock'
+import type { Domaine, SiteWeb } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -28,6 +31,16 @@ export default function ListeCertificats() {
   const { autorise, refus } = useApp()
   const executer = useOperation()
   const collection = useCollection<Certificat>('certificats', CERTIFICATS)
+  // Hôtes couvrables : les domaines possédés et les hôtes déjà servis (sites).
+  // Le champ « Hôte à couvrir » propose cette liste (plus « + Nouveau… »).
+  const lesDomaines = useCollection<Domaine>('domaines', DOMAINES)
+  const lesSites = useCollection<SiteWeb>('sites-web', SITES_WEB)
+  const optionsHotes = [
+    ...new Set([...lesSites.items.map((s) => s.hote), ...lesDomaines.items.map((d) => d.nom)]),
+  ]
+    .filter(Boolean)
+    .sort()
+    .map((h) => ({ value: h, label: h }))
   const [hote, setHote] = useState('')
   const [typeCert, setTypeCert] = useState<TypeCertificat>('letsencrypt')
   const payants = collection.items.filter((c) => c.prixAnnuel > 0)
@@ -109,7 +122,15 @@ export default function ListeCertificats() {
             titre="Commander un certificat TLS"
             description="Le gratuit convient à presque tout. Les payants servent quand il faut une garantie financière, le nom de l’entreprise dans le certificat, ou tous les sous-domaines d’un coup."
             champs={[
-              { id: 'hote', label: 'Hôte à couvrir', placeholder: 'boutique.dba.africa', obligatoire: true },
+              {
+                id: 'hote',
+                label: 'Hôte à couvrir',
+                type: 'select_ou_nouveau',
+                options: optionsHotes,
+                hint: 'Choisissez un domaine ou un hôte déjà servi, ou « + Nouveau… ».',
+                placeholder: 'boutique.dba.africa',
+                obligatoire: true,
+              },
               {
                 id: 'type',
                 label: 'Type',

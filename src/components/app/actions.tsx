@@ -297,7 +297,15 @@ export type ValeurChamp = string | number | boolean
 export interface ChampSpec {
   id: string
   label: string
-  type?: 'texte' | 'nombre' | 'select' | 'switch' | 'zone' | 'mono' | 'mot_de_passe'
+  type?:
+    | 'texte'
+    | 'nombre'
+    | 'select'
+    | 'select_ou_nouveau'
+    | 'switch'
+    | 'zone'
+    | 'mono'
+    | 'mot_de_passe'
   options?: Array<{ value: string; label: string }>
   hint?: string
   placeholder?: string
@@ -311,12 +319,83 @@ export interface ChampSpec {
 
 export type ValeursFormulaire = Record<string, ValeurChamp>
 
+/**
+ * Valeur sentinelle de l'entrée « + Nouveau… » d'un champ
+ * `select_ou_nouveau` : choisir cette entrée bascule sur une saisie libre
+ * plutôt que de renvoyer une valeur au formulaire.
+ */
+const NOUVEAU = '__nouveau__'
+
+/**
+ * Liste déroulante de valeurs existantes + une entrée « + Nouveau… » qui
+ * ouvre une saisie libre. Sert aux champs qui désignent une ressource déjà
+ * connue (un domaine, un hôte) tout en laissant en créer un au vol.
+ */
+function SelectOuNouveau({
+  valeur,
+  options,
+  placeholder,
+  onChange,
+}: {
+  valeur: string
+  options: Array<{ value: string; label: string }>
+  placeholder?: string
+  onChange: (v: string) => void
+}) {
+  // Saisie libre quand la valeur courante ne correspond à aucune option —
+  // c'est aussi le cas d'une valeur préremplie hors liste (import, reprise).
+  const [saisieLibre, setSaisieLibre] = useState(false)
+  const connu = options.some((o) => o.value === valeur)
+  const enSaisie = saisieLibre || (valeur !== '' && !connu)
+
+  return (
+    <div className="space-y-2">
+      <Select
+        value={enSaisie ? NOUVEAU : valeur}
+        onChange={(e) => {
+          if (e.target.value === NOUVEAU) {
+            setSaisieLibre(true)
+            onChange('')
+          } else {
+            setSaisieLibre(false)
+            onChange(e.target.value)
+          }
+        }}
+      >
+        {options.length === 0 && <option value="">Aucun existant</option>}
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+        <option value={NOUVEAU}>+ Nouveau…</option>
+      </Select>
+      {enSaisie && (
+        <Input
+          value={valeur}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  )
+}
+
 function valeursInitiales(champs: ChampSpec[], depart?: ValeursFormulaire): ValeursFormulaire {
   const out: ValeursFormulaire = {}
   for (const c of champs) {
     out[c.id] =
       depart?.[c.id] ??
-      (c.type === 'switch' ? false : c.type === 'nombre' ? (c.min ?? 0) : (c.options?.[0]?.value ?? ''))
+      (c.type === 'switch'
+        ? false
+        : c.type === 'nombre'
+          ? (c.min ?? 0)
+          : c.type === 'select_ou_nouveau'
+            ? // Une ressource à désigner n'a pas de défaut implicite : mieux vaut
+              // laisser vide (l'entrée « + Nouveau… » couvre la création) que de
+              // pré-sélectionner le premier domaine de la liste.
+              ''
+            : (c.options?.[0]?.value ?? ''))
   }
   return out
 }
@@ -413,6 +492,13 @@ export function ModaleFormulaire({
                   </option>
                 ))}
               </Select>
+            ) : c.type === 'select_ou_nouveau' ? (
+              <SelectOuNouveau
+                valeur={String(valeurs[c.id] ?? '')}
+                options={c.options ?? []}
+                placeholder={c.placeholder}
+                onChange={(v) => poser(c.id, v)}
+              />
             ) : c.type === 'switch' ? (
               <Switch checked={Boolean(valeurs[c.id])} onChange={(v) => poser(c.id, v)} label={c.placeholder} />
             ) : c.type === 'zone' ? (

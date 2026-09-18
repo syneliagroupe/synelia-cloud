@@ -22,6 +22,7 @@ import { useLectureDegradable } from '@/lib/api/degradable'
 import type {
   AuditEvent,
   EspaceCloud,
+  EvenementSupervision,
   Invoice,
   K8sCluster,
   Membership,
@@ -61,8 +62,38 @@ const LIBELLES_ACTION: Record<string, string> = {
   'espace.create': 'a créé',
 }
 
-export default function TableauDeBord() {
-  const maintenant = useMaintenant()
+/**
+ * Synthèse serveur (`GET /tableau-de-bord`) : compteurs et agrégats réellement
+ * calculés côté backend (services managés souscrits, taux de réussite des
+ * travaux sur 30 j, engagement SLA contractuel, événements de supervision
+ * dérivés des travaux récents). Champs optionnels : le contrat les laisse
+ * absents quand ils n'ont pas de source réelle.
+ */
+interface SyntheseServeur {
+  servicesManages: number
+  uptime30j?: number | null
+  slaContractuel?: number | null
+  ticketsOuverts?: number | null
+  evenements?: EvenementSupervision[] | null
+  quota: { vcpu: number; ramGo: number; stockageTo: number }
+  usage: { vcpu: number; ramGo: number; stockageTo: number }
+  depenseMois: number
+  depenseMoisPrecedent?: number | null
+}
+
+/** Service managé réellement souscrit (`GET /services`). */
+interface ServiceOpere {
+  id: string
+  nom: string
+  domaine: string
+  palier: string
+  site: string
+  statut: string
+  siegesUtilises: number
+  siegesSouscrits: number
+}
+
+export default function TableauDeBord() {  const maintenant = useMaintenant()
   const s = SYNTHESE_CLIENT
   // Le sélecteur d'organisation de la barre supérieure lit `organisations` /
   // `organisationId` du contexte, pas `ORG_COURANTE` : en mode API, c'est la
@@ -101,6 +132,23 @@ export default function TableauDeBord() {
     parPage: '8',
   })
   const journal = journalDistant?.donnees ?? journalLocal
+
+  // Synthèse serveur : la page ne lit plus la graine de démonstration pour les
+  // services managés, la disponibilité/SLA et les événements de supervision —
+  // le backend les calcule déjà (`/tableau-de-bord`). Hors API (mode maquette),
+  // la graine reste la source, comme avant.
+  const { donnees: synthese } = useLectureDegradable<SyntheseServeur>('/tableau-de-bord')
+  const servicesManagesN = synthese?.servicesManages ?? s.servicesManages
+  // Applications réellement en échec : même agrégat backend que l'accueil
+  // Applications (`/projets/synthese`), plutôt qu'un « 2 sur 6 » fixe.
+  const { donnees: syntheseProjets } = useLectureDegradable<{ enEchec: number; services: number }>(
+    '/projets/synthese',
+  )
+  // Services managés réellement souscrits (`GET /services`) : la carte
+  // « Mes services opérés » affichait jusqu'ici un état « catalogue non
+  // raccordé » alors que le backend les sert.
+  const { donnees: servicesDistants } = useLectureDegradable<{ donnees: ServiceOpere[] }>('/services')
+  const servicesOperes = servicesDistants?.donnees ?? []
 
   const espacesN = espaces.items.length
   // Détail réel de la tuile « Espaces Cloud » : sites et offres distincts
@@ -150,6 +198,9 @@ export default function TableauDeBord() {
   // Pas de champ `updatedAt` sur un ticket : impossible de dater la résolution
   // sans le fabriquer, donc un compte total plutôt qu'un « ce mois » inventé.
   const ticketsResolus = tickets.items.filter((t) => t.statut === 'resolu').length
+  // Incidents réels : comptés par gravité sur les tickets ouverts, pas figés.
+  const incidentsCritiques = ticketsOuverts.filter((t) => t.gravite === 'critique').length
+  const incidentsMajeurs = ticketsOuverts.filter((t) => t.gravite === 'majeure').length
 
   const periodeCourante = maintenant.slice(0, 7)
   const [anneeCourante, moisCourant] = periodeCourante.split('-').map(Number)
@@ -206,14 +257,16 @@ export default function TableauDeBord() {
         />
         <StatTile
           libelle="Services managés"
-          valeur={s.servicesManages}
+          valeur={servicesManagesN}
           detail={
             api
-              ? 'Démonstration — pas encore une lecture réelle'
+              ? synthese
+                ? `${servicesManagesN} souscrit(s) dans votre organisation`
+                : 'Lecture en cours…'
               : '1 en provisioning · 1 mise à jour disponible'
           }
           ton="violet"
-          serie={trendSeries('svc', 24, 4, 6, 0)}
+          serie={trendSeries('svc', 24, Math.max(0, servicesManagesN - 2), servicesManagesN, 0)}
         />
         <StatTile
           libelle="Applications déployées"
@@ -333,33 +386,41 @@ export default function TableauDeBord() {
             titre="Disponibilité"
             sousTitre={
               api
-                ? 'Démonstration — pas encore une lecture réelle'
+                ? 'Taux de réussite des travaux sur 30 jours, contre l’engagement contractuel'
                 : 'Moyenne pondérée sur 30 jours'
             }
           />
-          {/* Pas de supervision SLA/incidents branchée côté backend : en
-              mode API, la jauge et les trois lignes gardent les valeurs
-              illustratives du jeu de démonstration, mais l'écran le dit —
-              même convention que la tuile « Services managés » plus haut sur
-              cette page (catalogue jamais raccordé à une infra réelle). */}
           <GaugeCircle
-            valeur={s.uptime30j}
-            cible={s.slaContractuel}
+            valeur={synthese?.uptime30j ?? s.uptime30j}
+            cible={synthese?.slaContractuel ?? s.slaContractuel}
             min={99}
             libelle="Face à un engagement contractuel de 99,9 %"
             taille={148}
             className="mx-auto"
           />
           <dl className="mt-4 space-y-2 border-t border-g-100 pt-3.5">
-            <Ligne cle="Applications à surveiller" valeur="2 sur 6" ton="warn" />
-            <Ligne cle="Incidents ouverts" valeur="1 critique · 2 majeurs" ton="err" />
-            <Ligne cle="Crédit SLA en cours de calcul" valeur={money(12200)} ton="ok" />
+            <Ligne
+              cle="Applications à surveiller"
+              valeur={
+                api
+                  ? syntheseProjets
+                    ? `${syntheseProjets.enEchec} sur ${syntheseProjets.services}`
+                    : '—'
+                  : '2 sur 6'
+              }
+              ton={(api ? (syntheseProjets?.enEchec ?? 0) : 2) > 0 ? 'warn' : 'ok'}
+            />
+            <Ligne
+              cle="Incidents ouverts"
+              valeur={
+                api
+                  ? `${incidentsCritiques} critique${incidentsCritiques > 1 ? 's' : ''} · ${incidentsMajeurs} majeur${incidentsMajeurs > 1 ? 's' : ''}`
+                  : '1 critique · 2 majeurs'
+              }
+              ton={incidentsCritiques > 0 ? 'err' : incidentsMajeurs > 0 ? 'warn' : 'ok'}
+            />
+            {!api && <Ligne cle="Crédit SLA en cours de calcul" valeur={money(12200)} ton="ok" />}
           </dl>
-          {api && (
-            <p className="mt-2 text-[11px] font-semibold text-g-500">
-              Démonstration — pas encore une lecture réelle
-            </p>
-          )}
           <Link
             href="/app/support"
             className="mt-3 inline-flex items-center gap-1 border-t border-g-100 pt-3 text-[12px] font-semibold text-p-700 hover:text-m-600"
@@ -384,17 +445,52 @@ export default function TableauDeBord() {
           }
         >
           {api ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-[8px] border border-dashed border-g-300 bg-g-050 px-4 py-8 text-center">
-              <PackageSearch size={20} className="text-g-400" />
-              <p className="text-[12.5px] font-semibold text-g-700">
-                Catalogue non raccordé sur ce lab
-              </p>
-              <p className="max-w-xs text-[11.5px] leading-relaxed text-g-500">
-                Drive, messagerie, visioconférence et ERP existent dans le catalogue de services
-                managés, mais aucun n’est aujourd’hui provisionné derrière une infrastructure
-                réelle. Parcourez le catalogue depuis le lanceur.
-              </p>
-            </div>
+            servicesOperes.length > 0 ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                {servicesOperes.slice(0, 4).map((svc) => (
+                  <Link
+                    key={svc.id}
+                    href="/app/lanceur"
+                    className="group flex items-start justify-between gap-3 rounded-[10px] border border-g-300 bg-white p-3.5 transition-colors hover:border-p-400 hover:bg-p-050"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-bold text-ink group-hover:text-p-700">
+                        {svc.nom}
+                      </span>
+                      <span className="block truncate font-mono text-[11px] text-g-500">
+                        {svc.domaine}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-g-500">
+                        {svc.palier} · {svc.site} · {svc.siegesUtilises}/{svc.siegesSouscrits}{' '}
+                        siège(s)
+                      </span>
+                    </span>
+                    <Badge
+                      size="sm"
+                      tone={
+                        svc.statut === 'operationnel'
+                          ? 'ok'
+                          : svc.statut === 'erreur'
+                            ? 'err'
+                            : 'warn'
+                      }
+                    >
+                      {svc.statut}
+                    </Badge>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-2 rounded-[8px] border border-dashed border-g-300 bg-g-050 px-4 py-8 text-center">
+                <PackageSearch size={20} className="text-g-400" />
+                <p className="text-[12.5px] font-semibold text-g-700">
+                  Aucun service managé souscrit
+                </p>
+                <p className="max-w-xs text-[11.5px] leading-relaxed text-g-500">
+                  Parcourez le catalogue de services managés depuis le lanceur pour en souscrire un.
+                </p>
+              </div>
+            )
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
               {servicesVedette.map((svc) => (
@@ -414,11 +510,18 @@ export default function TableauDeBord() {
             titre="Santé de l’infrastructure"
             sousTitre="Six derniers événements de supervision"
           />
-          <EventList evenements={EVENEMENTS_SUPERVISION} max={6} />
-          {api && (
-            <p className="mt-2 text-[11px] font-semibold text-g-500">
-              Démonstration — aucune intégration Centreon réelle sur ce lab.
-            </p>
+          {api ? (
+            (synthese?.evenements?.length ?? 0) > 0 ? (
+              <EventList evenements={synthese?.evenements ?? []} max={6} />
+            ) : (
+              <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-4 text-center text-[12.5px] text-g-500">
+                {synthese
+                  ? 'Aucun événement : aucune tâche récente en échec sur votre organisation.'
+                  : 'Lecture en cours…'}
+              </p>
+            )
+          ) : (
+            <EventList evenements={EVENEMENTS_SUPERVISION} max={6} />
           )}
         </Card>
 

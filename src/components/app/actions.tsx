@@ -653,6 +653,7 @@ export function BoutonFormulaire({
   complement,
   ouvert: ouvertControle,
   onOuvertChange,
+  sansApi,
 }: {
   libelle: ReactNode
   titre: string
@@ -671,6 +672,12 @@ export function BoutonFormulaire({
   operation: (valeurs: ValeursFormulaire) => SpecOperation
   complement?: (valeurs: ValeursFormulaire) => ReactNode
   /**
+   * Formulaire sans contrepartie backend : en mode API le bouton reste
+   * désactivé avec ce motif, au lieu d'enregistrer une note qui n'existe que
+   * dans le navigateur. Voir `SpecOperation.sansApi`.
+   */
+  sansApi?: string
+  /**
    * Ouverture pilotée depuis l'appelant (ex. l'action d'un `DataTable` en état
    * vide, qui n'a pas de référence vers le bouton du bandeau) : non fourni, la
    * modale garde son état interne comme avant.
@@ -685,6 +692,7 @@ export function BoutonFormulaire({
   const setOuvert = onOuvertChange ?? setOuvertInterne
   const [erreurs, setErreurs] = useState<Record<string, string>>({})
   const permis = action ? autorise(action) : true
+  const bloqueApi = estActif() && !!sansApi
 
   /**
    * En mode API avec `appel`, la modale reste ouverte jusqu’au succès : un
@@ -706,7 +714,7 @@ export function BoutonFormulaire({
       })
       return
     }
-    executer({ action, ...spec })
+    executer({ action, sansApi: spec.sansApi ?? sansApi, ...spec })
     setOuvert(false)
   }
 
@@ -719,6 +727,8 @@ export function BoutonFormulaire({
           iconBefore={icone}
           fullWidth={fullWidth}
           className={className}
+          disabled={bloqueApi}
+          title={bloqueApi ? sansApi : undefined}
           onClick={() => {
             setErreurs({})
             setOuvert(true)

@@ -704,6 +704,8 @@ export default function Equipe() {
                 action: 'org.manage',
                 titre: 'Politique d’accès de l’équipe enregistrée',
                 detail: `${POLITIQUE.filter((r) => politique[r.id]).length} règles actives sur ${POLITIQUE.length}. Les deux règles non désactivables le restent.`,
+                sansApi:
+                  'Enregistrement indisponible : la politique d’accès de l’équipe n’est pas encore servie par l’API.',
               }}
             />
           </Card>
@@ -1048,6 +1050,8 @@ export default function Equipe() {
                   // Pas d’appel : la révocation de sessions vit côté client
                   // (`DELETE /securite/sessions`), pas côté équipe.
                   effet: () => equipe.modifier(detail.id, { dernierAcces: MAINTENANT }),
+                  sansApi:
+                    'Fermeture indisponible d’ici : la révocation des sessions se fait depuis l’espace de la personne.',
                 }}
               />
               {!detail.privilegie && (

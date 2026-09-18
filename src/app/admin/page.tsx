@@ -437,6 +437,8 @@ export default function VuePlateforme() {
                           titre: `Reprise de « ${j.label} »`,
                           detail: 'La séquence repart à l’étape qui a échoué, pas depuis le début.',
                           effet: () => reprendreJob(j.id, 'jobs-plateforme', JOBS_PLATEFORME),
+                          sansApi:
+                            'Reprise indisponible : le backend n’expose pas encore la reprise d’un job échoué.',
                         }}
                       />
                       <BoutonAction

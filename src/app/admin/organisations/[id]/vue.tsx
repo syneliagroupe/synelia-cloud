@@ -693,6 +693,8 @@ export function VueOrganisation({ id }: { id: string }) {
                                 ton: 'info',
                                 titre: `Facture ${f.numero} téléchargée`,
                                 detail: `${money(f.total)} · exemplaire opposable`,
+                                sansApi:
+                                  'Téléchargement indisponible : le backend ne sert pas encore le PDF de facture.',
                               }}
                             />
                             {f.statut === 'impayee' && (
@@ -708,6 +710,8 @@ export function VueOrganisation({ id }: { id: string }) {
                                     titre: `Relance envoyée pour ${f.numero}`,
                                     detail:
                                       'Courriel au contact de facturation et à l’administrateur de l’organisation, avec la copie de la facture.',
+                                    sansApi:
+                                      'Relance indisponible : l’envoi de relance n’est pas encore branché sur l’API.',
                                   }}
                                 />
                               </GatedAction>
@@ -766,6 +770,7 @@ export function VueOrganisation({ id }: { id: string }) {
                   action="org.manage"
                   titre="Enregistrer un appel de recouvrement"
                   description="Ce qui a été dit compte autant que le fait d’avoir appelé : la note suit le dossier et évite qu’un collègue répète la même demande."
+                  sansApi="Indisponible : la note d’appel n’est pas encore enregistrée côté API."
                   champs={[
                     {
                       id: 'issue',
@@ -793,6 +798,7 @@ export function VueOrganisation({ id }: { id: string }) {
                   action="org.manage"
                   titre="Proposer un échelonnement"
                   description="Un échelonnement accepté rapporte plus qu’une suspension : il maintient le service et étale la créance."
+                  sansApi="Indisponible : la proposition d’échelonnement n’est pas encore branchée sur l’API."
                   champs={[
                     { id: 'mensualites', label: 'Nombre de mensualités', type: 'nombre', demi: true, min: 2, max: 12 },
                     { id: 'premiere', label: 'Première échéance', type: 'select', demi: true, options: [
@@ -814,6 +820,7 @@ export function VueOrganisation({ id }: { id: string }) {
                   action="org.manage"
                   titre="Passer un avoir commercial"
                   description="Un avoir sort de la créance et entre dans la marge : il se justifie, il ne s’accorde pas pour clore une discussion."
+                  sansApi="Indisponible : l’avoir commercial n’est pas encore branché sur l’API."
                   champs={[
                     { id: 'montant', label: 'Montant', type: 'nombre', demi: true, min: 1, suffixe: 'FCFA' },
                     { id: 'motif', label: 'Motif', type: 'select', demi: true, options: [

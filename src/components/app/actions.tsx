@@ -302,6 +302,7 @@ export interface ChampSpec {
     | 'nombre'
     | 'select'
     | 'select_ou_nouveau'
+    | 'select_multi_ou_nouveau'
     | 'switch'
     | 'zone'
     | 'mono'
@@ -381,6 +382,76 @@ function SelectOuNouveau({
   )
 }
 
+/**
+ * Choix multiple : une pastille par valeur existante (cliquer ajoute/retire),
+ * plus une saisie libre pour les valeurs hors liste. La valeur du champ reste
+ * une chaîne séparée par des virgules — même forme que les champs qui la
+ * consomment déjà (`domainesAutorises` du relais SMTP).
+ */
+function SelectMultiOuNouveau({
+  valeur,
+  options,
+  placeholder,
+  onChange,
+}: {
+  valeur: string
+  options: Array<{ value: string; label: string }>
+  placeholder?: string
+  onChange: (v: string) => void
+}) {
+  const choisis = valeur
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+  const connus = choisis.filter((c) => options.some((o) => o.value === c))
+  const autres = choisis.filter((c) => !options.some((o) => o.value === c))
+
+  const basculer = (v: string) => {
+    const set = new Set(choisis)
+    if (set.has(v)) set.delete(v)
+    else set.add(v)
+    onChange([...set].join(', '))
+  }
+
+  return (
+    <div className="space-y-2">
+      {options.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((o) => {
+            const actif = choisis.includes(o.value)
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => basculer(o.value)}
+                className={
+                  actif
+                    ? 'rounded-full border border-p-600 bg-p-050 px-2.5 py-1 text-[12px] font-semibold text-p-700'
+                    : 'rounded-full border border-g-300 bg-white px-2.5 py-1 text-[12px] text-g-700 hover:border-p-400'
+                }
+              >
+                {actif ? '✓ ' : '+ '}
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <Input
+        value={autres.join(', ')}
+        placeholder={placeholder ?? 'autre-domaine.ci, …'}
+        onChange={(e) => {
+          const saisis = e.target.value
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean)
+          onChange([...connus, ...saisis].join(', '))
+        }}
+      />
+    </div>
+  )
+}
+
 function valeursInitiales(champs: ChampSpec[], depart?: ValeursFormulaire): ValeursFormulaire {
   const out: ValeursFormulaire = {}
   for (const c of champs) {
@@ -390,7 +461,7 @@ function valeursInitiales(champs: ChampSpec[], depart?: ValeursFormulaire): Vale
         ? false
         : c.type === 'nombre'
           ? (c.min ?? 0)
-          : c.type === 'select_ou_nouveau'
+          : c.type === 'select_ou_nouveau' || c.type === 'select_multi_ou_nouveau'
             ? // Une ressource à désigner n'a pas de défaut implicite : mieux vaut
               // laisser vide (l'entrée « + Nouveau… » couvre la création) que de
               // pré-sélectionner le premier domaine de la liste.
@@ -494,6 +565,13 @@ export function ModaleFormulaire({
               </Select>
             ) : c.type === 'select_ou_nouveau' ? (
               <SelectOuNouveau
+                valeur={String(valeurs[c.id] ?? '')}
+                options={c.options ?? []}
+                placeholder={c.placeholder}
+                onChange={(v) => poser(c.id, v)}
+              />
+            ) : c.type === 'select_multi_ou_nouveau' ? (
+              <SelectMultiOuNouveau
                 valeur={String(valeurs[c.id] ?? '')}
                 options={c.options ?? []}
                 placeholder={c.placeholder}

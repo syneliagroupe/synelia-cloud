@@ -184,7 +184,23 @@ export function VueHebergement({ id }: { id: string }) {
               titre="Installer un site sur cet hébergement"
               description="L’installation crée la racine, pose le certificat et déclare le sous-domaine dans la zone. Le contenu du site se règle ensuite dans l’outil lui-même, pas ici."
               champs={[
-                { id: 'hote', label: 'Nom d’hôte', placeholder: `boutique.${nom}`, obligatoire: true },
+                {
+                  id: 'hote',
+                  label: 'Nom d’hôte',
+                  type: 'select_ou_nouveau',
+                  options: [
+                    ...sites.map((s) => ({ value: s.hote, label: s.hote })),
+                    ...(h.domaine
+                      ? [
+                          { value: `www.${nom}`, label: `www.${nom}` },
+                          { value: nom, label: nom },
+                        ]
+                      : []),
+                  ],
+                  hint: `Choisissez un hôte existant sur cet hébergement, ou « + Nouveau… » pour un sous-domaine (ex. boutique.${nom}).`,
+                  placeholder: `boutique.${nom}`,
+                  obligatoire: true,
+                },
                 {
                   id: 'type',
                   label: 'Type de site',

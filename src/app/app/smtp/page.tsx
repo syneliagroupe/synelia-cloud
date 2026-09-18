@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Key, Plus, ShieldCheck, Webhook } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, num, pct, relatif } from '@/lib/format'
-import { SMTP } from '@/lib/mock'
+import { DOMAINES, ORG_COURANTE, SMTP } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -16,6 +16,7 @@ import { DegradedState } from '@/components/composition/states'
 import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import type { Domaine } from '@/lib/types'
 import {
   ApiError,
   creerRessource,
@@ -119,6 +120,13 @@ export default function Smtp() {
   const executer = useOperation()
   const cles = useCollection<CleSmtp>('cles-smtp', SMTP.cles)
   const webhooks = useCollection<WebhookSmtp>('webhooks-smtp', SMTP.webhooks)
+  // Domaines de l'organisation : les domaines autorisés à expédier se
+  // choisissent dans cette liste (plus une saisie libre), plutôt que d'être
+  // retapés à la main.
+  const lesDomaines = useCollection<Domaine>('domaines', DOMAINES)
+  const domainesConnus = estActif()
+    ? lesDomaines.items
+    : DOMAINES.filter((d) => d.orgId === ORG_COURANTE.id)
   const [onglet, setOnglet] = useState('apercu')
   const [nouvelleCle, setNouvelleCle] = useState(false)
   const [nomCle, setNomCle] = useState('')
@@ -440,7 +448,15 @@ export default function Smtp() {
                     titre="Activer le relais SMTP"
                     description="Les domaines déclarés sont les seuls acceptés en expéditeur. Le quota se règle ensuite."
                     champs={[
-                      { id: 'domaines', label: 'Domaines autorisés', placeholder: 'dba.africa, digitalbusinessafrica.ci', obligatoire: true },
+                      {
+                        id: 'domaines',
+                        label: 'Domaines autorisés',
+                        type: 'select_multi_ou_nouveau',
+                        options: domainesConnus.map((d) => ({ value: d.nom, label: d.nom })),
+                        hint: 'Cliquez vos domaines enregistrés, ou saisissez-en un hors liste.',
+                        placeholder: 'dba.africa, digitalbusinessafrica.ci',
+                        obligatoire: true,
+                      },
                       { id: 'quotaJour', label: 'Quota journalier', type: 'nombre', min: 100, demi: true },
                       { id: 'ipDediee', label: 'Adresse IP dédiée', type: 'switch', placeholder: 'Réputation isolée', demi: true },
                     ]}

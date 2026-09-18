@@ -6,6 +6,7 @@ import { ArrowRight, KeyRound, MailCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/field'
 import { ApiError, ecrireSession, requete, type SessionApi } from '@/lib/api/client'
+import { nettoyerCode, urlVerification } from '@/lib/auth/verification'
 
 /**
  * Vérification d’email après inscription (`POST /auth/verification-email`) :
@@ -91,7 +92,7 @@ function FormulaireVerification() {
           inputMode="numeric"
           autoComplete="one-time-code"
           value={code}
-          onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+          onChange={(e) => setCode(nettoyerCode(e.target.value))}
           placeholder="123456"
           autoFocus
         />

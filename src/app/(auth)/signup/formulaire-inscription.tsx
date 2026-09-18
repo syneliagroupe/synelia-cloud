@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox, Field, Input } from '@/components/ui/field'
 import { TVA_PCT } from '@/lib/format'
 import { ApiError, ecrireSession, requete, type SessionApi } from '@/lib/api/client'
+import { estEtatVerification, urlVerification } from '@/lib/auth/verification'
 
 // Pays, secteur et TVA se règlent ensuite depuis les paramètres de l’organisation
 // (cf. `/signup/organisation` en mode maquette) : à l’inscription, le nom suffit.
@@ -50,8 +51,8 @@ export function FormulaireInscriptionApi() {
           ...(nomOrg.trim() ? { organisation: { nom: nomOrg, pays: PAYS_DEFAUT } } : {}),
         },
       })
-      if ('essaisRestants' in reponse) {
-        router.push(`/signup/verifier?email=${encodeURIComponent(email)}`)
+      if (estEtatVerification(reponse)) {
+        router.push(urlVerification(email))
         return
       }
       ecrireSession(reponse)

@@ -14,9 +14,10 @@ décrite dans `docs/BRANCHEMENT-API.md`, qui tient aussi l'état réel/persisté
 simulé/maquette de chaque collection — n'employez pas le mot « maquette » pour
 désigner l'application, réservez-le au mode sans `NEXT_PUBLIC_API_URL`.
 
-Le cahier des charges d'origine (`SPECBUILDSYNELIACLOUD.md`, 1143 lignes) et la
-charte graphique (`Design.md`) ne sont pas dans le dépôt : ils ont été fournis en
-pièce jointe. Ce fichier retient ce qu'il faut en savoir pour ne pas défaire des
+Le cahier des charges d'origine (`SPECBUILDSYNELIACLOUD.md`, 1143 lignes) n'est
+pas dans le dépôt : il a été fourni en pièce jointe. La charte graphique est
+`Design.md`, elle **est** dans le dépôt (suivie par git depuis le commit
+b908897). Ce fichier retient ce qu'il faut en savoir pour ne pas défaire des
 décisions déjà prises.
 
 ## Outillage

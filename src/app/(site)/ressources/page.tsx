@@ -154,9 +154,16 @@ export default function Ressources() {
                 placeholder="prenom.nom@organisation.ci"
                 className="flex-1"
                 aria-label="Adresse e-mail"
+                disabled
               />
-              <Button>S’abonner</Button>
+              <Button disabled title="Inscription par e-mail pas encore disponible">
+                S’abonner
+              </Button>
             </div>
+            <p className="mt-1.5 text-[11.5px] text-g-500">
+              Pas encore disponible : la lettre existe, mais rien n’enregistre encore d’adresse
+              depuis cette page.
+            </p>
             <p className="mt-3 text-[12px] leading-relaxed text-g-500">
               Pas de relance commerciale, pas de transmission à des tiers, désabonnement en un clic.
               Nous publions y compris nos post-mortems d’incident — c’est la partie que nos lecteurs

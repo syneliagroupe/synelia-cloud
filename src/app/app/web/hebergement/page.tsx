@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { money, num, relatif } from '@/lib/format'
 import { SITE_LABEL } from '@/lib/types'
 import {
+  DOMAINES,
   HEBERGEMENTS,
   ORG_COURANTE,
   PRIX_PALIER,
@@ -23,7 +24,7 @@ import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire } from '@/components/app/actions'
 import { creerRessource, estActif } from '@/lib/api/client'
-import type { SiteWeb, WebHosting } from '@/lib/types'
+import type { Domaine, SiteWeb, WebHosting } from '@/lib/types'
 
 const PALIERS = [
   {
@@ -52,6 +53,17 @@ export default function ListeHebergements() {
   const { autorise, refus } = useApp()
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
   const tousSites = useCollection<SiteWeb>('sites-web', SITES_WEB)
+  // Domaines de l'organisation : le champ « Domaine à servir » propose la
+  // liste des domaines existants (plus « + Nouveau… ») plutôt qu'une saisie
+  // libre — on veut voir ce qu'on possède déjà avant d'en servir un.
+  const lesDomaines = useCollection<Domaine>('domaines', DOMAINES)
+  const domainesConnus = estActif()
+    ? lesDomaines.items
+    : DOMAINES.filter((d) => d.orgId === ORG_COURANTE.id)
+  const optionsDomaines = domainesConnus.map((d) => ({
+    value: d.nom,
+    label: d.nom,
+  }))
   // Le backend filtre déjà par organisation ; la maquette restreint au
   // périmètre fictif, dont les identifiants sont inconnus du backend.
   const heberges = estActif()
@@ -80,7 +92,7 @@ export default function ListeHebergements() {
             icone={<Plus size={14} />}
             action="service.admin"
             titre="Commander un hébergement"
-            description="Un domaine, un serveur. Si vous n’avez pas encore de domaine, nous servons le site sur un nom provisoire le temps que vous l’enregistriez."
+            description="Un domaine, un serveur. Le domaine doit être enregistré et payé au préalable : il n’y a pas de nom provisoire."
             champs={[
               {
                 id: 'palier',
@@ -88,7 +100,15 @@ export default function ListeHebergements() {
                 type: 'select',
                 options: PALIERS.map((p) => ({ value: p.nom, label: `${p.nom} · ${p.specs} · ${p.sites}` })),
               },
-              { id: 'domaine', label: 'Domaine à servir', placeholder: 'mon-entreprise.ci — laissez vide pour un nom provisoire' },
+              {
+                id: 'domaine',
+                label: 'Domaine à servir',
+                type: 'select_ou_nouveau',
+                options: optionsDomaines,
+                obligatoire: true,
+                hint: 'Un domaine enregistré et payé est requis. Choisissez-en un, ou « + Nouveau… » après l’avoir commandé dans Domaines.',
+                placeholder: 'mon-entreprise.ci',
+              },
               {
                 id: 'site',
                 label: 'Site physique',
@@ -114,14 +134,12 @@ export default function ListeHebergements() {
             libelleValider="Commander"
             operation={(v) => ({
               titre: `Hébergement ${v.palier} commandé`,
-              detail: v.domaine
-                ? `Servira ${v.domaine} depuis ${v.site === 'ABJ' ? 'Abidjan' : 'Grand-Bassam'}.`
-                : 'Un nom provisoire est attribué le temps que vous enregistriez votre domaine.',
+              detail: `Servira ${v.domaine} depuis ${v.site === 'ABJ' ? 'Abidjan' : 'Grand-Bassam'}.`,
               appel: () =>
                 creerRessource('/web/hebergements', {
                   palier: String(v.palier),
                   site: v.site as 'ABJ' | 'GBM',
-                  ...(String(v.domaine).trim() ? { domaine: String(v.domaine).trim() } : {}),
+                  domaine: String(v.domaine).trim(),
                 }),
               job: {
                 type: 'hebergement.create',

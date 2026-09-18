@@ -46,10 +46,18 @@ export interface SpecOperation {
    */
   appel?: () => Promise<unknown>
   /**
-   * Rappelé sur `ApiError` en mode API, avant le toast : le site d’appel y
+   * Rappelé sur `ApiError` en mode API, avant le toast : le site d'appel y
    * accroche ses erreurs de champs (`422`, `e.champs`) sans rouvrir la modale.
    */
   onErreur?: (e: ApiError) => void
+  /**
+   * Opération sans contrepartie backend. Renseigner ce message rend l'action
+   * réellement désactivée quand l'API est active, avec ce texte en infobulle,
+   * au lieu d'annoncer un succès qui n'a rien changé côté serveur. Absent =
+   * l'opération reste affichée telle quelle (mutations de l'atelier en mode
+   * maquette, par exemple).
+   */
+  sansApi?: string
   /**
    * Ce qu'on écrit au journal d'audit. Par défaut l'opération est journalisée
    * en déduisant l'action de `action` et la cible de `titre` ; `audit: false`
@@ -95,6 +103,14 @@ export function useOperation() {
       // la seule trace qu'un auditeur ne peut pas reconstituer autrement.
       if (spec.action && !autorise(spec.action)) {
         trace('refuse', `Rôle ${role} insuffisant pour ${spec.action}`)
+        return
+      }
+
+      // Opération déclarée sans contrepartie backend : en mode API, on le dit
+      // au lieu de simuler un succès. Le bouton est déjà désactivé dans ce cas,
+      // ce garde-fou couvre les appels qui ne passent pas par lui.
+      if (estActif() && !spec.appel && spec.sansApi) {
+        pousser({ ton: 'warn', titre: spec.titre, detail: spec.sansApi })
         return
       }
 
@@ -257,6 +273,9 @@ export function BoutonAction({
   const executer = useOperation()
   const [ouvert, setOuvert] = useState(false)
   const permis = operation.action ? autorise(operation.action) : true
+  // Opération sans contrepartie backend : désactivée en mode API, avec le
+  // motif en infobulle — jamais un succès qui n'a rien changé côté serveur.
+  const bloqueApi = estActif() && !operation.appel && !!operation.sansApi
 
   return (
     <>
@@ -267,9 +286,9 @@ export function BoutonAction({
           iconBefore={icone}
           fullWidth={fullWidth}
           className={className}
-          disabled={desactive}
+          disabled={desactive || bloqueApi}
           aria-label={nomAccessible}
-          title={nomAccessible}
+          title={bloqueApi ? operation.sansApi : nomAccessible}
           onClick={() => (confirmation ? setOuvert(true) : executer(operation))}
         >
           {libelle}
@@ -297,7 +316,16 @@ export type ValeurChamp = string | number | boolean
 export interface ChampSpec {
   id: string
   label: string
-  type?: 'texte' | 'nombre' | 'select' | 'switch' | 'zone' | 'mono' | 'mot_de_passe'
+  type?:
+    | 'texte'
+    | 'nombre'
+    | 'select'
+    | 'select_ou_nouveau'
+    | 'select_multi_ou_nouveau'
+    | 'switch'
+    | 'zone'
+    | 'mono'
+    | 'mot_de_passe'
   options?: Array<{ value: string; label: string }>
   hint?: string
   placeholder?: string
@@ -311,12 +339,153 @@ export interface ChampSpec {
 
 export type ValeursFormulaire = Record<string, ValeurChamp>
 
+/**
+ * Valeur sentinelle de l'entrée « + Nouveau… » d'un champ
+ * `select_ou_nouveau` : choisir cette entrée bascule sur une saisie libre
+ * plutôt que de renvoyer une valeur au formulaire.
+ */
+const NOUVEAU = '__nouveau__'
+
+/**
+ * Liste déroulante de valeurs existantes + une entrée « + Nouveau… » qui
+ * ouvre une saisie libre. Sert aux champs qui désignent une ressource déjà
+ * connue (un domaine, un hôte) tout en laissant en créer un au vol.
+ */
+function SelectOuNouveau({
+  valeur,
+  options,
+  placeholder,
+  onChange,
+}: {
+  valeur: string
+  options: Array<{ value: string; label: string }>
+  placeholder?: string
+  onChange: (v: string) => void
+}) {
+  // Saisie libre quand la valeur courante ne correspond à aucune option —
+  // c'est aussi le cas d'une valeur préremplie hors liste (import, reprise).
+  const [saisieLibre, setSaisieLibre] = useState(false)
+  const connu = options.some((o) => o.value === valeur)
+  const enSaisie = saisieLibre || (valeur !== '' && !connu)
+
+  return (
+    <div className="space-y-2">
+      <Select
+        value={enSaisie ? NOUVEAU : valeur}
+        onChange={(e) => {
+          if (e.target.value === NOUVEAU) {
+            setSaisieLibre(true)
+            onChange('')
+          } else {
+            setSaisieLibre(false)
+            onChange(e.target.value)
+          }
+        }}
+      >
+        {options.length === 0 && <option value="">Aucun existant</option>}
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+        <option value={NOUVEAU}>+ Nouveau…</option>
+      </Select>
+      {enSaisie && (
+        <Input
+          value={valeur}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Choix multiple : une pastille par valeur existante (cliquer ajoute/retire),
+ * plus une saisie libre pour les valeurs hors liste. La valeur du champ reste
+ * une chaîne séparée par des virgules — même forme que les champs qui la
+ * consomment déjà (`domainesAutorises` du relais SMTP).
+ */
+function SelectMultiOuNouveau({
+  valeur,
+  options,
+  placeholder,
+  onChange,
+}: {
+  valeur: string
+  options: Array<{ value: string; label: string }>
+  placeholder?: string
+  onChange: (v: string) => void
+}) {
+  const choisis = valeur
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+  const connus = choisis.filter((c) => options.some((o) => o.value === c))
+  const autres = choisis.filter((c) => !options.some((o) => o.value === c))
+
+  const basculer = (v: string) => {
+    const set = new Set(choisis)
+    if (set.has(v)) set.delete(v)
+    else set.add(v)
+    onChange([...set].join(', '))
+  }
+
+  return (
+    <div className="space-y-2">
+      {options.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((o) => {
+            const actif = choisis.includes(o.value)
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => basculer(o.value)}
+                className={
+                  actif
+                    ? 'rounded-full border border-p-600 bg-p-050 px-2.5 py-1 text-[12px] font-semibold text-p-700'
+                    : 'rounded-full border border-g-300 bg-white px-2.5 py-1 text-[12px] text-g-700 hover:border-p-400'
+                }
+              >
+                {actif ? '✓ ' : '+ '}
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <Input
+        value={autres.join(', ')}
+        placeholder={placeholder ?? 'autre-domaine.ci, …'}
+        onChange={(e) => {
+          const saisis = e.target.value
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean)
+          onChange([...connus, ...saisis].join(', '))
+        }}
+      />
+    </div>
+  )
+}
+
 function valeursInitiales(champs: ChampSpec[], depart?: ValeursFormulaire): ValeursFormulaire {
   const out: ValeursFormulaire = {}
   for (const c of champs) {
     out[c.id] =
       depart?.[c.id] ??
-      (c.type === 'switch' ? false : c.type === 'nombre' ? (c.min ?? 0) : (c.options?.[0]?.value ?? ''))
+      (c.type === 'switch'
+        ? false
+        : c.type === 'nombre'
+          ? (c.min ?? 0)
+          : c.type === 'select_ou_nouveau' || c.type === 'select_multi_ou_nouveau'
+            ? // Une ressource à désigner n'a pas de défaut implicite : mieux vaut
+              // laisser vide (l'entrée « + Nouveau… » couvre la création) que de
+              // pré-sélectionner le premier domaine de la liste.
+              ''
+            : (c.options?.[0]?.value ?? ''))
   }
   return out
 }
@@ -413,6 +582,20 @@ export function ModaleFormulaire({
                   </option>
                 ))}
               </Select>
+            ) : c.type === 'select_ou_nouveau' ? (
+              <SelectOuNouveau
+                valeur={String(valeurs[c.id] ?? '')}
+                options={c.options ?? []}
+                placeholder={c.placeholder}
+                onChange={(v) => poser(c.id, v)}
+              />
+            ) : c.type === 'select_multi_ou_nouveau' ? (
+              <SelectMultiOuNouveau
+                valeur={String(valeurs[c.id] ?? '')}
+                options={c.options ?? []}
+                placeholder={c.placeholder}
+                onChange={(v) => poser(c.id, v)}
+              />
             ) : c.type === 'switch' ? (
               <Switch checked={Boolean(valeurs[c.id])} onChange={(v) => poser(c.id, v)} label={c.placeholder} />
             ) : c.type === 'zone' ? (

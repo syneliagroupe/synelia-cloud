@@ -41,7 +41,7 @@ export function FormulaireSite({
   envoi?: (formulaire: HTMLFormElement) => Promise<string>
 }) {
   const [reference, setReference] = useState<string | null>(null)
-  const [erreur, setErreur] = useState<string | null>(null)
+  const [erreur, setErreur] = useState<{ message: string; reference?: string } | null>(null)
   const [envoiEnCours, setEnvoiEnCours] = useState(false)
 
   if (reference) {
@@ -97,8 +97,8 @@ export function FormulaireSite({
         setEnvoiEnCours(false)
         setErreur(
           err instanceof ApiError
-            ? `${err.message}${err.correlationId ? ` Référence ${err.correlationId}.` : ''}`
-            : 'Le serveur ne répond pas. Réessayez dans un moment.',
+            ? { message: err.message, reference: err.correlationId }
+            : { message: 'Le serveur ne répond pas. Réessayez dans un moment.' },
         )
       },
     )
@@ -108,9 +108,19 @@ export function FormulaireSite({
     <form className="space-y-4" onSubmit={soumettre}>
       {children}
       {erreur && (
-        <p className="flex items-start gap-1.5 rounded-[6px] border border-err/40 bg-err-bg px-3 py-2 text-[12px] leading-relaxed text-ink">
+        <p
+          role="alert"
+          className="flex items-start gap-1.5 rounded-[6px] border border-err/40 bg-err-bg px-3 py-2 text-[12px] leading-relaxed text-ink"
+        >
           <AlertTriangle size={13} className="mt-0.5 shrink-0 text-err" />
-          {erreur}
+          <span>
+            {erreur.message}
+            {erreur.reference && (
+              <span className="mt-1 block font-mono text-[11px] text-g-500">
+                Référence {erreur.reference}
+              </span>
+            )}
+          </span>
         </p>
       )}
       <Button type="submit" size="lg" fullWidth disabled={envoiEnCours}>

@@ -6,7 +6,7 @@ import { cn, slugify } from '@/lib/utils'
 import { TVA_PCT } from '@/lib/format'
 import { PAYS, SECTEURS, TAILLES_ORG } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
-import { ButtonLink } from '@/components/ui/button'
+import { Button, ButtonLink } from '@/components/ui/button'
 import { Checkbox, Field, Input, Select } from '@/components/ui/field'
 import { Callout } from '@/components/composition/card'
 
@@ -90,7 +90,7 @@ export default function CreationOrganisation() {
 
         <Field
           label="Domaine principal"
-          hint="facultatif — servira à vérifier votre fédération d’identité"
+          hint="facultatif — utilisé pour vos URL et vos e-mails"
           error={domaineValide ? undefined : 'Format attendu : mon-organisation.ci'}
         >
           <Input
@@ -128,21 +128,20 @@ export default function CreationOrganisation() {
             mono
           />
           <Recap cle="Votre rôle" valeur="Org Admin — tous les droits sur l’organisation" />
-          <Recap cle="Realm d’identité" valeur={domaine.trim() ? `sso.synelia.cloud/realms/${slugify(domaine)}` : 'attribué à la création'} mono />
           <Recap cle="Zone de facturation" valeur={`${pays} · FCFA (XOF) · TVA ${TVA_PCT} %`} />
           <Recap cle="Résidence des données" valeur="Abidjan (Synertech Vallon) par défaut" />
         </dl>
       </div>
 
-      <ButtonLink
-        href="/app"
-        size="lg"
-        fullWidth
-        className={cn(!complet && 'pointer-events-none opacity-45')}
-        iconAfter={<ArrowRight size={15} />}
-      >
-        Créer mon organisation
-      </ButtonLink>
+      {complet ? (
+        <ButtonLink href="/app" size="lg" fullWidth iconAfter={<ArrowRight size={15} />}>
+          Créer mon organisation
+        </ButtonLink>
+      ) : (
+        <Button size="lg" fullWidth disabled iconAfter={<ArrowRight size={15} />}>
+          Créer mon organisation
+        </Button>
+      )}
 
       <Callout ton="info" titre="Vous pourrez tout modifier ensuite">
         Le nom, le secteur, les coordonnées de facturation et la résidence par défaut se modifient

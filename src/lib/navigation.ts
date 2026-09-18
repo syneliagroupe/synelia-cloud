@@ -226,7 +226,8 @@ export const UNIVERS_CLIENT: UniversNav[] = [
     nom: 'IAM & sécurité',
     sections: [
       { nom: 'Membres & rôles', href: '/app/membres' },
-      { nom: "Fédération d'identité", href: '/app/sso' },
+      // « Fédération d'identité » (/app/sso) est masquée : la fédération n'est
+      // pas livrée côté backend, la route reste dans le code pour plus tard.
       // « Mon compte » (double authentification personnelle) n'a pas d'onglet
       // propre, sur le patron du lanceur : on y arrive par le menu du compte.
       // Rattaché ici pour que la barre garde un repère quand on l'ouvre.

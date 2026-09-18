@@ -6,6 +6,7 @@ import { cn, surfaceMarque } from '@/lib/utils'
 import type { SiteWeb } from '@/lib/types'
 import { num, relatif } from '@/lib/format'
 import {
+  DOMAINES,
   HEBERGEMENTS,
   ORG_COURANTE,
   SITES_WEB,
@@ -13,7 +14,7 @@ import {
   hebergementById,
   nomServi,
 } from '@/lib/mock'
-import type { WebHosting } from '@/lib/types'
+import type { Domaine, WebHosting } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
@@ -60,6 +61,13 @@ export default function ListeApplications() {
     ? tousSites.items
     : tousSites.items.filter((s) => miens.has(s.hebergementId))
   const majEnAttente = sites.reduce((a, s) => a + (s.majEnAttente ?? 0), 0)
+  // Domaines possédés : « Nom d'hôte » propose les domaines connus (plus
+  // « + Nouveau… ») pour éviter de retaper un nom qu'on a déjà enregistré.
+  const lesDomaines = useCollection<Domaine>('domaines', DOMAINES)
+  const domainesConnus = estActif()
+    ? lesDomaines.items
+    : DOMAINES.filter((d) => d.orgId === ORG_COURANTE.id)
+  const optionsDomaines = domainesConnus.map((d) => ({ value: d.nom, label: d.nom }))
 
   return (
     <div className="space-y-5">
@@ -81,7 +89,15 @@ export default function ListeApplications() {
             titre="Installer une application"
             description="Nous posons le socle, les mises à jour et les sauvegardes. Le contenu s’édite ensuite dans l’application : le portail ne réimplémente pas son écran d’administration."
             champs={[
-              { id: 'hote', label: 'Nom d’hôte', placeholder: 'boutique.dba.africa', obligatoire: true },
+              {
+                id: 'hote',
+                label: 'Nom d’hôte',
+                type: 'select_ou_nouveau',
+                options: optionsDomaines,
+                hint: 'Choisissez un domaine existant ou « + Nouveau… » pour un sous-domaine ou un hôte précis.',
+                placeholder: 'boutique.dba.africa',
+                obligatoire: true,
+              },
               {
                 id: 'hebergement',
                 label: 'Hébergement de destination',
@@ -299,60 +315,18 @@ export default function ListeApplications() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {CATALOGUE.map((c) => {
             const surface = surfaceMarque(TEINTE[c.type] ?? '#4B2882')
+            const logiciel = c.nom.toLowerCase().replace(/[^a-z]/g, '')
+            // L'application se installe sur un hébergement choisi et sous un hôte
+            // choisi — l'ancienne version prenait silencieusement le premier
+            // hébergement et un sous-domaine générique, sans rien demander.
+            const hebergementDefaut = hebergementsConnus[0]
+            const hoteDefaut = hebergementDefaut
+              ? `${logiciel}.${nomServi(hebergementDefaut)}`
+              : `${logiciel}.dba.africa`
             return (
-              <button
+              <div
                 key={c.nom}
-                type="button"
-                onClick={() => {
-                  const premier = hebergementsConnus[0]
-                  const idSite = tousSites.identifiant('site')
-                  const hote = `${c.nom.toLowerCase().replace(/[^a-z]/g, '')}.${premier ? nomServi(premier) : 'dba.africa'}`
-                  executer({
-                    action: 'service.admin',
-                    titre: `Installation de ${c.nom} lancée`,
-                    detail: `${hote} · PHP ${c.php}. Le contenu s’édite ensuite dans l’application.`,
-                    appel: () =>
-                      premier
-                        ? creerRessource('/web/sites', {
-                            hebergementId: premier.id,
-                            site: {
-                              hote,
-                              type: c.type as SiteWeb['type'],
-                              phpVersion: c.php === '—' ? '8.3' : c.php,
-                              ssl: true,
-                            },
-                          })
-                        : Promise.resolve(),
-                    effet: () =>
-                      premier
-                        ? tousSites.creer({
-                            id: idSite,
-                            hebergementId: premier.id,
-                            hote,
-                            racine: `/var/www/${c.nom.toLowerCase()}`,
-                            type: c.type as SiteWeb['type'],
-                            phpVersion: c.php === '—' ? '8.3' : c.php,
-                            ssl: { etat: 'en_emission' },
-                            espaceMo: 0,
-                            visitesMois: 0,
-                            securite: { waf: true, bruteForce: true, scanMalware: true },
-                            statut: 'installation',
-                          })
-                        : undefined,
-                    job: { workflow: 'web.app.install', cible: `${c.nom} · ${hote}` },
-                    effetFinal: () => {
-                      if (estActif()) {
-                        tousSites.recharger()
-                        return
-                      }
-                      tousSites.modifier(idSite, {
-                        statut: 'en_ligne',
-                        ssl: { etat: 'actif', emetteur: 'Let’s Encrypt', expire: '2026-11-17' },
-                      })
-                    },
-                  })
-                }}
-                className="rounded-[8px] border border-g-300 bg-white p-3 text-left transition-colors hover:border-p-400 hover:bg-p-050"
+                className="flex flex-col rounded-[8px] border border-g-300 bg-white p-3"
               >
                 <span
                   className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[11px] font-bold"
@@ -361,9 +335,96 @@ export default function ListeApplications() {
                   {c.nom.slice(0, 2).toUpperCase()}
                 </span>
                 <span className="mt-2 block text-[13px] font-bold text-ink">{c.nom}</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-g-500">{c.phrase}</span>
+                <span className="mt-0.5 block flex-1 text-[11px] leading-snug text-g-500">
+                  {c.phrase}
+                </span>
                 <span className="mt-1.5 block text-[11px] text-g-500">PHP {c.php}</span>
-              </button>
+                <BoutonFormulaire
+                  libelle="Installer"
+                  titre={`Installer ${c.nom}`}
+                  size="sm"
+                  variant="secondary"
+                  className="mt-2 w-full"
+                  champs={[
+                    {
+                      id: 'hebergement',
+                      label: 'Hébergement de destination',
+                      type: 'select',
+                      options: hebergementsConnus.map((h) => ({
+                        value: h.id,
+                        label: `${nomServi(h)} · ${h.palier}`,
+                      })),
+                      obligatoire: true,
+                    },
+                    {
+                      id: 'hote',
+                      label: 'Nom d’hôte',
+                      type: 'select_ou_nouveau',
+                      options: [
+                        ...new Set([
+                          ...sites.map((s) => s.hote),
+                          ...domainesConnus.map((d) => `${logiciel}.${d.nom}`),
+                          ...domainesConnus.map((d) => d.nom),
+                        ]),
+                      ]
+                        .filter(Boolean)
+                        .map((h) => ({ value: h, label: h })),
+                      hint: `Sous-domaine dédié (ex. ${hoteDefaut}), ou « + Nouveau… » pour un autre hôte.`,
+                      placeholder: hoteDefaut,
+                      obligatoire: true,
+                    },
+                  ]}
+                  valeursDepart={{
+                    hebergement: hebergementDefaut?.id ?? '',
+                    hote: hoteDefaut,
+                  }}
+                  libelleValider="Installer"
+                  operation={(v) => {
+                    const idSite = tousSites.identifiant('site')
+                    const hote = String(v.hote)
+                    const hebergementId = String(v.hebergement)
+                    return {
+                      titre: `Installation de ${c.nom} lancée`,
+                      detail: `${hote} · PHP ${c.php}. Le contenu s’édite ensuite dans l’application.`,
+                      appel: () =>
+                        creerRessource('/web/sites', {
+                          hebergementId,
+                          site: {
+                            hote,
+                            type: c.type as SiteWeb['type'],
+                            phpVersion: c.php === '—' ? '8.3' : c.php,
+                            ssl: true,
+                          },
+                        }),
+                      effet: () =>
+                        tousSites.creer({
+                          id: idSite,
+                          hebergementId,
+                          hote,
+                          racine: `/var/www/${hote.split('.')[0] || logiciel}`,
+                          type: c.type as SiteWeb['type'],
+                          phpVersion: c.php === '—' ? '8.3' : c.php,
+                          ssl: { etat: 'en_emission' },
+                          espaceMo: 0,
+                          visitesMois: 0,
+                          securite: { waf: true, bruteForce: true, scanMalware: true },
+                          statut: 'installation',
+                        }),
+                      job: { workflow: 'web.app.install', cible: `${c.nom} · ${hote}` },
+                      effetFinal: () => {
+                        if (estActif()) {
+                          tousSites.recharger()
+                          return
+                        }
+                        tousSites.modifier(idSite, {
+                          statut: 'en_ligne',
+                          ssl: { etat: 'actif', emetteur: 'Let’s Encrypt', expire: '2026-11-17' },
+                        })
+                      },
+                    }
+                  }}
+                />
+              </div>
             )
           })}
         </div>

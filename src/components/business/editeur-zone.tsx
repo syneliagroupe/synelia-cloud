@@ -262,6 +262,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Filtrer par nom ou valeur…"
+                aria-label="Filtrer par nom ou valeur"
                 className="w-56"
               />
               <div className="flex flex-wrap gap-1">

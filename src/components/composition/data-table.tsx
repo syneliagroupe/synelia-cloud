@@ -144,6 +144,7 @@ export function DataTable<T extends { id: string }>({
           {recherche && (
             <SearchInput
               placeholder={placeholderRecherche}
+              aria-label={placeholderRecherche}
               value={q}
               onChange={(e) => {
                 setQ(e.target.value)

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { useState } from 'react'
+import { Children, Fragment, cloneElement, isValidElement, useState } from 'react'
 import { Check, ChevronRight, Copy, Eye, EyeOff } from 'lucide-react'
 import { cn, initials, surfaceMarque } from '@/lib/utils'
 import { Tooltip } from './overlay'
@@ -398,6 +398,11 @@ export function Spinner({ size = 16, className }: { size?: number; className?: s
 /**
  * Action refusée par le RBAC : le bouton reste visible mais désactivé,
  * avec une infobulle qui nomme le rôle requis (§10, règle de rendu).
+ *
+ * Le contrôle enfant est cloné pour porter `aria-disabled` et sortir de
+ * l’ordre de tabulation : sans cela, l’opacité et `pointer-events-none` ne
+ * suffisaient qu’à la souris — le bouton restait focalisable au clavier et
+ * annoncé « activé » par un lecteur d’écran.
  */
 export function GatedAction({
   autorise,
@@ -412,8 +417,27 @@ export function GatedAction({
   return (
     <Tooltip content={message}>
       <span className="inline-flex cursor-not-allowed opacity-45 [&_*]:pointer-events-none">
-        {children}
+        {neutraliser(children)}
       </span>
     </Tooltip>
   )
+}
+
+/**
+ * Clone l’enfant pour le rendre réellement inerte au clavier (`aria-disabled`,
+ * hors tabulation). Un `Fragment` ne peut recevoir que `key` et `children` :
+ * on descend alors dans ses enfants au lieu de lui poser l’attribut, ce qui
+ * produisait une erreur React « Invalid prop supplied to React.Fragment ».
+ */
+function neutraliser(children: ReactNode): ReactNode {
+  if (!isValidElement(children)) return children
+  if ((children as { type: unknown }).type === Fragment) {
+    const { children: sous } = children.props as { children?: ReactNode }
+    return Children.map(sous, neutraliser)
+  }
+  if (typeof (children as { type: unknown }).type === 'symbol') return children
+  return cloneElement(children as React.ReactElement<Record<string, unknown>>, {
+    'aria-disabled': true,
+    tabIndex: -1,
+  })
 }

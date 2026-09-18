@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Bell, CheckCircle2, Rss, Webhook } from 'lucide-react'
 import { cn, groupBy, seededSeries } from '@/lib/utils'
 import { dateHeure, pct, relatif } from '@/lib/format'
@@ -148,8 +148,8 @@ export default function Statut() {
               </thead>
               <tbody>
                 {parCategorie.map(([cat, services]) => (
-                  <>
-                    <tr key={`cat-${cat}`} className="border-b border-g-300 bg-p-050">
+                  <Fragment key={`cat-${cat}`}>
+                    <tr className="border-b border-g-300 bg-p-050">
                       <td colSpan={4} className="px-4 py-2">
                         <span className="type-micro text-p-700">{cat}</span>
                       </td>
@@ -174,7 +174,7 @@ export default function Statut() {
                         </td>
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

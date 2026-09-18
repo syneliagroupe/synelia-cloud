@@ -20,11 +20,36 @@ export function FormulaireConnexionApi() {
   const [defiMfa, setDefiMfa] = useState<string | null>(null)
   const [code, setCode] = useState('')
   const [chargement, setChargement] = useState(false)
-  const [erreur, setErreur] = useState<string | null>(null)
+  const [erreur, setErreur] = useState<{ message: string; reference?: string } | null>(null)
 
   const ouvrir = (session: SessionApi) => {
     ecrireSession(session)
     router.push('/app')
+  }
+
+  /**
+   * Message d’erreur actionnable pour l’utilisateur ; la référence technique
+   * (correlationId) reste affichée en discret pour le support, jamais en
+   * première lecture.
+   */
+  const presenterErreur = (e: unknown): { message: string; reference?: string } => {
+    if (e instanceof ApiError) {
+      if (e.code === 'non_authentifie') {
+        return {
+          message: 'Identifiants incorrects. Vérifiez votre adresse e-mail et votre mot de passe.',
+          reference: e.correlationId,
+        }
+      }
+      return { message: e.message, reference: e.correlationId }
+    }
+    // `fetch` ne rejette pas sur une réponse HTTP, seulement sur un échec
+    // réseau : DNS, TLS, ou blocage CORS. Dans les deux derniers cas le
+    // message « vérifiez votre connexion » envoie l’utilisateur sur une fausse
+    // piste — on nomme les deux causes possibles.
+    return {
+      message:
+        'Impossible de joindre l’API de connexion. Vérifiez votre connexion, ou réessayez plus tard : le service est peut-être momentanément indisponible.',
+    }
   }
 
   const connecter = async (e?: { preventDefault: () => void }) => {
@@ -46,11 +71,7 @@ export function FormulaireConnexionApi() {
         router.push(urlVerification(email))
         return
       }
-      setErreur(
-        e instanceof ApiError
-          ? `${e.message}${e.correlationId ? ` Référence ${e.correlationId}.` : ''}`
-          : 'Le backend ne répond pas.',
-      )
+      setErreur(presenterErreur(e))
     } finally {
       setChargement(false)
     }
@@ -68,15 +89,22 @@ export function FormulaireConnexionApi() {
         }),
       )
     } catch (e) {
-      setErreur(
-        e instanceof ApiError
-          ? `${e.message}${e.correlationId ? ` Référence ${e.correlationId}.` : ''}`
-          : 'Le backend ne répond pas.',
-      )
+      setErreur(presenterErreur(e))
     } finally {
       setChargement(false)
     }
   }
+
+  const alerteErreur = erreur && (
+    <p role="alert" className="text-[12.5px] font-medium text-err">
+      {erreur.message}
+      {erreur.reference && (
+        <span className="mt-1 block font-mono text-[11px] font-normal text-g-500">
+          Référence {erreur.reference}
+        </span>
+      )}
+    </p>
+  )
 
   return (
     <div className="rounded-[10px] border border-g-300 bg-white p-5">
@@ -95,7 +123,7 @@ export function FormulaireConnexionApi() {
               onChange={(e) => setCode(e.target.value)}
             />
           </Field>
-          {erreur && <p className="text-[12.5px] font-medium text-err">{erreur}</p>}
+          {alerteErreur}
           <Button fullWidth loading={chargement} disabled={code.trim().length === 0} onClick={validerMfa} iconAfter={<ArrowRight size={14} />}>
             Vérifier
           </Button>
@@ -120,7 +148,7 @@ export function FormulaireConnexionApi() {
               onChange={(e) => setMotDePasse(e.target.value)}
             />
           </Field>
-          {erreur && <p className="text-[12.5px] font-medium text-err">{erreur}</p>}
+          {alerteErreur}
           <Button
             type="submit"
             fullWidth
@@ -131,8 +159,7 @@ export function FormulaireConnexionApi() {
             Se connecter
           </Button>
           <p className="text-[11.5px] leading-relaxed text-g-500">
-            Session ouverte auprès de l’API configurée. En démonstration locale, utilisez le compte
-            <span className="font-mono text-[11px]"> admin@synelia.cloud</span>.
+            Session ouverte auprès de l’API configurée, sur une connexion chiffrée.
           </p>
         </form>
       )}

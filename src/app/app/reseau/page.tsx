@@ -640,8 +640,7 @@ export default function Reseau() {
                   libelle="Ajouter une règle"
                   variant="ghost"
                   className="mt-2.5"
-                  icone={<Plus size={12} />}
-                  action="network.manage"
+                  icone={<Plus size={12} />}                  action="network.manage"
                   titre={`Ajouter une règle à ${sg.nom}`}
                   champs={[
                     {
@@ -704,6 +703,31 @@ export default function Reseau() {
                         })),
                       effetFinal: () => lesGroupes.recharger(),
                     }
+                  }}
+                />
+              </GatedAction>
+              <GatedAction autorise={autorise('network.manage')} message={refus('network.manage')}>
+                <BoutonAction
+                  libelle="Supprimer le groupe"
+                  variant="ghost"
+                  className="mt-2.5"
+                  desactive={sg.attaches > 0}
+                  operation={{
+                    action: 'network.manage',
+                    ton: 'warn',
+                    titre: `Groupe ${sg.nom} supprimé`,
+                    appel: () => supprimerRessource('/groupes-securite', sg.id, sg.nom),
+                    effet: () => lesGroupes.supprimer(sg.id),
+                    effetFinal: () => lesGroupes.recharger(),
+                  }}
+                  confirmation={{
+                    ressource: sg.nom,
+                    pertes: [
+                      'Les règles de filtrage du groupe sont détruites',
+                      ...(sg.attaches > 0
+                        ? ['Détachez d’abord le groupe de ses ressources (Neutron le refuse sinon)']
+                        : []),
+                    ],
                   }}
                 />
               </GatedAction>

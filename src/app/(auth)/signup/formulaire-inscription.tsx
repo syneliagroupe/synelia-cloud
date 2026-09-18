@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox, Field, Input } from '@/components/ui/field'
 import { TVA_PCT } from '@/lib/format'
 import { ApiError, ecrireSession, requete, type SessionApi } from '@/lib/api/client'
+import { estEtatVerification, urlVerification } from '@/lib/auth/verification'
 
 // Pays, secteur et TVA se règlent ensuite depuis les paramètres de l’organisation
 // (cf. `/signup/organisation` en mode maquette) : à l’inscription, le nom suffit.
@@ -18,6 +19,8 @@ const PAYS_DEFAUT = 'CI'
  * Inscription réelle (`POST /auth/inscription`) : un seul appel crée le
  * compte et, si `nomOrg` est renseigné, l’organisation dans la foulée — le
  * backend ne connaît pas d’étape « fournisseur d’identité » séparée.
+ * Depuis la vérification d’email : le backend renvoie `202` + état de
+ * vérification (pas de session) → on bascule vers `/signup/verifier`.
  */
 export function FormulaireInscriptionApi() {
   const router = useRouter()
@@ -38,7 +41,7 @@ export function FormulaireInscriptionApi() {
     setChargement(true)
     setErreur(null)
     try {
-      const session = await requete<SessionApi>('/auth/inscription', {
+      const reponse = await requete<SessionApi | { email: string; expire: string; essaisRestants: number }>('/auth/inscription', {
         methode: 'POST',
         corps: {
           email,
@@ -48,7 +51,11 @@ export function FormulaireInscriptionApi() {
           ...(nomOrg.trim() ? { organisation: { nom: nomOrg, pays: PAYS_DEFAUT } } : {}),
         },
       })
-      ecrireSession(session)
+      if (estEtatVerification(reponse)) {
+        router.push(urlVerification(email))
+        return
+      }
+      ecrireSession(reponse)
       router.push('/app')
     } catch (e) {
       setErreur(

@@ -6,6 +6,7 @@ import { ArrowRight, KeyRound, Mail } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/field'
 import { ApiError, ecrireSession, requete, type SessionApi } from '@/lib/api/client'
+import { urlVerification } from '@/lib/auth/verification'
 
 /**
  * Connexion réelle au backend (`POST /auth/connexion`, puis `/auth/mfa` si le
@@ -41,6 +42,10 @@ export function FormulaireConnexionApi() {
         ouvrir(session)
       }
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'email_non_verifie') {
+        router.push(urlVerification(email))
+        return
+      }
       setErreur(
         e instanceof ApiError
           ? `${e.message}${e.correlationId ? ` Référence ${e.correlationId}.` : ''}`

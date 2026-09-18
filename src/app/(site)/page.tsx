@@ -147,7 +147,7 @@ export default function Accueil() {
           <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                {['Abidjan', 'Grand-Bassam', '4 ms entre les deux'].map((t, n) => (
+                {['Abidjan', 'Grand-Bassam', '4–6 ms entre les deux'].map((t, n) => (
                   <span
                     key={t}
                     className={`rounded-full px-3.5 py-1.5 text-[13px] font-bold ${PASTILLES[n]} ${

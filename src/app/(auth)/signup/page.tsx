@@ -9,14 +9,14 @@ import { FormulaireInscriptionApi } from './formulaire-inscription'
 export const metadata: Metadata = { title: 'Créer un compte' }
 
 // Même bascule que `/login` : un seul appel réel remplace les deux étapes
-// du parcours maquette (identité chez un IdP externe, puis organisation).
+// du parcours maquette (identité, puis organisation).
 const API_ACTIVE = !!process.env.NEXT_PUBLIC_API_URL
 
 const ETAPES = [
   {
     titre: 'Créer votre identité',
     detail:
-      'Chez notre fournisseur d’identité. C’est là que vit votre mot de passe et votre second facteur — jamais dans ce portail.',
+      'Nom, e-mail professionnel et mot de passe, puis un code de vérification reçu par e-mail. Rien ne transite en clair.',
   },
   {
     titre: 'Créer votre organisation',
@@ -70,11 +70,10 @@ export default function Inscription() {
           </ol>
 
           <ButtonLink href="/signup/organisation" size="lg" fullWidth iconAfter={<ArrowRight size={15} />}>
-            Créer mon identité
+            Continuer
           </ButtonLink>
           <p className="-mt-3 text-center text-[11.5px] text-g-500">
-            Vous serez redirigé vers notre fournisseur d’identité, puis reviendrez ici pour créer votre
-            organisation.
+            Démonstration locale : vous créerez ensuite votre organisation, sans compte réel.
           </p>
         </>
       )}

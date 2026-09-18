@@ -6,7 +6,7 @@ import type { Metadata } from 'next'
  */
 export const metadata: Metadata = {
   title: 'Connexion en cours',
-  description: 'Retour du fournisseur d’identité, puis redirection vers votre espace.',
+  description: 'Préparation de votre session de démonstration, puis redirection vers votre espace.',
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {

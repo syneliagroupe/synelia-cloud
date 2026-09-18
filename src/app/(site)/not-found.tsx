@@ -27,7 +27,7 @@ export default function NotFound() {
       </p>
       <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
         <ButtonLink href="/">Retour à l’accueil</ButtonLink>
-        <ButtonLink href="/contact" variant="secondary">
+        <ButtonLink href="/entreprises#contact" variant="secondary">
           Nous contacter
         </ButtonLink>
       </div>

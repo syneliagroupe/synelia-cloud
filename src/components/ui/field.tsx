@@ -1,7 +1,7 @@
 'use client'
 
 import type { ComponentProps, ReactNode } from 'react'
-import { useId, useState } from 'react'
+import { cloneElement, isValidElement, useId, useState } from 'react'
 import { Check, ChevronDown, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -30,6 +30,13 @@ export function Label({
   )
 }
 
+/**
+ * Étiquette + champ. `Field` associe réellement l’étiquette au contrôle :
+ * sans `htmlFor`/`id`, cliquer sur le libellé ne focalise pas le champ et un
+ * lecteur d’écran annonce « zone de saisie » sans nom. L’`id` est généré ici
+ * et injecté dans l’enfant (`Input`, `Select`, `Textarea`…), qui le pose sur
+ * l’élément natif.
+ */
 export function Field({
   label,
   hint,
@@ -45,14 +52,18 @@ export function Field({
   children: ReactNode
   className?: string
 }) {
+  const id = useId()
+  const controle = isValidElement(children)
+    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id })
+    : children
   return (
     <div className={className}>
       {label && (
-        <Label hint={hint} required={required}>
+        <Label htmlFor={id} hint={hint} required={required}>
           {label}
         </Label>
       )}
-      {children}
+      {controle}
       {error && <p className="mt-1 text-[12px] text-err">{error}</p>}
     </div>
   )
@@ -87,11 +98,27 @@ export function Input({
   return <input className={cn(FIELD, 'h-9 px-3', className)} {...rest} />
 }
 
+/**
+ * Champ de recherche : pas d’étiquette visible, donc le nom accessible ne
+ * peut pas venir du `placeholder` seul — il disparaît dès la première frappe
+ * et un lecteur d’écran annonce alors « zone de saisie » sans nom. On fige le
+ * texte du placeholder dans `aria-label` si l’appelant n’en fournit pas.
+ */
 export function SearchInput({
   className,
+  placeholder,
+  'aria-label': ariaLabel,
   ...rest
 }: ComponentProps<'input'>) {
-  return <Input iconBefore={<Search size={14} />} className={className} {...rest} />
+  return (
+    <Input
+      iconBefore={<Search size={14} />}
+      placeholder={placeholder}
+      aria-label={ariaLabel ?? placeholder ?? 'Rechercher'}
+      className={className}
+      {...rest}
+    />
+  )
 }
 
 export function Textarea({ className, ...rest }: ComponentProps<'textarea'>) {

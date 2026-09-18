@@ -141,16 +141,12 @@ export default function Docs() {
                   <ul className="space-y-1.5">
                     {s.articles.map((a) => (
                       <li key={a}>
-                        <a
-                          href="#"
-                          className="group flex items-start gap-2 text-[13px] leading-snug text-g-700 transition-colors hover:text-p-700"
-                        >
-                          <FileText
-                            size={13}
-                            className="mt-0.5 shrink-0 text-g-300 group-hover:text-p-700"
-                          />
+                        {/* Pas de page d’article pour l’instant : le titre est
+                            affiché comme texte, jamais comme un lien mort. */}
+                        <span className="flex items-start gap-2 text-[13px] leading-snug text-g-700">
+                          <FileText size={13} className="mt-0.5 shrink-0 text-g-300" />
                           {a}
-                        </a>
+                        </span>
                       </li>
                     ))}
                   </ul>

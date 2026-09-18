@@ -9,8 +9,8 @@ import { ButtonLink } from '@/components/ui/button'
 
 const ETAPES = [
   {
-    titre: 'Échange du code d’autorisation',
-    detail: 'Le code reçu du fournisseur d’identité est échangé contre un jeton.',
+    titre: 'Vérification de votre adresse',
+    detail: 'Votre adresse e-mail est associée à une session de démonstration locale.',
   },
   {
     titre: 'Création de la session',
@@ -102,10 +102,8 @@ export default function Callback() {
         </p>
       )}
 
-      <p className="border-t border-g-100 pt-4 font-mono text-[11px] leading-relaxed text-g-500">
-        state=8f3a2c… · nonce=vérifié · flow=authorization_code+pkce
-        <br />
-        issuer=sso.synelia.cloud/realms/dba-africa
+      <p className="border-t border-g-100 pt-4 text-[11px] leading-relaxed text-g-500">
+        Démonstration locale — aucune session réelle n’est créée à l’issue de ce parcours fictif.
       </p>
     </div>
   )

@@ -472,7 +472,8 @@ export default function Securite() {
                     t: 'Fédération d’identité active',
                     etat: 'ok' as const,
                     d: 'Vos collaborateurs s’authentifient via Microsoft Entra ID. Un départ dans votre annuaire coupe l’accès sans intervention de notre part.',
-                    action: { l: 'Voir la fédération', h: '/app/sso' },
+                    // Pas de lien vers /app/sso : la fédération n'est pas livrée,
+                    // l'écran est masqué de la navigation en attendant.
                   },
                   {
                     t: 'Services managés raccordés',
@@ -528,9 +529,11 @@ export default function Securite() {
                         <Badge tone={c.etat} size="sm">
                           {c.etat === 'ok' ? 'Conforme' : c.etat === 'warn' ? 'À traiter' : 'Optionnel'}
                         </Badge>
-                        <ButtonLink size="sm" variant="ghost" href={c.action.h}>
-                          {c.action.l}
-                        </ButtonLink>
+                        {c.action && (
+                          <ButtonLink size="sm" variant="ghost" href={c.action.h}>
+                            {c.action.l}
+                          </ButtonLink>
+                        )}
                       </span>
                     </div>
                     <p className="mt-1 text-[11.5px] leading-relaxed text-g-700">{c.d}</p>

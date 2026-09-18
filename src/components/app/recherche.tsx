@@ -280,6 +280,7 @@ export function RechercheGlobale({ portee = 'client' }: { portee?: Portee }) {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Rechercher…"
+                aria-label="Rechercher dans le portail"
                 className="flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-g-500"
               />
               <kbd className="shrink-0 rounded border border-g-300 bg-g-050 px-1.5 py-0.5 font-mono text-[11px] text-g-500">

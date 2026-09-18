@@ -1,12 +1,19 @@
 'use client'
 
 import { Suspense, useState } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, KeyRound, MailCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/field'
 import { ApiError, ecrireSession, requete, type SessionApi } from '@/lib/api/client'
 import { nettoyerCode, urlVerification } from '@/lib/auth/verification'
+
+interface ErreurVerification {
+  message: string
+  reference?: string
+  versLogin?: boolean
+}
 
 /**
  * Vérification d’email après inscription (`POST /auth/verification-email`) :
@@ -19,16 +26,19 @@ function FormulaireVerification() {
   const [code, setCode] = useState('')
   const [chargement, setChargement] = useState(false)
   const [renvoi, setRenvoi] = useState(false)
-  const [erreur, setErreur] = useState<string | null>(null)
+  const [erreur, setErreur] = useState<ErreurVerification | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
-  const messageErreur = (e: unknown) => {
-    if (!(e instanceof ApiError)) return 'Le backend ne répond pas.'
-    if (e.code === 'email_deja_verifie') {
-      router.push('/login')
-      return 'Email déjà vérifié : connectez-vous.'
+  const messageErreur = (e: unknown): ErreurVerification => {
+    if (!(e instanceof ApiError)) {
+      return { message: 'Le backend ne répond pas. Vérifiez votre connexion puis réessayez.' }
     }
-    return `${e.message}${e.correlationId ? ` Référence ${e.correlationId}.` : ''}`
+    // Compte déjà actif : on reste sur place avec un lien, plutôt que de
+    // naviguer vers /login en jetant le message (erreur invisible).
+    if (e.code === 'email_deja_verifie') {
+      return { message: 'Email déjà vérifié : vous pouvez vous connecter.', versLogin: true }
+    }
+    return { message: e.message, reference: e.correlationId }
   }
 
   const verifier = async (e?: { preventDefault: () => void }) => {
@@ -97,8 +107,28 @@ function FormulaireVerification() {
           autoFocus
         />
       </Field>
-      {erreur && <p className="text-[12.5px] font-medium text-err">{erreur}</p>}
-      {info && <p className="text-[12.5px] font-medium text-ok">{info}</p>}
+      {erreur && (
+        <p role="alert" className="text-[12.5px] font-medium text-err">
+          {erreur.message}
+          {erreur.versLogin && (
+            <span className="mt-1 block">
+              <Link href="/login" className="font-semibold underline hover:text-m-600">
+                Se connecter
+              </Link>
+            </span>
+          )}
+          {erreur.reference && (
+            <span className="mt-1 block font-mono text-[11px] font-normal text-g-500">
+              Référence {erreur.reference}
+            </span>
+          )}
+        </p>
+      )}
+      {info && (
+        <p role="status" className="text-[12.5px] font-medium text-ok">
+          {info}
+        </p>
+      )}
       <Button
         type="submit"
         size="lg"

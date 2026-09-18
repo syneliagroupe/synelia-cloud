@@ -42,20 +42,19 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         />
         <div className="relative flex h-full flex-col justify-between p-10">
           <div>
-            <p className="type-micro text-p-300">Identité fédérée</p>
+            <p className="type-micro text-p-300">Connexion sécurisée</p>
             <h2 className="mt-3 max-w-sm text-[26px] font-bold leading-tight [font-family:var(--font-display)] text-white">
-              Votre mot de passe ne transite jamais par ce portail.
+              Vos identifiants sont vérifiés par l’API, jamais stockés ici.
             </h2>
             <p className="mt-4 max-w-sm text-[14px] leading-relaxed text-p-300">
-              L’authentification est déléguée à Keycloak. Synelia Cloud ne stocke aucun mot de
-              passe et n’affiche aucun champ de mot de passe — nous construisons les écrans autour
-              de l’identité, pas l’identité elle-même.
+              Le mot de passe transite en HTTPS vers l’API Synelia Cloud, qui ne conserve qu’une
+              empreinte chiffrée. La session ouverte est courte et renouvelée par jeton.
             </p>
             <div className="mt-6 flex items-center gap-2 rounded-[8px] border border-p-400/40 bg-white/5 px-3.5 py-2.5">
               <ShieldCheck size={16} className="shrink-0 text-p-300" />
               <p className="text-[12px] leading-snug text-white/85">
-                MFA, politique de mot de passe et sessions sont administrés dans votre fournisseur
-                d’identité.
+                MFA, politique de mot de passe et durée de session suivent les règles
+                de votre organisation.
               </p>
             </div>
           </div>

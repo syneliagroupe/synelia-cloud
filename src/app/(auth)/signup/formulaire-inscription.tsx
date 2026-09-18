@@ -30,7 +30,7 @@ export function FormulaireInscriptionApi() {
   const [nomOrg, setNomOrg] = useState('')
   const [conditions, setConditions] = useState(false)
   const [chargement, setChargement] = useState(false)
-  const [erreur, setErreur] = useState<string | null>(null)
+  const [erreur, setErreur] = useState<{ message: string; reference?: string } | null>(null)
 
   const complet =
     nom.trim().length >= 2 && email.trim().length > 0 && motDePasse.length >= 8 && conditions
@@ -60,8 +60,8 @@ export function FormulaireInscriptionApi() {
     } catch (e) {
       setErreur(
         e instanceof ApiError
-          ? `${e.message}${e.correlationId ? ` Référence ${e.correlationId}.` : ''}`
-          : 'Le backend ne répond pas.',
+          ? { message: e.message, reference: e.correlationId }
+          : { message: 'Le backend ne répond pas. Vérifiez votre connexion puis réessayez.' },
       )
     } finally {
       setChargement(false)
@@ -118,7 +118,16 @@ export function FormulaireInscriptionApi() {
         />
       </div>
 
-      {erreur && <p className="text-[12.5px] font-medium text-err">{erreur}</p>}
+      {erreur && (
+        <p role="alert" className="text-[12.5px] font-medium text-err">
+          {erreur.message}
+          {erreur.reference && (
+            <span className="mt-1 block font-mono text-[11px] font-normal text-g-500">
+              Référence {erreur.reference}
+            </span>
+          )}
+        </p>
+      )}
 
       <Button
         type="submit"

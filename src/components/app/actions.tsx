@@ -46,10 +46,18 @@ export interface SpecOperation {
    */
   appel?: () => Promise<unknown>
   /**
-   * Rappelé sur `ApiError` en mode API, avant le toast : le site d’appel y
+   * Rappelé sur `ApiError` en mode API, avant le toast : le site d'appel y
    * accroche ses erreurs de champs (`422`, `e.champs`) sans rouvrir la modale.
    */
   onErreur?: (e: ApiError) => void
+  /**
+   * Opération sans contrepartie backend. Renseigner ce message rend l'action
+   * réellement désactivée quand l'API est active, avec ce texte en infobulle,
+   * au lieu d'annoncer un succès qui n'a rien changé côté serveur. Absent =
+   * l'opération reste affichée telle quelle (mutations de l'atelier en mode
+   * maquette, par exemple).
+   */
+  sansApi?: string
   /**
    * Ce qu'on écrit au journal d'audit. Par défaut l'opération est journalisée
    * en déduisant l'action de `action` et la cible de `titre` ; `audit: false`
@@ -95,6 +103,14 @@ export function useOperation() {
       // la seule trace qu'un auditeur ne peut pas reconstituer autrement.
       if (spec.action && !autorise(spec.action)) {
         trace('refuse', `Rôle ${role} insuffisant pour ${spec.action}`)
+        return
+      }
+
+      // Opération déclarée sans contrepartie backend : en mode API, on le dit
+      // au lieu de simuler un succès. Le bouton est déjà désactivé dans ce cas,
+      // ce garde-fou couvre les appels qui ne passent pas par lui.
+      if (estActif() && !spec.appel && spec.sansApi) {
+        pousser({ ton: 'warn', titre: spec.titre, detail: spec.sansApi })
         return
       }
 
@@ -257,6 +273,9 @@ export function BoutonAction({
   const executer = useOperation()
   const [ouvert, setOuvert] = useState(false)
   const permis = operation.action ? autorise(operation.action) : true
+  // Opération sans contrepartie backend : désactivée en mode API, avec le
+  // motif en infobulle — jamais un succès qui n'a rien changé côté serveur.
+  const bloqueApi = estActif() && !operation.appel && !!operation.sansApi
 
   return (
     <>
@@ -267,9 +286,9 @@ export function BoutonAction({
           iconBefore={icone}
           fullWidth={fullWidth}
           className={className}
-          disabled={desactive}
+          disabled={desactive || bloqueApi}
           aria-label={nomAccessible}
-          title={nomAccessible}
+          title={bloqueApi ? operation.sansApi : nomAccessible}
           onClick={() => (confirmation ? setOuvert(true) : executer(operation))}
         >
           {libelle}

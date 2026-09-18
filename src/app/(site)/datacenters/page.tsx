@@ -326,7 +326,7 @@ export default async function Datacenters() {
                           valeur:
                             espacesSite.length > 0
                               ? espacesSite.map((e) => e.code).join(' · ')
-                              : 'Aucun dans le jeu de démonstration',
+                              : 'Aucun pour l’instant',
                         },
                         {
                           cle: 'Services de plateforme',

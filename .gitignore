@@ -29,3 +29,6 @@ test-results/
 graphify-out/
 .opencode/
 AGENTS.md
+
+# Medias locaux (captures/videos de recette)
+public/videos/

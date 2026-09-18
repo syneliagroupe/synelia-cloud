@@ -24,3 +24,8 @@ tests/integration/resultats/
 test-results/
 .env.local
 .env*
+
+# graphify — artefacts locaux, non commis
+graphify-out/
+.opencode/
+AGENTS.md

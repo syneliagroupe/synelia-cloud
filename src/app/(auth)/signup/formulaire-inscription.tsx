@@ -18,6 +18,8 @@ const PAYS_DEFAUT = 'CI'
  * Inscription réelle (`POST /auth/inscription`) : un seul appel crée le
  * compte et, si `nomOrg` est renseigné, l’organisation dans la foulée — le
  * backend ne connaît pas d’étape « fournisseur d’identité » séparée.
+ * Depuis la vérification d’email : le backend renvoie `202` + état de
+ * vérification (pas de session) → on bascule vers `/signup/verifier`.
  */
 export function FormulaireInscriptionApi() {
   const router = useRouter()
@@ -38,7 +40,7 @@ export function FormulaireInscriptionApi() {
     setChargement(true)
     setErreur(null)
     try {
-      const session = await requete<SessionApi>('/auth/inscription', {
+      const reponse = await requete<SessionApi | { email: string; expire: string; essaisRestants: number }>('/auth/inscription', {
         methode: 'POST',
         corps: {
           email,
@@ -48,7 +50,11 @@ export function FormulaireInscriptionApi() {
           ...(nomOrg.trim() ? { organisation: { nom: nomOrg, pays: PAYS_DEFAUT } } : {}),
         },
       })
-      ecrireSession(session)
+      if ('essaisRestants' in reponse) {
+        router.push(`/signup/verifier?email=${encodeURIComponent(email)}`)
+        return
+      }
+      ecrireSession(reponse)
       router.push('/app')
     } catch (e) {
       setErreur(

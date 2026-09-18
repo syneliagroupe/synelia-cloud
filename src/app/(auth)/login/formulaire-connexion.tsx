@@ -41,6 +41,10 @@ export function FormulaireConnexionApi() {
         ouvrir(session)
       }
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'email_non_verifie') {
+        router.push(`/signup/verifier?email=${encodeURIComponent(email)}`)
+        return
+      }
       setErreur(
         e instanceof ApiError
           ? `${e.message}${e.correlationId ? ` Référence ${e.correlationId}.` : ''}`

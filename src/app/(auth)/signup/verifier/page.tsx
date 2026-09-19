@@ -30,6 +30,23 @@ function FormulaireVerification() {
   const [erreur, setErreur] = useState<ErreurVerification | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
+  const CLE_RENVOI_AT = 'synelia.verifier.renvoiAt'
+
+  useEffect(() => {
+    try {
+      const brut = window.localStorage.getItem(CLE_RENVOI_AT)
+      if (!brut) return
+      const at = Number(brut)
+      if (!Number.isFinite(at)) return
+      const ecoule = Math.floor((Date.now() - at) / 1000)
+      const restant = 60 - ecoule
+      if (restant > 0) setAttenteRenvoi(restant)
+      else window.localStorage.removeItem(CLE_RENVOI_AT)
+    } catch {
+      /* ignore storage */
+    }
+  }, [])
+
   useEffect(() => {
     if (attenteRenvoi === 0) return
     const minuteur = window.setInterval(
@@ -37,6 +54,15 @@ function FormulaireVerification() {
       1000,
     )
     return () => window.clearInterval(minuteur)
+  }, [attenteRenvoi])
+
+  useEffect(() => {
+    if (attenteRenvoi !== 0) return
+    try {
+      window.localStorage.removeItem(CLE_RENVOI_AT)
+    } catch {
+      /* ignore */
+    }
   }, [attenteRenvoi])
 
   const messageErreur = (e: unknown): ErreurVerification => {
@@ -77,9 +103,27 @@ function FormulaireVerification() {
     setInfo(null)
     try {
       await requete('/auth/verification-email/renvoi', { methode: 'POST', corps: { email } })
+      try {
+        window.localStorage.setItem(CLE_RENVOI_AT, String(Date.now()))
+      } catch {
+        /* ignore */
+      }
       setAttenteRenvoi(60)
       setInfo('Un nouveau code vient de vous être envoyé (valable 15 minutes).')
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'renvoi_trop_tot') {
+        const m = e.message.match(/(\d+)\s*s/)
+        const s = m ? Number(m[1]) : 60
+        if (Number.isFinite(s) && s > 0 && s <= 60) {
+          setAttenteRenvoi(s)
+          try {
+            const at = Date.now() - (60 - s) * 1000
+            window.localStorage.setItem(CLE_RENVOI_AT, String(at))
+          } catch {
+            /* ignore */
+          }
+        }
+      }
       setErreur(messageErreur(e))
     } finally {
       setRenvoi(false)

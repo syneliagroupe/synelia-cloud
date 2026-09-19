@@ -741,6 +741,11 @@ const web = {
       verrouTransfert: booleen(),
       zoneId: chaine(),
       hebergementId: chaine('Un domaine est attaché à un serveur et à un seul.'),
+      provisionnement: liste(
+        ['automatique', 'manuel'],
+        'Mode de provisionnement amont — manuel = traitement ops sous ~48h',
+        { default: 'manuel' },
+      ),
     },
     ['id', 'orgId', 'nom', 'extension', 'expiration', 'renouvellementAuto', 'whoisProtege', 'verrouTransfert'],
   ),

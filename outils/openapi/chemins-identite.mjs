@@ -553,6 +553,8 @@ const securite = fusion(
         resume: 'Obtenir la configuration de fédération',
         ok: ref('ConfigurationSso'),
         rbac: 'sso.configure',
+        xEtat: 'persiste',
+        xCapacite: 'securite.sso',
       }),
       put: op({
         tag: T_SECU,
@@ -561,6 +563,8 @@ const securite = fusion(
         corps: ref('ConfigurationSso'),
         ok: ref('ConfigurationSso'),
         rbac: 'sso.configure',
+        xEtat: 'persiste',
+        xCapacite: 'securite.sso',
       }),
     },
     '/securite/politiques': {
@@ -631,6 +635,8 @@ const securite = fusion(
     ),
     code: 200,
     rbac: 'sso.configure',
+    xEtat: 'persiste',
+    xCapacite: 'securite.sso',
   }),
   crud({
     tag: T_SECU,

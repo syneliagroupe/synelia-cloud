@@ -21,6 +21,7 @@ import { ApiError } from '@/lib/api/client'
 import { useLectureDegradable } from '@/lib/api/degradable'
 import type {
   AuditEvent,
+  Domaine,
   EspaceCloud,
   EvenementSupervision,
   Invoice,
@@ -29,12 +30,15 @@ import type {
   Projet,
   Ticket,
   VM,
+  WebHosting,
 } from '@/lib/types'
 import {
   CATALOGUE,
+  DOMAINES,
   ESPACES,
   EVENEMENTS_SUPERVISION,
   FACTURES,
+  HEBERGEMENTS,
   K8S_CLUSTERS,
   MEMBERSHIPS,
   ORG_COURANTE,
@@ -124,6 +128,8 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
   // porte de quota de sièges — `organisations/service.py::nb_utilisateurs`
   // ne compte que les adhésions de portée `org`, la tuile fait de même.
   const memberships = useCollection<Membership>('memberships', MEMBERSHIPS)
+  const domaines = useCollection<Domaine>('domaines', DOMAINES)
+  const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
   // Même motif que /app/securite : `journal` (atelier local) sert de repli,
   // `/audit` réel prime quand il répond — l'activité récente lisait jusqu'ici
   // uniquement le journal local, jamais le vrai journal d'audit en mode API.
@@ -236,6 +242,60 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
       />
 
       <PanneauOnboarding />
+
+      {/* ─── Mes ressources — inventaire personnel (PLAN-UI §3.1) ───── */}
+      <Card>
+        <CardHeader
+          titre="Mes ressources"
+          sousTitre="Ce que vous possédez, où cliquer — comptages réels agrégés sur tous les univers."
+        />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          <Link href="/app/espaces" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Espaces</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{espacesN}</div>
+            <div className="mt-1 text-[11px] text-g-500">{sitesN} site(s) · {offresN} offre(s)</div>
+          </Link>
+          <Link href="/app/vms" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">VMs</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{vmsN}</div>
+            <div className="mt-1 text-[11px] text-g-500">{clustersN} cluster(s) K8s</div>
+          </Link>
+          <Link href="/app/web/domaines" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Domaines</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{domaines.items.length}</div>
+            <div className="mt-1 text-[11px] text-g-500">portefeuille</div>
+          </Link>
+          <Link href="/app/web/hebergements" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Hébergements</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{hebergements.items.length}</div>
+            <div className="mt-1 text-[11px] text-g-500">serveurs web</div>
+          </Link>
+          <Link href="/app/applications" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Projets</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{applicationsN}</div>
+            <div className="mt-1 text-[11px] text-g-500">{environnementsN} env.</div>
+          </Link>
+          <Link href="/app/facturation" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Factures</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{factures.items.length}</div>
+            <div className="mt-1 text-[11px] text-g-500">{facturesImpayees.length} impayée(s)</div>
+          </Link>
+        </div>
+      </Card>
+
+      {/* ─── Accès rapide / Commander (PLAN-UI §3.2) ───────────────── */}
+      <Card>
+        <CardHeader
+          titre="Accès rapide"
+          sousTitre="Commander en un clic — créations les plus fréquentes."
+        />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <ButtonLink href="/app/web/domaines" variant="secondary" className="justify-center">Nouveau domaine</ButtonLink>
+          <ButtonLink href="/app/web/hebergements" variant="secondary" className="justify-center">Nouvel hébergement</ButtonLink>
+          <ButtonLink href="/app/vms/composer" variant="secondary" className="justify-center">Nouvelle VM</ButtonLink>
+          <ButtonLink href="/app/kubernetes" variant="secondary" className="justify-center">Nouveau cluster</ButtonLink>
+        </div>
+      </Card>
 
       {/* ─── Bande 1 : chiffres clés ─────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">

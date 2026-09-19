@@ -217,6 +217,8 @@ export function VueVariables({ id }: { id: string }) {
                                 titre: `Révélation de ${v.cle} journalisée`,
                                 detail:
                                   'Votre nom, l’heure et la variable concernée figurent désormais dans le journal d’audit de l’organisation.',
+                                sansApi:
+                                  'Indisponible : il n’y a pas d’endpoint pour journaliser côté serveur la révélation d’une variable secrète.',
                               })
                             }
                             setReveles((r) => ({ ...r, [cle]: !r[cle] }))

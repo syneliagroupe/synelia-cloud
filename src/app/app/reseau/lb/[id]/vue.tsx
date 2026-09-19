@@ -982,6 +982,8 @@ export function VueLb({ id }: { id: string }) {
                     detail: v
                       ? 'Les règles OWASP s’appliquent dès la prochaine requête.'
                       : 'Les injections et le cross-site scripting ne sont plus filtrés.',
+                    sansApi:
+                      'Indisponible : l’API refuse encore `waf` sur un load balancer (422 non_porte).',
                     effet: () =>
                       lbs.modifier(lb.id, { waf: { actif: v, ruleset: 'OWASP CRS 4.3' } }),
                   })
@@ -1061,6 +1063,8 @@ export function VueLb({ id }: { id: string }) {
                         action: 'lb.create',
                         titre: 'Exception WAF retirée',
                         detail: `${chemin} · la règle ${regle} s’applique de nouveau`,
+                        sansApi:
+                          'Indisponible : le pare-feu applicatif n’est pas encore piloté par l’API (422 non_porte sur `waf`).',
                         effet: () => exceptions.supprimer(excId),
                       })
                     }

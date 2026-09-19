@@ -1190,53 +1190,74 @@ users:
           <Card>
             <CardHeader titre="Options d’accès" />
             <div className="space-y-3.5">
-              <Switch
-                checked={oidcObligatoire}
-                onChange={(v) =>
-                  executer({
-                    action: 'espace.quota.update',
-                    ton: v ? 'ok' : 'warn',
-                    titre: v
-                      ? 'Authentification OIDC obligatoire'
-                      : 'Jetons de compte de service autorisés',
-                    detail: v
-                      ? 'Les accès expirent avec la session Synelia.'
-                      : 'Un jeton statique ne s’éteint pas au départ d’une personne : à éviter.',
-                    effet: () => setOidcObligatoire(v),
-                  })
-                }
-                label="Authentification OIDC obligatoire"
-                description="Aucun jeton de compte de service statique n’est distribué. Les accès expirent avec la session Synelia."
-              />
-              <Switch
-                checked={auditApi}
-                onChange={(v) =>
-                  executer({
-                    action: 'espace.quota.update',
-                    ton: v ? 'ok' : 'warn',
-                    titre: v ? 'Accès à l’API journalisés' : 'Journalisation de l’API coupée',
-                    effet: () => setAuditApi(v),
-                  })
-                }
-                label="Journaliser les accès à l’API dans l’audit"
-                description="Chaque appel modifiant une ressource apparaît dans votre journal d’audit, avec l’acteur et l’objet visé."
-              />
-              <Switch
-                checked={apiPublique}
-                onChange={(v) =>
-                  executer({
-                    action: 'espace.quota.update',
-                    ton: v ? 'warn' : 'ok',
-                    titre: v ? 'API exposée sur Internet' : 'API ramenée aux réseaux privés',
-                    detail: v
-                      ? 'Ajoutez une liste d’adresses autorisées : sans elle, le serveur d’API est joignable du monde entier.'
-                      : 'L’accès depuis un poste passe désormais par le VPN de l’espace.',
-                    effet: () => setApiPublique(v),
-                  })
-                }
-                label="Exposer l’API sur Internet"
-                description="Par défaut, l’API n’est joignable que depuis vos réseaux privés et le pool VPN. L’exposition publique élargit fortement la surface d’attaque."
-              />
+              <GatedAction
+                autorise={!estActif()}
+                message="Indisponible : le réglage OIDC du cluster n’est pas encore exposé par l’API (le contrat ne porte que la lecture et la suppression du cluster)."
+              >
+                <Switch
+                  checked={oidcObligatoire}
+                  onChange={(v) =>
+                    executer({
+                      action: 'espace.quota.update',
+                      ton: v ? 'ok' : 'warn',
+                      titre: v
+                        ? 'Authentification OIDC obligatoire'
+                        : 'Jetons de compte de service autorisés',
+                      detail: v
+                        ? 'Les accès expirent avec la session Synelia.'
+                        : 'Un jeton statique ne s’éteint pas au départ d’une personne : à éviter.',
+                      sansApi:
+                        'Indisponible : le réglage OIDC du cluster n’est pas encore exposé par l’API (le contrat ne porte que la lecture et la suppression du cluster).',
+                      effet: () => setOidcObligatoire(v),
+                    })
+                  }
+                  label="Authentification OIDC obligatoire"
+                  description="Aucun jeton de compte de service statique n’est distribué. Les accès expirent avec la session Synelia."
+                />
+              </GatedAction>
+              <GatedAction
+                autorise={!estActif()}
+                message="Indisponible : la journalisation de l’API du cluster n’est pas encore exposée par l’API du portail."
+              >
+                <Switch
+                  checked={auditApi}
+                  onChange={(v) =>
+                    executer({
+                      action: 'espace.quota.update',
+                      ton: v ? 'ok' : 'warn',
+                      titre: v ? 'Accès à l’API journalisés' : 'Journalisation de l’API coupée',
+                      sansApi:
+                        'Indisponible : la journalisation de l’API du cluster n’est pas encore exposée par l’API du portail.',
+                      effet: () => setAuditApi(v),
+                    })
+                  }
+                  label="Journaliser les accès à l’API dans l’audit"
+                  description="Chaque appel modifiant une ressource apparaît dans votre journal d’audit, avec l’acteur et l’objet visé."
+                />
+              </GatedAction>
+              <GatedAction
+                autorise={!estActif()}
+                message="Indisponible : la portée réseau de l’API du cluster n’est pas encore réglable via l’API du portail."
+              >
+                <Switch
+                  checked={apiPublique}
+                  onChange={(v) =>
+                    executer({
+                      action: 'espace.quota.update',
+                      ton: v ? 'warn' : 'ok',
+                      titre: v ? 'API exposée sur Internet' : 'API ramenée aux réseaux privés',
+                      detail: v
+                        ? 'Ajoutez une liste d’adresses autorisées : sans elle, le serveur d’API est joignable du monde entier.'
+                        : 'L’accès depuis un poste passe désormais par le VPN de l’espace.',
+                      sansApi:
+                        'Indisponible : la portée réseau de l’API du cluster n’est pas encore réglable via l’API du portail.',
+                      effet: () => setApiPublique(v),
+                    })
+                  }
+                  label="Exposer l’API sur Internet"
+                  description="Par défaut, l’API n’est joignable que depuis vos réseaux privés et le pool VPN. L’exposition publique élargit fortement la surface d’attaque."
+                />
+              </GatedAction>
             </div>
           </Card>
         </div>

@@ -185,6 +185,8 @@ export default function Conformite() {
       detail: signature
         ? 'Le document signé est disponible au téléchargement. La génération est journalisée dans l’audit.'
         : 'Document produit sans signature électronique : le destinataire devra nous contacter pour en vérifier l’authenticité.',
+      sansApi:
+        'Indisponible : ce modèle d’attestation n’a pas d’identifiant reconnu par l’API (elle ne connaît que ses propres modèles), et le formulaire ne les propose pas encore.',
       effet: () => {
         if (estActif()) return
         generees.creer({

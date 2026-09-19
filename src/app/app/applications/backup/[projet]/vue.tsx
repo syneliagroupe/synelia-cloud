@@ -376,6 +376,8 @@ export function VueBackup({ id }: { id: string }) {
             titre: `Restauration de ${cible.nom} lancée`,
             detail:
               'Le service est arrêté, le volume remplacé par le point choisi, puis le service redémarre.',
+            sansApi:
+              'Indisponible : la restauration n’est pas encore exposée pour les services applicatifs (elle existe pour les VM, les bases et le web cloud).',
             effet: () => lesServices.modifier(cible.id, { statut: 'stopped' }),
             job: { workflow: 'backup.restore', cible: `${cible.nom} (${cible.environnement})` },
             effetFinal: () =>

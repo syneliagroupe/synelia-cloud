@@ -15,7 +15,7 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource } from '@/lib/api/client'
+import { creerRessource, supprimerRessource } from '@/lib/api/client'
 import { CHAMPS_CLE, type CleS3 } from './cles'
 
 const PRIX_GO = { chaud: 1.5, froid: 0.62 }
@@ -364,6 +364,8 @@ export default function StockageObjet() {
                         titre: `Clé ${c.nom} renouvelée`,
                         detail:
                           'L’ancienne valeur reste valable une heure, le temps de mettre à jour vos applications.',
+                        sansApi:
+                          'Indisponible : la rotation d’une clé S3 n’est pas encore exposée par l’API — révoquez-la et créez-en une nouvelle.',
                         effet: () => cles.modifier(c.id, { creee: MAINTENANT.slice(0, 10) }),
                       })
                     }
@@ -379,7 +381,9 @@ export default function StockageObjet() {
                         ton: 'warn',
                         titre: `Clé ${c.nom} révoquée`,
                         detail: 'La révocation est immédiate : toute application qui l’utilise recevra un 403.',
+                        appel: () => supprimerRessource('/cles-s3', c.id, c.nom),
                         effet: () => cles.supprimer(c.id),
+                        effetFinal: () => cles.recharger(),
                       })
                     }
                   >

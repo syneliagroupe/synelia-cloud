@@ -1016,39 +1016,53 @@ export default function Facturation() {
               </Field>
             </div>
             <div className="mt-3.5 space-y-3">
-              <Switch
-                checked={envoiMensuel}
-                onChange={(v) =>
-                  executer({
-                    action: 'invoice.view',
-                    titre: v ? 'Envoi mensuel activé' : 'Envoi mensuel coupé',
-                    detail: v
-                      ? 'Chaque responsable reçoit uniquement les lignes de son périmètre.'
-                      : undefined,
-                    effet: () => setEnvoiMensuel(v),
-                  })
-                }
-                label="Envoyer automatiquement le 3 de chaque mois"
-                description="Chaque responsable reçoit uniquement les lignes de son périmètre."
-              />
-              <Switch
-                checked={inclureNonAffecte}
-                onChange={(v) =>
-                  executer({
-                    action: 'invoice.view',
-                    ton: v ? 'ok' : 'warn',
-                    titre: v
-                      ? 'Ligne « non affecté » incluse'
-                      : 'Ligne « non affecté » masquée',
-                    detail: v
-                      ? undefined
-                      : 'Ce qui n’est pas affecté disparaît du rapport — et cesse donc de diminuer.',
-                    effet: () => setInclureNonAffecte(v),
-                  })
-                }
-                label="Inclure les ressources sans étiquette dans une ligne « non affecté »"
-                description="Rendre visible ce qui n’est pas affecté est le seul moyen de le faire diminuer."
-              />
+              <GatedAction
+                autorise={!enApi}
+                message="Indisponible : la planification d’envoi du rapport de refacturation n’est pas encore exposée par l’API."
+              >
+                <Switch
+                  checked={envoiMensuel}
+                  onChange={(v) =>
+                    executer({
+                      action: 'invoice.view',
+                      titre: v ? 'Envoi mensuel activé' : 'Envoi mensuel coupé',
+                      detail: v
+                        ? 'Chaque responsable reçoit uniquement les lignes de son périmètre.'
+                        : undefined,
+                      sansApi:
+                        'Indisponible : la planification d’envoi du rapport de refacturation n’est pas encore exposée par l’API.',
+                      effet: () => setEnvoiMensuel(v),
+                    })
+                  }
+                  label="Envoyer automatiquement le 3 de chaque mois"
+                  description="Chaque responsable reçoit uniquement les lignes de son périmètre."
+                />
+              </GatedAction>
+              <GatedAction
+                autorise={!enApi}
+                message="Indisponible : le réglage du rapport de refacturation n’est pas encore exposé par l’API."
+              >
+                <Switch
+                  checked={inclureNonAffecte}
+                  onChange={(v) =>
+                    executer({
+                      action: 'invoice.view',
+                      ton: v ? 'ok' : 'warn',
+                      titre: v
+                        ? 'Ligne « non affecté » incluse'
+                        : 'Ligne « non affecté » masquée',
+                      detail: v
+                        ? undefined
+                        : 'Ce qui n’est pas affecté disparaît du rapport — et cesse donc de diminuer.',
+                      sansApi:
+                        'Indisponible : le réglage du rapport de refacturation n’est pas encore exposé par l’API.',
+                      effet: () => setInclureNonAffecte(v),
+                    })
+                  }
+                  label="Inclure les ressources sans étiquette dans une ligne « non affecté »"
+                  description="Rendre visible ce qui n’est pas affecté est le seul moyen de le faire diminuer."
+                />
+              </GatedAction>
             </div>
             <Callout ton="warn" className="mt-4" titre="4,2 % de la dépense n’est pas affectée">
               Onze ressources ne portent pas d’étiquette de centre de coût. Rendre l’étiquette

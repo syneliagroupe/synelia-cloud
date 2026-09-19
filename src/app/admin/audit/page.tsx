@@ -21,6 +21,7 @@ import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useLectureDegradable } from '@/lib/api/degradable'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
+import { requete } from '@/lib/api/client'
 import type { AuditEvent } from '@/lib/types'
 
 /** `GET /audit/integrite` : rejoue la chaîne de hachage et confirme qu'elle est intacte, ou
@@ -482,7 +483,12 @@ export default function AuditAdmin() {
                                 titre: `Élévation de ${m.nom} révoquée`,
                                 detail:
                                   'L’accès est coupé immédiatement. La révocation est journalisée dans le journal du client comme dans le nôtre.',
+                                appel: () =>
+                                  requete(`/admin/equipe/${encodeURIComponent(m.id)}/elevation`, {
+                                    methode: 'DELETE',
+                                  }),
                                 effet: () => equipe.modifier(m.id, { elevation: { active: false } }),
+                                effetFinal: () => equipe.recharger(),
                               })
                             }
                           >

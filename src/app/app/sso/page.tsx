@@ -764,6 +764,7 @@ export default function Sso() {
                   />
                   <Switch
                     checked={desactivationAuto}
+                    disabled={api}
                     onChange={(v) =>
                       executer({
                         action: 'sso.configure',
@@ -774,14 +775,21 @@ export default function Sso() {
                         detail: v
                           ? undefined
                           : 'Un départ dans votre annuaire ne coupera plus l’accès ici : il faudra le faire à la main.',
+                        sansApi:
+                          'Indisponible : la désactivation automatique des comptes disparus n’est pas encore exposée par l’API.',
                         effet: () => setDesactivationAuto(v),
                       })
                     }
                     label="Désactiver les comptes disparus de l’annuaire"
-                    description="À la synchronisation, un compte absent de votre annuaire est désactivé ici. C’est ce qui garantit qu’un départ coupe réellement les accès."
+                    description={
+                      api
+                        ? 'Indisponible : ce réglage n’est pas encore exposé par l’API.'
+                        : 'À la synchronisation, un compte absent de votre annuaire est désactivé ici. C’est ce qui garantit qu’un départ coupe réellement les accès.'
+                    }
                   />
                   <Switch
                     checked={comptesLocaux}
+                    disabled={api}
                     onChange={(v) =>
                       executer({
                         action: 'sso.configure',
@@ -790,11 +798,17 @@ export default function Sso() {
                         detail: v
                           ? 'Chaque compte local est une exception à surveiller : il survit à un départ de votre annuaire.'
                           : undefined,
+                        sansApi:
+                          'Indisponible : les comptes locaux en parallèle ne sont pas encore gérés par l’API.',
                         effet: () => setComptesLocaux(v),
                       })
                     }
                     label="Autoriser les comptes locaux en parallèle"
-                    description="Utile pour un prestataire externe qui n’est pas dans votre annuaire. Chaque compte local est une exception à surveiller."
+                    description={
+                      api
+                        ? 'Indisponible : ce réglage n’est pas encore exposé par l’API.'
+                        : 'Utile pour un prestataire externe qui n’est pas dans votre annuaire. Chaque compte local est une exception à surveiller.'
+                    }
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1281,6 +1295,7 @@ export default function Sso() {
                 </Field>
                 <Switch
                   checked={envoiContinu}
+                  disabled={api}
                   onChange={(v) =>
                     executer({
                       action: 'compliance.export',
@@ -1288,11 +1303,17 @@ export default function Sso() {
                       detail: v
                         ? 'Chaque événement d’authentification part vers votre collecteur en temps réel.'
                         : undefined,
+                      sansApi:
+                        'Indisponible : l’envoi continu vers un collecteur externe n’est pas encore exposé par l’API.',
                       effet: () => setEnvoiContinu(v),
                     })
                   }
                   label="Envoi continu vers votre collecteur"
-                  description="Nous poussons chaque événement d’authentification vers votre outil de corrélation, en temps réel, plutôt que par exports ponctuels."
+                  description={
+                    api
+                      ? 'Indisponible : ce réglage n’est pas encore exposé par l’API.'
+                      : 'Nous poussons chaque événement d’authentification vers votre outil de corrélation, en temps réel, plutôt que par exports ponctuels.'
+                  }
                 />
               </div>
               <BoutonAction

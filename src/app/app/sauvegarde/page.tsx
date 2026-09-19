@@ -23,7 +23,7 @@ import { Regle321 } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource, estActif } from '@/lib/api/client'
+import { creerRessource, estActif, modifierRessource, supprimerRessource } from '@/lib/api/client'
 
 /** Valeurs du formulaire de plan — le tiroir doit être contrôlé pour
  *  qu'« Enregistrer » ait quelque chose à enregistrer. */
@@ -181,6 +181,24 @@ function OngletPlans() {
       action: 'backup.plan.write',
       titre: cible ? `Plan « ${f.nom} » enregistré` : `Plan « ${f.nom} » créé`,
       detail: `Portée ${f.scopeType} · ${f.scopeValeur} · rétention ${f.retentionJours} jours${f.immutable ? ' · immuable' : ''}`,
+      appel: () => {
+        const corps = {
+          nom: f.nom,
+          scope: { type: f.scopeType, valeur: f.scopeValeur },
+          frequence: f.frequence,
+          mode: f.mode,
+          retentionJours: f.retentionJours,
+          immutable: f.immutable,
+          destinations: destinations(),
+          chiffrement: {
+            mode: f.chiffrement,
+            kmsRef: f.chiffrement === 'byok' ? f.kmsRef || 'kms-byok-dba' : undefined,
+          },
+        }
+        return cible
+          ? modifierRessource('/sauvegarde/plans', cible.id, corps)
+          : creerRessource('/sauvegarde/plans', corps)
+      },
       effet: () =>
         cible
           ? plans.modifier(cible.id, {
@@ -214,6 +232,7 @@ function OngletPlans() {
               ressourcesProtegees: 0,
               dernierResultat: 'ok',
             }),
+      effetFinal: () => plans.recharger(),
     })
     setDrawer(null)
   }
@@ -651,6 +670,8 @@ function OngletPoints() {
                 ton: 'info',
                 titre: 'Téléchargement préparé',
                 detail: `${goHumain(p.tailleGo)} · lien signé valable une heure`,
+                sansApi:
+                  'Indisponible : l’API ne génère pas encore de lien signé pour un point de restauration.',
               })
             }
           >
@@ -670,6 +691,7 @@ function OngletPoints() {
                 ton: 'warn',
                 titre: `Point du ${dateCourte(p.date)} supprimé`,
                 detail: `${goHumain(p.tailleGo)} libérés sur ${p.destination}`,
+                appel: () => supprimerRessource('/sauvegarde/points', p.id, p.resourceNom),
                 effet: () => points.supprimer(p.id),
                 effetFinal: () => points.recharger(),
               })

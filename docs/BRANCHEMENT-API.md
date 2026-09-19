@@ -142,8 +142,8 @@ panneaux Web Cloud, membres (utilisateur embarqué), moyens, sessions, jetons.
   d’écran client dédié — vérifié au niveau API), estimation facturable (`POST
   /facturation/estimation`, aucun écran ne l’appelle — `CostPreview` calcule
   en local), attribution de sièges (`userId` backend vs `USERS` mock),
-  ouverture SSO (`POST …/ouverture` → URL à ouvrir), console VM, politiques
-  SSO (`PUT /securite/politiques`), consommation/ventilation facturation,
+  ouverture SSO (`POST …/ouverture` → URL à ouvrir), politiques
+  SSO (`PUT /securite/politiques`) — **console VM (`POST /vms/{vmId}/console`) est désormais branchée en réel** (voir table `vms` ci-dessous), consommation/ventilation facturation,
   métriques/journaux/événements d’observabilité (graines locales), tableaux de
   bord `/app` et `/admin` (serveur, graines).
 - Écarts backend relevés en vérifiant (pas du ressort du frontend) :
@@ -163,7 +163,7 @@ panneaux Web Cloud, membres (utilisateur embarqué), moyens, sessions, jetons.
   champs `422` vers les formulaires : transportées (`ApiError.champs`,
   toast), pas encore câblées écran par écran.
 
-## État réel par collection (2026-09-08)
+## État réel par collection (2026-09-19 — mis à jour, vérifié contre openapi.json + Subagent A)
 
 Quatre états, et pas un de plus :
 
@@ -174,16 +174,16 @@ Quatre états, et pas un de plus :
 | **simulé côté backend** | le backend répond `2xx`/`202` mais l'amont est un stub vide ou l'exécuteur n'appelle rien : un faux succès |
 | **maquette seule** | la collection n'est pas dans le registre, ou l'écran lit une graine : rien ne part vers le backend même en mode API |
 
-Dérivé le 2026-09-08 par lecture du code backend (`synelia-cloud-backend`,
+Dérivé initialement le 2026-09-08 par lecture du code backend (`synelia-cloud-backend`,
 `packages/openstack/synelia_openstack/` pour les connecteurs `*Simule` /
 `*OpenStack`/`*Reel`, `apps/synelia/synelia/modules/<module>/service.py` pour
 leur usage réel dans les exécuteurs de mutation), pas vérifié en direct
 collection par collection — seuls les points déjà vérifiés lors des passes
-2026-09-04/05/07 sont marqués comme tels.
+2026-09-04/05/07 sont marqués comme tels. **Mise à jour 2026-09-19** : `serveurs-bases` → réel (PR #15 2026-09-18), `certificats` → simulé intentionnel (gate `SYNELIA_ACME_URL`), console VM → réel, vérifié contre `openapi.json` + Subagent A §4.
 
 | Collection | Endpoint | Module backend | État | Remarque |
 |---|---|---|---|---|
-| `vms` | `/vms` | `vms` | réel | Création, arrêt/démarrage, redimensionnement, suppression, instantané (création) **et restauration** réels (`ComputeOpenStack`). La restauration d'instantané (`ExecuteurVmRestore`) a longtemps été un faux succès (mémoire `vm-snapshot-restore-fake-success-bug`) ; le code actuel a un `etape()` réel (`amont().restaurer` = `rebuild_server`) — corrigé côté backend depuis, ce document le dit à jour. |
+| `vms` | `/vms` | `vms` | réel | Création, arrêt/démarrage, redimensionnement, suppression, instantané (création) **et restauration** réels (`ComputeOpenStack`). La restauration d'instantané (`ExecuteurVmRestore`) a longtemps été un faux succès (mémoire `vm-snapshot-restore-fake-success-bug`) ; le code actuel a un `etape()` réel (`amont().restaurer` = `rebuild_server`) — corrigé côté backend depuis, ce document le dit à jour. **Console VM `POST /vms/{vmId}/console` est réelle** (`ComputeOpenStack.get_console_url` via Nova, `ConsoleVm{url, protocole, expire}`) — était listée en « reste vague 3 » en 2026-09-08, désormais branchée. |
 | `espaces` | `/espaces` | `espaces` | réel | Keystone (projet) + Neutron (réseau) via `IdentiteOpenStack`. |
 | `volumes` | `/volumes` | `stockage` | réel | Cinder (`BlockStorageOpenStack`). |
 | `buckets` | `/buckets` | `stockage` | réel | MinIO (`MinioReel`). |
@@ -217,11 +217,11 @@ collection par collection — seuls les points déjà vérifiés lors des passes
 | `equipe-synelia` | `/admin/equipe` | `admin` | persisté | |
 | `hebergements` | `/web/hebergements` | `web_hebergement` (`router_hebergements`) | réel | Nova + SSH + Network. |
 | `sites-web` | `/web/sites` | `web_hebergement` (`router_sites`) | réel | SSH (déploiement/retrait de sites). |
-| `serveurs-bases` | `/web/bases` | `web_hebergement` (`router_bases`) | simulé côté backend | Aucun MariaDB mutualisé derrière — à ne pas confondre avec la collection `bases-managees` (`/bases`), réelle, qui provisionne une VM Nova dédiée par base. |
+| `serveurs-bases` | `/web/bases` | `web_hebergement` (`router_bases`) | réel | Branché pour de vrai depuis **PR #15 (2026-09-18)** : mot de passe racine propagé, `MDB_MDP` fixé côté `service.py` — était simulé le 2026-09-08 (« Aucun MariaDB mutualisé »), désormais réel. À ne pas confondre avec `bases-managees` (`/bases`), réelle, qui provisionne une VM Nova dédiée par base. |
 | `domaines` | `/web/domaines` | `web_domaines` | simulé côté backend | `RegistrarOpenStack` hérite intégralement de `RegistrarSimule` sans surcharger une seule méthode : commande, transfert, code-auth renvoient des valeurs figées même en mode `openstack`. |
 | `messageries` | `/web/emails` | `web_emails` | réel | Zimbra (`ZimbraReel`, SOAP admin). |
 | `drives` | `/web/drive` | `web_drive` | réel | SSH + règles de load-balancer réelles. |
-| `certificats` | `/web/ssl` | `web_ssl` | réel, non vérifié en direct | `AcmeReel` fait de vrais appels HTTP ; pas de `SYNELIA_ACME_URL` configurée sur le laboratoire au dernier relevé. |
+| `certificats` | `/web/ssl` | `web_ssl` | simulé intentionnel (gate) | `AcmeReel` existe et fait de vrais appels HTTP, mais **gate `SYNELIA_ACME_URL` jamais posée** → toujours `AcmeSimule` (Subagent A §4 `acme.py` = simulé). Table disait « réel » le 2026-09-08 alors que branché = faux. Si `SYNELIA_ACME_URL` est posée, `AcmeReel` devient réel. |
 | `cles-smtp` | `/web/smtp/cles` | `web_smtp` | réel | `RelaisSmtpReel`. |
 | `webhooks-smtp` | `/web/smtp/webhooks` | `web_smtp` | persisté | Configuration seule (URL, secret) ; aucun appel amont à leur création. |
 | `zones-dns` | `/web/dns` | `web_dns` | réel | Designate (`DesignateOpenStack`). |

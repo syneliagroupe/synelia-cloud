@@ -8,7 +8,7 @@
  *     bun run test:integration --project maquette
  *     BASE=http://127.0.0.1:3111 node outils/audit.mjs                # ne doit pas régresser
  *     pkill -f next-server
- *     NEXT_PUBLIC_API_URL=https://api.synelia.dev01.ovh.smile.ci/v1 bun run build && bun run start -p 3113 &
+ *     NEXT_PUBLIC_API_URL=https://api.cloud.dev01.ovh.smile.ci/v1 bun run build && bun run start -p 3113 &
  *     SYNELIA_TEST_EMAIL=admin@synelia.cloud SYNELIA_TEST_MDP=… bun run test:integration --project api
  *
  * Le projet `api` crée de vraies ressources sur le laboratoire OpenStack de

@@ -107,9 +107,35 @@ const auth = {
       portee: 'auth',
       id: 'sInscrire',
       resume: 'Créer un compte et son organisation',
+      detail:
+        'Le compte naît non vérifié : aucune session n’est ouverte tant que le code reçu ' +
+        'par courriel n’a pas été confirmé (`POST /auth/verification-email`).',
       corps: ref('Inscription'),
+      ok: ref('VerificationEmailEtat'),
+      code: 202,
+      erreurs: [409],
+    }),
+  },
+  '/auth/verification-email': {
+    post: op({
+      tag: T_AUTH,
+      portee: 'auth',
+      id: 'verifierEmail',
+      resume: 'Confirmer le code reçu par courriel et ouvrir la session',
+      corps: ref('VerificationEmailConfirmation'),
       ok: ref('Session'),
-      code: 201,
+      erreurs: [409],
+    }),
+  },
+  '/auth/verification-email/renvoi': {
+    post: op({
+      tag: T_AUTH,
+      portee: 'auth',
+      id: 'renvoyerCodeVerification',
+      resume: 'Renvoyer un code de vérification',
+      corps: ref('VerificationEmailDemande'),
+      ok: ref('VerificationEmailEtat'),
+      code: 202,
       erreurs: [409],
     }),
   },

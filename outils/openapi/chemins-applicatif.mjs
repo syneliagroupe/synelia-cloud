@@ -20,252 +20,13 @@ import {
   tableau,
 } from './socle.mjs'
 
-const T_APPS = 'Applications'
 const T_DEPLOIEMENTS = 'Déploiements'
 const T_PROJETS = 'Projets applicatifs'
 const T_MODELES = 'Modèles applicatifs'
 
-const idApp = chemin('appId', 'Identifiant de l’application.')
 const idEnv = chemin('envId', 'Identifiant de l’environnement.')
 const idProjet = chemin('projetId', 'Identifiant du projet.', 'prj-metier')
 const idService = chemin('serviceId', 'Identifiant du service.', 'svc-metier-api')
-
-// ─── Applications et environnements ───────────────────────────────────
-
-const applications = fusion(
-  crud({
-    tag: T_APPS,
-    base: '/applications',
-    idParam: idApp,
-    nomSingulier: 'Application',
-    nomPluriel: 'Applications',
-    libelle: 'une application',
-    libellePluriel: 'les applications',
-    schema: 'ApplicationPaas',
-    creation: 'ApplicationPaasCreation',
-    modification: 'ApplicationPaasCreation',
-    creationAsync: true,
-    suppressionAsync: true,
-    rbacLecture: 'org.dashboard.view',
-    rbacEcriture: 'app.deploy',
-    filtres: [
-      filtre('espaceId', chaine()),
-      filtre('cible', liste(['vm', 'k8s'])),
-      filtre('sante', liste(['sain', 'degrade', 'arrete', 'echec'])),
-    ],
-  }),
-  {
-    '/applications/analyse-depot': {
-      post: op({
-        tag: T_APPS,
-        id: 'analyserDepot',
-        resume: 'Analyser un dépôt avant création',
-        detail:
-          'Lit le dépôt et dit ce qu’il y a vu : services détectés, constructeur proposé, ' +
-          'variables attendues. Rien n’est créé.',
-        corps: objet(
-          {
-            provider: liste(['github', 'gitlab']),
-            url: chaine(),
-            branche: chaine(),
-            jetonAcces: chaine('Nécessaire pour un dépôt privé ; jamais conservé.'),
-          },
-          ['provider', 'url'],
-        ),
-        ok: ref('AnalyseDepot'),
-        rbac: 'app.deploy',
-      }),
-    },
-    '/applications/{appId}/environnements': {
-      get: op({
-        tag: T_APPS,
-        id: 'listerEnvironnements',
-        resume: 'Lister les environnements d’une application',
-        params: [idApp],
-        ok: tableau(ref('Environnement')),
-      }),
-      post: op({
-        tag: T_APPS,
-        id: 'creerEnvironnement',
-        resume: 'Créer un environnement',
-        params: [idApp],
-        corps: ref('EnvironnementCreation'),
-        ok: ref('Environnement'),
-        code: 201,
-        rbac: 'app.deploy',
-        erreurs: [409],
-      }),
-    },
-    '/environnements/{envId}': {
-      get: op({
-        tag: T_APPS,
-        id: 'obtenirEnvironnement',
-        resume: 'Obtenir un environnement',
-        params: [idEnv],
-        ok: ref('Environnement'),
-      }),
-      patch: op({
-        tag: T_APPS,
-        id: 'modifierEnvironnement',
-        resume: 'Modifier un environnement',
-        params: [idEnv],
-        corps: ref('EnvironnementCreation'),
-        ok: ref('Environnement'),
-        rbac: 'app.deploy',
-      }),
-      delete: op({
-        tag: T_APPS,
-        id: 'supprimerEnvironnement',
-        resume: 'Supprimer un environnement',
-        params: [idEnv],
-        destructif: true,
-        ok: ref('TravailProvisioning'),
-        code: 202,
-        rbac: 'app.deploy',
-      }),
-    },
-    '/environnements/{envId}/variables': {
-      get: op({
-        tag: T_APPS,
-        id: 'listerVariablesEnvironnement',
-        resume: 'Lister les variables d’un environnement',
-        detail: 'La valeur d’un secret n’est jamais renvoyée : seule son existence est visible.',
-        params: [idEnv],
-        ok: tableau(ref('VariableEnvironnement')),
-        rbac: 'secrets.update',
-      }),
-      put: op({
-        tag: T_APPS,
-        id: 'modifierVariablesEnvironnement',
-        resume: 'Remplacer les variables d’un environnement',
-        params: [idEnv],
-        corps: objet(
-          {
-            variables: tableau(
-              objet(
-                {
-                  cle: chaine(),
-                  valeur: chaine(),
-                  secret: booleen(),
-                  scope: liste(['build', 'runtime']),
-                  supprimer: booleen(),
-                },
-                ['cle'],
-              ),
-            ),
-            redeployer: booleen('Applique les nouvelles valeurs en redéployant l’environnement.'),
-          },
-          ['variables'],
-        ),
-        ok: tableau(ref('VariableEnvironnement')),
-        rbac: 'secrets.update',
-      }),
-    },
-    '/environnements/{envId}/composants': {
-      get: op({
-        tag: T_APPS,
-        id: 'listerComposants',
-        resume: 'Lister les composants d’un environnement',
-        params: [idEnv],
-        ok: tableau(ref('Composant')),
-      }),
-      post: op({
-        tag: T_APPS,
-        id: 'creerComposant',
-        resume: 'Ajouter un composant',
-        params: [idEnv],
-        corps: ref('ComposantCreation'),
-        ok: ref('TravailProvisioning'),
-        code: 202,
-        rbac: 'app.deploy',
-        erreurs: [402],
-      }),
-    },
-    '/composants/{composantId}': {
-      get: op({
-        tag: T_APPS,
-        id: 'obtenirComposant',
-        resume: 'Obtenir un composant',
-        params: [chemin('composantId', 'Identifiant du composant.')],
-        ok: ref('Composant'),
-      }),
-      patch: op({
-        tag: T_APPS,
-        id: 'modifierComposant',
-        resume: 'Modifier un composant',
-        params: [chemin('composantId', 'Identifiant du composant.')],
-        corps: ref('ComposantCreation'),
-        ok: ref('TravailProvisioning'),
-        code: 202,
-        rbac: 'app.deploy',
-      }),
-      delete: op({
-        tag: T_APPS,
-        id: 'supprimerComposant',
-        resume: 'Supprimer un composant',
-        params: [chemin('composantId', 'Identifiant du composant.')],
-        destructif: true,
-        ok: ref('TravailProvisioning'),
-        code: 202,
-        rbac: 'app.deploy',
-      }),
-    },
-    '/canvas/briques': {
-      get: op({
-        tag: T_APPS,
-        id: 'listerBriquesCanvas',
-        resume: 'Lister les briques assemblables',
-        detail: 'Images qualifiées proposées dans la composition visuelle d’une application.',
-        ok: tableau(ref('BriqueCanvas')),
-      }),
-    },
-    '/depots/branches': {
-      get: op({
-        tag: T_APPS,
-        id: 'listerBranchesDepot',
-        resume: 'Lister les branches d’un dépôt',
-        detail:
-          'Sert le choix de branche du déploiement automatique, avec le dernier commit de chacune : ' +
-          'on choisit une branche vivante, pas un nom saisi de mémoire.',
-        params: [
-          filtre('provider', liste(['github', 'gitlab'])),
-          filtre('url', chaine()),
-          filtre('appId', chaine(), 'Reprend le dépôt déjà connu de l’application.'),
-        ],
-        ok: tableau(ref('BrancheDepot')),
-        rbac: 'app.deploy',
-        erreurs: [424],
-      }),
-    },
-  },
-  ...[
-    ['redemarrage', 'redemarrerComposant', 'Redémarrer un composant', 'component.restart'],
-    ['arret', 'arreterComposant', 'Arrêter un composant', 'component.restart'],
-  ].map(([verbe, id, resume, rbac]) =>
-    action({
-      tag: T_APPS,
-      chemin: `/composants/{composantId}/${verbe}`,
-      id,
-      resume,
-      params: [chemin('composantId', 'Identifiant du composant.')],
-      rbac,
-    }),
-  ),
-  action({
-    tag: T_APPS,
-    chemin: '/composants/{composantId}/dimensionnement',
-    id: 'dimensionnerComposant',
-    resume: 'Ajuster les ressources d’un composant',
-    params: [chemin('composantId', 'Identifiant du composant.')],
-    corps: objet(
-      { cpu: entier(), ramMo: entier(), diskGo: entier(), replicas: entier() },
-      [],
-    ),
-    corpsRequis: true,
-    rbac: 'app.deploy',
-    erreurs: [402],
-  }),
-)
 
 // ─── Déploiements ─────────────────────────────────────────────────────
 
@@ -319,6 +80,67 @@ const deploiements = fusion(
           filtre('etape', liste(['build', 'scan', 'provision', 'deploy'])),
         ],
         ok: ref('ExtraitLogs'),
+      }),
+    },
+    '/depots/branches': {
+      get: op({
+        tag: T_DEPLOIEMENTS,
+        id: 'listerBranchesDepot',
+        resume: 'Lister les branches d’un dépôt',
+        detail:
+          'Sert le choix de branche du déploiement automatique, avec le dernier commit de chacune : ' +
+          'on choisit une branche vivante, pas un nom saisi de mémoire.',
+        params: [
+          filtre('provider', liste(['github', 'gitlab'])),
+          filtre('url', chaine()),
+          filtre('appId', chaine(), 'Reprend le dépôt déjà connu de l’application.'),
+        ],
+        ok: tableau(ref('BrancheDepot')),
+        rbac: 'app.deploy',
+        erreurs: [424],
+      }),
+    },
+    '/environnements': {
+      post: op({
+        tag: T_DEPLOIEMENTS,
+        id: 'creerEnvironnement',
+        resume: 'Créer un environnement de déploiement',
+        detail:
+          'Remplace l’ancienne création sous `/applications/{appId}/environnements`. ' +
+          '`appId` est optionnel : absent, l’environnement est autonome au niveau organisation.',
+        corps: ref('EnvironnementCreation'),
+        ok: ref('Environnement'),
+        code: 201,
+        rbac: 'app.deploy',
+        erreurs: [404, 409],
+      }),
+    },
+    '/environnements/{envId}': {
+      get: op({
+        tag: T_DEPLOIEMENTS,
+        id: 'obtenirEnvironnement',
+        resume: 'Obtenir un environnement',
+        params: [idEnv],
+        ok: ref('Environnement'),
+      }),
+      patch: op({
+        tag: T_DEPLOIEMENTS,
+        id: 'modifierEnvironnement',
+        resume: 'Modifier un environnement',
+        params: [idEnv],
+        corps: ref('EnvironnementCreation'),
+        ok: ref('Environnement'),
+        rbac: 'app.deploy',
+      }),
+      delete: op({
+        tag: T_DEPLOIEMENTS,
+        id: 'supprimerEnvironnement',
+        resume: 'Supprimer un environnement',
+        params: [idEnv],
+        destructif: true,
+        ok: ref('TravailProvisioning'),
+        code: 202,
+        rbac: 'app.deploy',
       }),
     },
   },
@@ -738,4 +560,4 @@ const modeles = {
   },
 }
 
-export const cheminsApplicatif = fusion(applications, deploiements, projets, domainesApplicatifs, modeles)
+export const cheminsApplicatif = fusion(deploiements, projets, domainesApplicatifs, modeles)

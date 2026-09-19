@@ -364,6 +364,26 @@ const identite = {
     ['email', 'nom', 'motDePasse', 'accepteConditions'],
   ),
 
+  VerificationEmailDemande: objet(
+    { email: chaine(undefined, { format: 'email' }) },
+    ['email'],
+  ),
+
+  VerificationEmailConfirmation: objet(
+    { email: chaine(undefined, { format: 'email' }), code: chaine('Code à six chiffres reçu par courriel.') },
+    ['email', 'code'],
+  ),
+
+  VerificationEmailEtat: objet(
+    {
+      email: chaine(undefined, { format: 'email' }),
+      expire: horodatage(),
+      essaisRestants: entier(),
+    },
+    ['email', 'expire', 'essaisRestants'],
+    'Compte créé, en attente du code reçu par courriel avant toute session.',
+  ),
+
   DecouverteSso: objet(
     {
       federationDisponible: booleen(),
@@ -1086,6 +1106,7 @@ const iaas = {
 
   BucketCreation: objet(
     {
+      espaceId: chaine(),
       nom: chaine(),
       region: liste(SITES),
       classe: liste(['chaud', 'froid']),
@@ -1096,7 +1117,7 @@ const iaas = {
       policy: liste(['prive', 'lecture_publique', 'json']),
       policyJson: chaine('Politique explicite, quand `policy` vaut `json`.'),
     },
-    ['nom', 'region', 'classe'],
+    ['espaceId', 'nom', 'region', 'classe'],
   ),
 
   CleS3: objet(

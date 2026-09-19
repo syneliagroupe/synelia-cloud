@@ -1,0 +1,3 @@
+# Org "asdf asdf" 01a0b205...
+
+Signup test vide 0 ressources, inoffensif. Pas de `DELETE /organisations` (seulement suspension). Laisser tel quel.

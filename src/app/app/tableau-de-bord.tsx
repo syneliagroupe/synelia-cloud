@@ -639,6 +639,34 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                 </Link>
               </div>
             )}
+            {/* 5 factures recentes avec badge statut — PLAN-UI §3.3 */}
+            {factures.items.length > 0 && (
+              <ul className="mt-3 divide-y divide-g-100 border-t border-g-100 pt-3">
+                {factures.items
+                  .slice()
+                  .sort((a, b) => (b.periode ?? '').localeCompare(a.periode ?? '') || (b.numero ?? '').localeCompare(a.numero ?? ''))
+                  .slice(0, 5)
+                  .map((f) => (
+                    <li key={f.id} className="flex items-center justify-between gap-2 py-2">
+                      <Link href="/app/facturation" className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink hover:text-p-700">
+                        {f.numero} · {f.periode}
+                      </Link>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="tnum text-[12px] font-semibold text-ink">{money(f.total)}</span>
+                        <Badge
+                          tone={f.statut === 'impayee' ? 'err' : f.statut === 'brouillon' ? 'warn' : f.statut === 'payee' ? 'ok' : 'neutral'}
+                          size="sm"
+                        >
+                          {f.statut === 'impayee' ? 'Impayée' : f.statut === 'brouillon' ? 'Brouillon' : f.statut === 'payee' ? 'Payée' : f.statut}
+                        </Badge>
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            )}
+            {factures.items.length === 0 && (
+              <p className="mt-3 text-center text-[12px] text-g-500">Aucune facture ce mois</p>
+            )}
             {(api ? facturesImpayees.length : s.facturesEnAttente) > 0 && (
               <p className="mt-2 rounded-[6px] bg-err-bg px-2.5 py-2 text-[11.5px] text-err">
                 {api
@@ -656,23 +684,35 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
               <Compteur libelle="Résolus" valeur={api ? ticketsResolus : 2} ton="ok" />
             </div>
             <ul className="mt-3 space-y-2 border-t border-g-100 pt-3">
-              {ticketsOuverts.slice(0, 3).map((t) => (
+              {ticketsOuverts
+                .slice()
+                .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+                .slice(0, 3)
+                .map((t) => (
                 <li key={t.id}>
                   <Link href={`/app/support/${t.id}`} className="group block">
                     <div className="flex items-start gap-2">
-                      <Badge
-                        size="sm"
-                        tone={
-                          t.gravite === 'critique'
-                            ? 'err'
-                            : t.gravite === 'majeure'
-                              ? 'warn'
-                              : 'neutral'
-                        }
-                        className="mt-0.5 shrink-0"
-                      >
-                        {t.numero}
-                      </Badge>
+                      <span className="mt-0.5 flex shrink-0 items-center gap-1">
+                        <Badge
+                          size="sm"
+                          tone={
+                            t.gravite === 'critique'
+                              ? 'err'
+                              : t.gravite === 'majeure'
+                                ? 'warn'
+                                : 'neutral'
+                          }
+                        >
+                          {t.numero}
+                        </Badge>
+                        <Badge
+                          size="sm"
+                          tone={t.statut === 'attente_client' ? 'warn' : t.statut === 'ouvert' ? 'err' : 'neutral'}
+                          className="hidden sm:inline-flex"
+                        >
+                          {t.statut === 'attente_client' ? 'Vous' : t.statut === 'ouvert' ? 'Ouvert' : t.statut}
+                        </Badge>
+                      </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[12px] text-ink group-hover:text-p-700">
                           {t.sujet}

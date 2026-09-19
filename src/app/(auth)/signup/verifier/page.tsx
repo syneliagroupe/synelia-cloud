@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, KeyRound, MailCheck } from 'lucide-react'
@@ -26,8 +26,18 @@ function FormulaireVerification() {
   const [code, setCode] = useState('')
   const [chargement, setChargement] = useState(false)
   const [renvoi, setRenvoi] = useState(false)
+  const [attenteRenvoi, setAttenteRenvoi] = useState(0)
   const [erreur, setErreur] = useState<ErreurVerification | null>(null)
   const [info, setInfo] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (attenteRenvoi === 0) return
+    const minuteur = window.setInterval(
+      () => setAttenteRenvoi((secondes) => Math.max(0, secondes - 1)),
+      1000,
+    )
+    return () => window.clearInterval(minuteur)
+  }, [attenteRenvoi])
 
   const messageErreur = (e: unknown): ErreurVerification => {
     if (!(e instanceof ApiError)) {
@@ -67,6 +77,7 @@ function FormulaireVerification() {
     setInfo(null)
     try {
       await requete('/auth/verification-email/renvoi', { methode: 'POST', corps: { email } })
+      setAttenteRenvoi(60)
       setInfo('Un nouveau code vient de vous être envoyé (valable 15 minutes).')
     } catch (e) {
       setErreur(messageErreur(e))
@@ -142,11 +153,15 @@ function FormulaireVerification() {
       <button
         type="button"
         onClick={renvoyer}
-        disabled={renvoi || email.trim().length === 0}
+        disabled={renvoi || attenteRenvoi > 0 || email.trim().length === 0}
         className="flex w-full items-center justify-center gap-1.5 text-[12.5px] font-semibold text-p-700 hover:text-m-600 disabled:opacity-50"
       >
         <KeyRound size={13} />
-        {renvoi ? 'Envoi en cours…' : 'Renvoyer un code'}
+        {renvoi
+          ? 'Envoi en cours…'
+          : attenteRenvoi > 0
+            ? `Renvoyer dans ${attenteRenvoi} s`
+            : 'Renvoyer un code'}
       </button>
     </form>
   )

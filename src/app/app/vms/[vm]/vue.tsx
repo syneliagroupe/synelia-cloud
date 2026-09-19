@@ -1880,11 +1880,16 @@ function OngletMateriel({ vm }: { vm: VM }) {
             titre="Options de la VM"
             actions={
               <GatedAction
-                autorise={autorise('vm.hardware.update')}
-                message={refus('vm.hardware.update')}
+                autorise={autorise('vm.hardware.update') && !estActif()}
+                message={
+                  estActif()
+                    ? 'Indisponible : ces options avancées ne sont pas encore exposées par l’API.'
+                    : refus('vm.hardware.update')
+                }
               >
                 <Button
                   size="sm"
+                  disabled={estActif()}
                   onClick={() =>
                     executer({
                       action: 'vm.hardware.update',

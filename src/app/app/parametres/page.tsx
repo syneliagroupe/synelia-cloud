@@ -424,6 +424,7 @@ export default function Parametres() {
                             { id: 'obligatoire', label: 'Obligatoire', type: 'switch', placeholder: 'À la création' },
                           ]}
                           valeursDepart={{ valeurs: t.valeurs.join(', '), obligatoire: t.obligatoire }}
+                          sansApi="Indisponible : le registre d’étiquettes n’est pas encore exposé par l’API."
                           operation={(v) => ({
                             titre: `Étiquette ${t.cle} modifiée`,
                             detail: `${String(v.valeurs).split(',').filter((x) => x.trim()).length} valeurs${v.obligatoire ? ' · obligatoire' : ''}`,
@@ -511,6 +512,10 @@ export default function Parametres() {
                             ton: 'warn',
                             titre: `Jeton ${j.nom} révoqué`,
                             detail: 'Toute automatisation qui l’utilise cessera de fonctionner immédiatement.',
+                            appel: () =>
+                              requete(`/securite/cles-api/${encodeURIComponent(j.id)}`, {
+                                methode: 'DELETE',
+                              }),
                             effet: () => jetons.supprimer(j.id),
                             effetFinal: () => jetons.recharger(),
                           }}
@@ -781,6 +786,8 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                 operation={{
                   titre: 'Canaux de notification enregistrés',
                   detail: `${mailTechnique} · ${mailFacturation}${webhook ? ' · webhook d’équipe actif' : ''}${notifsCoupees.length ? ` · ${notifsCoupees.length} notification(s) coupée(s)` : ''}`,
+                  sansApi:
+                    'Indisponible : les canaux de notification ne sont pas encore enregistrés par l’API.',
                 }}
               />
             </Card>

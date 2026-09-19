@@ -8,6 +8,7 @@ import {
   Globe,
   HardDrive,
   Mail,
+  Plus,
   Server,
   ShieldCheck,
 } from 'lucide-react'
@@ -15,7 +16,13 @@ import { cn } from '@/lib/utils'
 import { dateCourte, num, relatif } from '@/lib/format'
 import { estActif } from '@/lib/api/client'
 import type { DnsZone, Domaine, SiteWeb, WebHosting } from '@/lib/types'
-import type { Certificat, DriveDomaine, MessagerieDomaine, ServeurBases } from '@/lib/mock'
+import type {
+  Certificat,
+  DriveDomaine,
+  MessagerieDomaine,
+  SauvegardeWeb,
+  ServeurBases,
+} from '@/lib/mock'
 import {
   CERTIFICATS,
   DOMAINES,
@@ -23,6 +30,7 @@ import {
   MESSAGERIES,
   DRIVES,
   ORG_COURANTE,
+  SAUVEGARDES_WEB,
   SERVEURS_BASES,
   SITES_WEB,
   ZONES_DNS,
@@ -35,6 +43,7 @@ import {
   serveursBasesDeLOrg,
 } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
+import { ButtonLink } from '@/components/ui/button'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
 import { useCollection } from '@/components/app/atelier'
@@ -46,9 +55,7 @@ export default function AccueilWebCloud() {
   // ont chacun un vrai backend (`/web/domaines`, `/web/hebergements`,
   // `/web/sites`, `/web/bases`, `/web/emails`, `/web/drive`, `/web/ssl`,
   // `/web/dns`) : `useCollection` en sert les données réelles quand l'API est
-  // active, et retombe sur la graine sinon. Les sauvegardes web n'ont pas
-  // encore de section câblée sur un vrai backend : elles restent sur la
-  // graine, comme `/app/web/backup` lui-même.
+  // active, et retombe sur la graine sinon.
   const domainesCol = useCollection<Domaine>('domaines', DOMAINES)
   const hebergementsCol = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
   const sitesWebCol = useCollection<SiteWeb>('sites-web', SITES_WEB)
@@ -57,6 +64,7 @@ export default function AccueilWebCloud() {
   const certificatsCol = useCollection<Certificat>('certificats', CERTIFICATS)
   const serveursBasesCol = useCollection<ServeurBases>('serveurs-bases', SERVEURS_BASES)
   const zonesDnsCol = useCollection<DnsZone>('zones-dns', ZONES_DNS)
+  const sauvegardesCol = useCollection<SauvegardeWeb>('sauvegardes-web', SAUVEGARDES_WEB)
 
   // En mode API, le backend filtre déjà par organisation (et les identifiants
   // du jeu local lui sont inconnus) : la maquette seule restreint au
@@ -82,9 +90,7 @@ export default function AccueilWebCloud() {
     ? drivesCol.items
     : drivesCol.items.filter((d) => perimetreDrives.has(d.id))
   const certificats = certificatsCol.items
-  // Pas de backend pour les sauvegardes web : reste sur la graine, comme la
-  // section `/app/web/backup` elle-même.
-  const plans = sauvegardesWebDeLOrg()
+  const plans = estActif() ? sauvegardesCol.items : sauvegardesWebDeLOrg()
 
   const boites = messageries.reduce((a, m) => a + m.boites.length, 0)
   const majEnAttente = sites.reduce((a, s) => a + (s.majEnAttente ?? 0), 0)
@@ -183,6 +189,21 @@ export default function AccueilWebCloud() {
         titre="Web Cloud"
         sousTitre="Vos noms de domaine et ce qui tourne dessus : hébergement mutualisé, bases, messagerie, drive, applications, certificats et sauvegardes. Chaque section a sa liste dans le panneau de gauche."
       />
+
+      <Card>
+        <CardHeader titre="Commander" sousTitre="Les actions les plus fréquentes, sans chercher dans les sections." />
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink href="/app/web/domaines" iconBefore={<Plus size={13} />}>
+            Nouveau domaine
+          </ButtonLink>
+          <ButtonLink href="/app/web/hebergement" variant="secondary" iconBefore={<Server size={13} />}>
+            Nouvel hébergement
+          </ButtonLink>
+          <ButtonLink href="/app/web/applications" variant="secondary">
+            Installer une application
+          </ButtonLink>
+        </div>
+      </Card>
 
       {aSurveiller.length > 0 && (
         <Callout

@@ -491,6 +491,8 @@ export default function BasesManagees() {
                                 titre: `${base.nom}-replica-${i + 1} promu instance principale`,
                                 detail:
                                   'L’ancienne instance principale passe en lecture seule : reconfigurez vos applications.',
+                                sansApi:
+                                  'Indisponible : la promotion d’un réplica n’est pas encore exposée par l’API.',
                                 job: {
                                   type: 'db.replica.promote',
                                   label: `Promotion de ${base.nom}-replica-${i + 1}`,

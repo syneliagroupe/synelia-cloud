@@ -245,6 +245,8 @@ export function VueSauvegarde({ id }: { id: string }) {
                             ton: 'info',
                             titre: `Archive du ${dateCourte(e.ts)} préparée`,
                             detail: `${e.taille} · lien signé valable une heure`,
+                            sansApi:
+                              'Indisponible : aucun lien de téléchargement signé n’est encore généré par l’API.',
                           }}
                         />
                       </span>

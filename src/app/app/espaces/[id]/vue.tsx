@@ -193,6 +193,7 @@ export function VueEspace({ id }: { id: string }) {
               ]}
               valeursDepart={{ offre: espace.offerId }}
               libelleValider="Changer d’offre"
+              sansApi="Indisponible : le contrat API permet de modifier le quota, pas l’offre facturée."
               operation={(v) => {
                 const offre = offresReelles.items.find((o) => o.id === v.offre)
                 return {

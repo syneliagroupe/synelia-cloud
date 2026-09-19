@@ -1329,6 +1329,16 @@ const smtp = fusion(
         rbac: 'service.admin',
       }),
     },
+    '/web/smtp/webhooks/{webhookId}/test': {
+      post: op({
+        tag: T_SMTP,
+        id: 'testerWebhookSmtp',
+        resume: 'Envoyer un événement de test au webhook',
+        params: [chemin('webhookId', 'Identifiant du webhook.')],
+        ok: objet({ envoye: booleen(), code: entier() }, ['envoye']),
+        rbac: 'service.admin',
+      }),
+    },
   },
   action({
     tag: T_SMTP,

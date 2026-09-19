@@ -50,26 +50,33 @@ const paas = {
     ['id', 'espaceId', 'nom', 'source', 'cible', 'domainePrincipal', 'sante', 'stack', 'dernierDeploiement', 'environnements'],
   ),
 
-  ApplicationPaasCreation: objet(
+  EnvironnementCreation: objet(
     {
-      espaceId: chaine(),
       nom: chaine(),
-      source: liste(['git', 'image', 'canvas']),
-      repo: objet({ provider: liste(['github', 'gitlab']), url: chaine(), branche: chaine() }),
-      image: chaine('Référence d’image quand `source` vaut `image`.'),
-      builder: liste(['nixpacks', 'dockerfile', 'image']),
-      cible: liste(['vm', 'k8s']),
-      domainePrincipal: chaine(),
-      description: chaine(),
-      briques: tableau(chaine(), 'Briques du canvas quand `source` vaut `canvas`.'),
+      appId: chaine(
+        'Application parente ; absent pour un environnement autonome (modèle déploiements).',
+      ),
+      couleur: chaine(),
+      domaines: tableau(chaine()),
+      autoDeploy: objet({ branche: chaine(), previewParPR: booleen() }),
+      protection: objet({
+        approbationRequise: booleen(),
+        gelJusquau: horodatage(),
+        motDePasse: booleen(),
+      }),
+      strategie: liste(['rolling', 'canari', 'blue_green']),
+      canari: objet({ pct: pourcentage(), seuil5xx: nombre(), fenetreS: entier() }),
+      copierDepuis: chaine('Environnement dont on reprend les variables.'),
     },
-    ['espaceId', 'nom', 'source', 'cible'],
+    ['nom'],
   ),
 
   Environnement: objet(
     {
       id: chaine(),
-      appId: chaine(),
+      appId: chaine(
+        'Absent quand l’environnement n’est rattaché à aucune application PaaS legacy.',
+      ),
       nom: chaine(),
       domaines: tableau(chaine()),
       couleur: chaine(),
@@ -91,64 +98,7 @@ const paas = {
         'fenetreS',
       ]),
     },
-    ['id', 'appId', 'nom', 'domaines', 'couleur', 'statut', 'sante'],
-  ),
-
-  EnvironnementCreation: objet(
-    {
-      nom: chaine(),
-      couleur: chaine(),
-      domaines: tableau(chaine()),
-      autoDeploy: objet({ branche: chaine(), previewParPR: booleen() }),
-      protection: objet({ approbationRequise: booleen(), gelJusquau: horodatage(), motDePasse: booleen() }),
-      strategie: liste(['rolling', 'canari', 'blue_green']),
-      canari: objet({ pct: pourcentage(), seuil5xx: nombre(), fenetreS: entier() }),
-      copierDepuis: chaine('Environnement dont on reprend les variables.'),
-    },
-    ['nom'],
-  ),
-
-  Composant: objet(
-    {
-      id: chaine(),
-      envId: chaine(),
-      nom: chaine(),
-      kind: liste(['vm', 'k8s']),
-      role: liste(['web', 'api', 'db', 'cache', 'proxy', 'worker', 'cron', 'observabilite']),
-      image: chaine(),
-      version: chaine(),
-      ressources: objet({ cpu: nombre(), ramMo: entier(), diskGo: entier() }, ['cpu', 'ramMo', 'diskGo']),
-      ports: tableau(
-        objet(
-          { interne: entier(), expose: entier(), type: liste(['ClusterIP', 'LoadBalancer']) },
-          ['interne', 'type'],
-        ),
-      ),
-      envVars: tableau(ref('VariableEnvironnement')),
-      storage: tableau(
-        objet({ chemin: chaine(), tailleGo: entier(), classe: chaine() }, ['chemin', 'tailleGo', 'classe']),
-      ),
-      emplacement: objet({ vms: tableau(chaine()), namespace: chaine(), pods: tableau(chaine()) }),
-      statut: liste(['deployed', 'degraded', 'stopped', 'failed']),
-      dependances: tableau(chaine()),
-    },
-    ['id', 'envId', 'nom', 'kind', 'role', 'image', 'version', 'ressources', 'ports', 'envVars', 'emplacement', 'statut'],
-  ),
-
-  ComposantCreation: objet(
-    {
-      nom: chaine(),
-      kind: liste(['vm', 'k8s']),
-      role: liste(['web', 'api', 'db', 'cache', 'proxy', 'worker', 'cron', 'observabilite']),
-      image: chaine(),
-      version: chaine(),
-      ressources: objet({ cpu: nombre(), ramMo: entier(), diskGo: entier() }),
-      ports: tableau(objet({ interne: entier(), expose: entier(), type: liste(['ClusterIP', 'LoadBalancer']) })),
-      envVars: tableau(ref('VariableEnvironnement')),
-      storage: tableau(objet({ chemin: chaine(), tailleGo: entier(), classe: chaine() })),
-      dependances: tableau(chaine()),
-    },
-    ['nom', 'kind', 'role', 'image'],
+    ['id', 'nom', 'domaines', 'couleur', 'statut', 'sante'],
   ),
 
   VariableEnvironnement: objet(
@@ -225,38 +175,6 @@ const paas = {
       message: chaine(),
     },
     ['envId'],
-  ),
-
-  AnalyseDepot: objet(
-    {
-      depot: chaine(),
-      branche: chaine(),
-      commit: chaine(),
-      constats: tableau(
-        objet(
-          {
-            fichier: chaine(),
-            constat: chaine(),
-            consequence: chaine(),
-            niveau: liste(['info', 'attention', 'bloquant']),
-          },
-          ['fichier', 'constat'],
-        ),
-      ),
-      builderPropose: liste(['nixpacks', 'dockerfile', 'image']),
-      ciblePropose: liste(['vm', 'k8s']),
-      servicesDetectes: tableau(
-        objet({ nom: chaine(), type: chaine(), port: entier(), image: chaine() }, ['nom', 'type']),
-      ),
-      variablesRequises: tableau(chaine()),
-    },
-    ['depot', 'branche', 'constats'],
-    "Lecture d'un dépôt avant création : ce que la plateforme y a vu et ce qu'elle en déduit.",
-  ),
-
-  BriqueCanvas: objet(
-    { id: chaine(), nom: chaine(), categorie: chaine(), image: chaine(), teinte: chaine() },
-    ['id', 'nom', 'categorie', 'image'],
   ),
 
 }

@@ -364,6 +364,26 @@ const identite = {
     ['email', 'nom', 'motDePasse', 'accepteConditions'],
   ),
 
+  VerificationEmailDemande: objet(
+    { email: chaine(undefined, { format: 'email' }) },
+    ['email'],
+  ),
+
+  VerificationEmailConfirmation: objet(
+    { email: chaine(undefined, { format: 'email' }), code: chaine('Code à six chiffres reçu par courriel.') },
+    ['email', 'code'],
+  ),
+
+  VerificationEmailEtat: objet(
+    {
+      email: chaine(undefined, { format: 'email' }),
+      expire: horodatage(),
+      essaisRestants: entier(),
+    },
+    ['email', 'expire', 'essaisRestants'],
+    'Compte créé, en attente du code reçu par courriel avant toute session.',
+  ),
+
   DecouverteSso: objet(
     {
       federationDisponible: booleen(),

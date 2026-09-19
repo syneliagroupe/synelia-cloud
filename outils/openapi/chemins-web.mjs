@@ -71,6 +71,8 @@ const domaines = fusion(
         code: 202,
         rbac: 'marketplace.subscribe',
         erreurs: [409, 402],
+        xEtat: 'simule',
+        xCapacite: 'registrar.domain',
       }),
     },
     '/web/domaines/disponibilite': {
@@ -84,6 +86,8 @@ const domaines = fusion(
         ],
         ok: ref('DisponibiliteDomaine'),
         erreurs: [424],
+        xEtat: 'simule',
+        xCapacite: 'registrar.domain',
       }),
     },
     '/web/domaines/transferts': {
@@ -96,6 +100,8 @@ const domaines = fusion(
         code: 202,
         rbac: 'marketplace.subscribe',
         erreurs: [409],
+        xEtat: 'simule',
+        xCapacite: 'registrar.domain',
       }),
     },
     '/web/domaines/{domaineId}': {
@@ -146,6 +152,8 @@ const domaines = fusion(
     corpsRequis: true,
     rbac: 'marketplace.subscribe',
     erreurs: [402],
+    xEtat: 'simule',
+    xCapacite: 'registrar.domain',
   }),
   action({
     tag: T_DOMAINES,
@@ -157,6 +165,8 @@ const domaines = fusion(
     ok: objet({ code: chaine(), expire: horodatage() }, ['code']),
     code: 200,
     rbac: 'network.manage',
+    xEtat: 'simule',
+    xCapacite: 'registrar.domain',
   }),
   {
     '/web/dns': {
@@ -1014,6 +1024,8 @@ const ssl = fusion(
         code: 202,
         rbac: 'marketplace.subscribe',
         erreurs: [409, 402],
+        xEtat: 'simule',
+        xCapacite: 'acme.certificat',
       }),
     },
     '/web/ssl/{certificatId}': {
@@ -1076,6 +1088,8 @@ const ssl = fusion(
     corps: objet({ dureeAnnees: entier() }),
     rbac: 'service.admin',
     erreurs: [402],
+    xEtat: 'simule',
+    xCapacite: 'acme.certificat',
   }),
   action({
     tag: T_SSL,
@@ -1096,6 +1110,8 @@ const ssl = fusion(
     ),
     code: 200,
     rbac: 'service.admin',
+    xEtat: 'simule',
+    xCapacite: 'acme.certificat',
   }),
 )
 

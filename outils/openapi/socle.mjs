@@ -251,6 +251,8 @@ const PAGINATION = [P('Page'), P('ParPage'), P('Tri'), P('Ordre'), P('Recherche'
  * @param {string} [o.rbac]     Identifiant d'action de la matrice RBAC.
  * @param {string[]} [o.erreurs] Réponses d'erreur supplémentaires.
  * @param {boolean}[o.destructif] Impose le paramètre `confirmation`.
+ * @param {string} [o.xEtat]      État d'implémentation amont : reel|persiste|simule|maquette.
+ * @param {string} [o.xCapacite]  Identifiant du registre des capacités (ex. registrar.domain).
  */
 export function op({
   tag,
@@ -268,6 +270,8 @@ export function op({
   erreurs = [],
   destructif = false,
   deprecie = false,
+  xEtat,
+  xCapacite,
 }) {
   const transverses = [P('Langue')]
   if (portee === 'client') transverses.unshift(P('Organisation'))
@@ -307,6 +311,9 @@ export function op({
     ...(detail ? { description: detail } : {}),
     ...(deprecie ? { deprecated: true } : {}),
     ...(rbac ? { 'x-rbac': rbac } : {}),
+    ...(xEtat ? { 'x-etat': xEtat } : {}),
+    ...(xCapacite ? { 'x-capacite': xCapacite } : {}),
+    ...(xEtat === 'simule' ? { 'x-provisionnement': 'manuel' } : {}),
     ...(portee === 'public' || portee === 'auth' ? { security: [] } : {}),
     ...(tous.length ? { parameters: tous } : {}),
     ...(corps
@@ -469,6 +476,8 @@ export function action({
   portee = 'client',
   destructif = false,
   erreurs = [],
+  xEtat,
+  xCapacite,
 }) {
   return {
     [url]: {
@@ -486,6 +495,8 @@ export function action({
         rbac,
         destructif,
         erreurs,
+        xEtat,
+        xCapacite,
       }),
     },
   }

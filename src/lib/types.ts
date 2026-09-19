@@ -949,6 +949,8 @@ export interface Domaine {
   zoneId?: string
   /** Serveur attaché — un domaine est attaché à un serveur et à un seul. */
   hebergementId?: string
+  /** Mode de provisionnement amont — manuel = traitement ops sous ~48h */
+  provisionnement?: 'automatique' | 'manuel'
 }
 
 // ─── Commerce & exploitation ──────────────────────────────────────────

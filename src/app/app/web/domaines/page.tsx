@@ -329,10 +329,13 @@ export default function PortefeuilleWebCloud() {
         }
       />
 
-      {estActif() && (
+      {(portefeuille.items.some((d) => d.provisionnement === 'manuel') || (!portefeuille.chargement && portefeuille.items.length === 0 && estActif())) && (
         <Callout ton="info" titre="Dépôt au registre traité manuellement">
           La commande est vérifiée par notre équipe sous 48 h. Aucun paiement n’est prélevé avant la
           confirmation du dépôt effectif du domaine.
+          {portefeuille.items.some((d) => d.provisionnement === 'manuel') && (
+            <span className="mt-1 block text-[11px]">Piloté par le contrat : <code className="font-mono">provisionnement=manuel</code> · <code>x-provisionnement: manuel</code> (registre simule)</span>
+          )}
         </Callout>
       )}
 
@@ -414,6 +417,11 @@ export default function PortefeuilleWebCloud() {
                       </Link>
                       {e.provisoire && (
                         <span className="mt-0.5 block text-[11px] text-warn">Nom provisoire</span>
+                      )}
+                      {e.domaine?.provisionnement === 'manuel' && (
+                        <span className="mt-0.5 inline-flex">
+                          <Badge tone="warn" size="sm">Traitement manuel ·48h</Badge>
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2.5">

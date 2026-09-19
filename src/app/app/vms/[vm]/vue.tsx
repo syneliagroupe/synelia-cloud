@@ -1895,6 +1895,8 @@ function OngletMateriel({ vm }: { vm: VM }) {
                       action: 'vm.hardware.update',
                       titre: 'Options de la machine enregistrées',
                       detail: `Démarrage automatique ${demarrageAuto ? 'activé' : 'désactivé'} · ordre ${ordre} · horloge ${ntp === 'synelia' ? 'NTP interne' : 'hyperviseur'}`,
+                      sansApi:
+                        'Indisponible : démarrage automatique, ordre de démarrage, NTP et quiescing ne sont pas encore exposés par l’API — seuls vCPU/mémoire le sont (via /vms/{id}/redimensionnement).',
                     })
                   }
                 >
@@ -1957,6 +1959,8 @@ function OngletMateriel({ vm }: { vm: VM }) {
                         action: 'vm.hardware.update',
                         titre: 'Paramètres avancés appliqués',
                         detail: `Réservation ${reservationCpu} MHz · limite ${limiteCpu === 0 ? 'aucune' : `${limiteCpu} MHz`} · anti-affinité ${antiAffinite || 'aucune'}`,
+                        sansApi:
+                          'Indisponible : réservation/limite CPU et anti-affinité ne sont pas encore exposées par l’API (placement côté fournisseur, non exposé).',
                         effet: () =>
                           antiAffinite
                             ? parc.modifier(vm.id, (v) => ({

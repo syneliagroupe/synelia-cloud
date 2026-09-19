@@ -312,6 +312,8 @@ export function VueDrive({ id }: { id: string }) {
                                 titre: `Siège de ${u.nom} retiré`,
                                 detail:
                                   'Ses fichiers personnels restent trente jours avant suppression ; les fichiers partagés restent au groupe.',
+                                sansApi:
+                                  'Indisponible : le retrait de siège Drive n’est pas encore exposé par l’API (seule l’attribution POST /web/drive/{id}/sieges l’est).',
                                 effet: () => {
                                   setRetires((prev) => [...prev, u.id])
                                   drives.modifier(d.id, (x) => ({
@@ -350,6 +352,8 @@ export function VueDrive({ id }: { id: string }) {
                           action: 'seat.assign',
                           titre: `${e.target.value} sièges souscrits`,
                           detail: 'Modification à chaud, facturée au prorata du mois en cours.',
+                          sansApi:
+                            'Indisponible : la souscription de sièges Drive n’est pas encore exposée par l’API (seule la création avec sieges initiaux l’est).',
                           effet: () =>
                             drives.modifier(d.id, (x) => ({
                               sieges: { ...x.sieges, souscrits: Number(e.target.value) },

@@ -944,19 +944,12 @@ export default function Securite() {
                   </option>
                 </Select>
               </Field>
+              {/* Réglage du brouillon d'export, pas encore une ressource : rien à
+              annoncer avant que « Générer l'export » ne poste la demande, comme les
+              autres champs du formulaire ci-dessus (format, périmètre, dates). */}
               <Switch
                 checked={empreinteChainage}
-                onChange={(v) =>
-                  executer({
-                    action: 'compliance.export',
-                    ton: v ? 'ok' : 'warn',
-                    titre: v ? 'Empreinte de chaînage incluse' : 'Empreinte de chaînage retirée',
-                    detail: v
-                      ? undefined
-                      : 'Sans elle, un tiers ne peut pas vérifier que l’export n’a pas été retouché — la plupart des auditeurs la demandent.',
-                    effet: () => setEmpreinteChainage(v),
-                  })
-                }
+                onChange={setEmpreinteChainage}
                 label="Inclure l’empreinte de chaînage"
                 description="Permet à un tiers de vérifier que l’export n’a pas été modifié après extraction. Attendu par la plupart des auditeurs."
               />

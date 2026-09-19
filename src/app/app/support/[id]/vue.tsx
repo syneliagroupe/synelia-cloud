@@ -22,7 +22,7 @@ import { Timeline } from '@/components/composition/flow'
 import { EventList, GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
-import { creerRessource, modifierRessource } from '@/lib/api/client'
+import { creerRessource, estActif, modifierRessource } from '@/lib/api/client'
 import type { Ticket } from '@/lib/types'
 import { useMaintenant } from '@/components/app/contexte'
 
@@ -422,6 +422,7 @@ export function VueTicket({ id }: { id: string }) {
               <div className="space-y-3">
                 <Switch
                   checked={lectureContexte}
+                  disabled={estActif()}
                   onChange={(v) =>
                     executer({
                       ton: v ? 'ok' : 'warn',
@@ -431,14 +432,21 @@ export function VueTicket({ id }: { id: string }) {
                       detail: v
                         ? undefined
                         : 'Sans ce contexte, le diagnostic prendra plus longtemps : il faudra vous demander chaque élément.',
+                      sansApi:
+                        'Indisponible : les accès du support ne sont pas encore gérés par l’API.',
                       effet: () => setLectureContexte(v),
                     })
                   }
                   label="Lecture du contexte technique"
-                  description="Métriques, journaux, emplacement d’exécution, historique des déploiements des ressources liées à ce ticket."
+                  description={
+                    estActif()
+                      ? 'Indisponible : ce réglage n’est pas encore exposé par l’API.'
+                      : 'Métriques, journaux, emplacement d’exécution, historique des déploiements des ressources liées à ce ticket.'
+                  }
                 />
                 <Switch
                   checked={interventionAutorisee}
+                  disabled={estActif()}
                   onChange={(v) =>
                     executer({
                       ton: v ? 'warn' : 'info',
@@ -448,11 +456,17 @@ export function VueTicket({ id }: { id: string }) {
                       detail: v
                         ? 'Accès nominatif, limité à 4 heures, chaque action journalisée dans votre audit.'
                         : undefined,
+                      sansApi:
+                        'Indisponible : les accès du support ne sont pas encore gérés par l’API.',
                       effet: () => setInterventionAutorisee(v),
                     })
                   }
                   label="Autoriser une intervention sur mes ressources"
-                  description="À n’accorder que si nous vous le demandons. L’accès est nominatif, limité à 4 heures, et chaque action est journalisée dans votre audit."
+                  description={
+                    estActif()
+                      ? 'Indisponible : ce réglage n’est pas encore exposé par l’API.'
+                      : 'À n’accorder que si nous vous le demandons. L’accès est nominatif, limité à 4 heures, et chaque action est journalisée dans votre audit.'
+                  }
                 />
               </div>
               <Callout ton="violet" className="mt-4" titre="Élévation visible et bornée">

@@ -17,7 +17,7 @@ import { LogPeek } from '@/components/business/observabilite'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource } from '@/lib/api/client'
+import { creerRessource, modifierRessource, supprimerRessource } from '@/lib/api/client'
 import { CHAMPS_CLE, type CleS3 } from '../cles'
 
 interface Entree {
@@ -259,6 +259,8 @@ export function VueBucket({ id }: { id: string }) {
                                   e.type === 'dossier'
                                     ? 'Un préfixe entier se récupère avec aws s3 sync, pas depuis le portail.'
                                     : 'Lien signé valable dix minutes.',
+                                sansApi:
+                                  'Indisponible : le portail ne génère pas encore de lien signé, l’API n’expose pas la liste des objets d’un bucket.',
                               })
                             }
                           >
@@ -280,6 +282,8 @@ export function VueBucket({ id }: { id: string }) {
                                 detail: bucket.versioning
                                   ? 'Le versioning est actif : un marqueur de suppression est posé, l’objet reste récupérable.'
                                   : 'Sans versioning, la suppression est définitive.',
+                                sansApi:
+                                  'Indisponible : l’API n’expose pas encore la suppression d’un objet individuel, seulement celle du bucket entier.',
                                 effet: () => {
                                   entrees.supprimer(e.id)
                                   seaux.modifier(bucket.id, (b) => ({
@@ -402,7 +406,15 @@ export function VueBucket({ id }: { id: string }) {
                   detail: v
                     ? 'Une écriture crée une version au lieu d’écraser ; une suppression pose un marqueur.'
                     : 'Les versions déjà créées sont conservées, mais les prochaines écritures écraseront.',
+                  appel: () =>
+                    modifierRessource('/buckets', bucket.id, {
+                      nom: bucket.nom,
+                      region: bucket.region,
+                      classe: bucket.classe,
+                      versioning: v,
+                    }),
                   effet: () => seaux.modifier(bucket.id, { versioning: v }),
+                  effetFinal: () => seaux.recharger(),
                 })
               }
               label="Conserver chaque version d’un objet"
@@ -530,6 +542,8 @@ export function VueBucket({ id }: { id: string }) {
                             action: 'network.manage',
                             ton: 'warn',
                             titre: `Règle « ${r.nom} » supprimée`,
+                            sansApi:
+                              'Indisponible : le cycle de vie d’un bucket n’est pas encore exposé par l’API.',
                             effet: () => regles.supprimer(r.id),
                           })
                         }
@@ -598,11 +612,20 @@ export function VueBucket({ id }: { id: string }) {
                     titre: 'Verrouillage d’objet activé',
                     detail:
                       'Définitif : le verrouillage ne peut plus être désactivé sur ce bucket. C’est une contrainte de la norme.',
+                    appel: () =>
+                      modifierRessource('/buckets', bucket.id, {
+                        nom: bucket.nom,
+                        region: bucket.region,
+                        classe: bucket.classe,
+                        objectLock: { actif: v, retentionJours: 35 },
+                        versioning: true,
+                      }),
                     effet: () =>
                       seaux.modifier(bucket.id, {
                         objectLock: { actif: v, retentionJours: 35 },
                         versioning: true,
                       }),
+                    effetFinal: () => seaux.recharger(),
                   })
                 }
                 label="Activer le verrouillage d’objet"
@@ -675,20 +698,39 @@ export function VueBucket({ id }: { id: string }) {
           <Switch
             checked={Boolean(bucket.replication)}
             onChange={(v) =>
-              executer({
-                action: 'network.manage',
-                ton: 'info',
-                titre: v ? 'Réplication activée' : 'Réplication arrêtée',
-                detail: v
-                  ? 'Chaque nouvel objet est copié vers le second site. Les objets déjà présents ne le sont pas rétroactivement.'
-                  : 'La copie déjà écrite sur l’autre site reste en place et reste facturée.',
-                effet: () =>
-                  seaux.modifier(bucket.id, {
-                    replication: v
-                      ? { cible: bucket.region === 'ABJ' ? 'GBM' : 'ABJ' }
-                      : undefined,
-                  }),
-              })
+              executer(
+                v
+                  ? {
+                      action: 'network.manage',
+                      ton: 'info',
+                      titre: 'Réplication activée',
+                      detail:
+                        'Chaque nouvel objet est copié vers le second site. Les objets déjà présents ne le sont pas rétroactivement.',
+                      appel: () =>
+                        modifierRessource('/buckets', bucket.id, {
+                          nom: bucket.nom,
+                          region: bucket.region,
+                          classe: bucket.classe,
+                          replication: { cible: bucket.region === 'ABJ' ? 'GBM' : 'ABJ' },
+                        }),
+                      effet: () =>
+                        seaux.modifier(bucket.id, {
+                          replication: { cible: bucket.region === 'ABJ' ? 'GBM' : 'ABJ' },
+                        }),
+                      effetFinal: () => seaux.recharger(),
+                    }
+                  : {
+                      action: 'network.manage',
+                      ton: 'warn',
+                      titre: 'Réplication arrêtée',
+                      detail: 'La copie déjà écrite sur l’autre site reste en place et reste facturée.',
+                      // Le backend ne sait qu'écrire `replication`, pas l'effacer (le
+                      // patch ignore les champs nuls) : la désactivation resterait sans
+                      // effet réel derrière un faux succès.
+                      sansApi:
+                        'Indisponible : l’API ne permet pas encore de désactiver la réplication d’un bucket, seulement de l’activer.',
+                    },
+              )
             }
             label={`Répliquer vers ${bucket.region === 'ABJ' ? 'Grand-Bassam' : 'Abidjan'}`}
             description="Réplication asynchrone de chaque nouvel objet vers le second site. Le trafic inter-site n’est pas facturé ; seul le stockage de la copie l’est."
@@ -809,6 +851,8 @@ export function VueBucket({ id }: { id: string }) {
                           action: 'network.manage',
                           titre: `Clé ${c.nom} renouvelée`,
                           detail: 'L’ancienne valeur reste valable une heure.',
+                          sansApi:
+                            'Indisponible : la rotation d’une clé S3 n’est pas encore exposée par l’API — révoquez-la et créez-en une nouvelle.',
                           effet: () => cles.modifier(c.id, { creee: MAINTENANT.slice(0, 10) }),
                         })
                       }
@@ -824,7 +868,9 @@ export function VueBucket({ id }: { id: string }) {
                           ton: 'warn',
                           titre: `Clé ${c.nom} révoquée`,
                           detail: 'Toute application qui l’utilise recevra un 403 immédiatement.',
+                          appel: () => supprimerRessource('/cles-s3', c.id, c.nom),
                           effet: () => cles.supprimer(c.id),
+                          effetFinal: () => cles.recharger(),
                         })
                       }
                     >
@@ -894,7 +940,15 @@ aws --endpoint-url https://s3.${bucket.region.toLowerCase()}.synelia.cloud \\
                       detail: v
                         ? 'Chaque requête est journalisée : utile en audit, et facturé au volume écrit.'
                         : undefined,
+                      appel: () =>
+                        modifierRessource('/buckets', bucket.id, {
+                          nom: bucket.nom,
+                          region: bucket.region,
+                          classe: bucket.classe,
+                          accessLogs: v,
+                        }),
                       effet: () => seaux.modifier(bucket.id, { accessLogs: v }),
+                      effetFinal: () => seaux.recharger(),
                     })
                   }
                   label="Journaux d’accès"

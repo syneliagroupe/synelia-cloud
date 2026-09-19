@@ -787,44 +787,24 @@ export default function Observabilite() {
                   </Select>
                 </Field>
                 <div className="space-y-3">
+                  {/* Réglages du brouillon de règle, pas encore une ressource : un
+                  changement ici n'a rien à annoncer avant que « Créer » ne poste la
+                  règle, contrairement aux autres opérations de cet écran qui agissent
+                  sur une règle déjà existante. */}
                   <Switch
                     checked={canalCourriel}
-                    onChange={(v) =>
-                      executer({
-                        titre: v ? 'Courriel activé' : 'Courriel coupé',
-                        detail: v
-                          ? undefined
-                          : 'Plus aucune alerte ne partira par courriel : vérifiez qu’un autre canal reste actif.',
-                        effet: () => setCanalCourriel(v),
-                      })
-                    }
+                    onChange={setCanalCourriel}
                     label="Courriel aux administrateurs de l’organisation"
                   />
                   <Switch
                     checked={canalWebhook}
-                    onChange={(v) =>
-                      executer({
-                        titre: v ? 'Webhook activé' : 'Webhook coupé',
-                        detail: v ? 'Charge JSON signée, format documenté.' : undefined,
-                        effet: () => setCanalWebhook(v),
-                      })
-                    }
+                    onChange={setCanalWebhook}
                     label="Webhook vers un canal d’équipe"
                     description="Nous envoyons une charge JSON signée ; le format est décrit dans la documentation."
                   />
                   <Switch
                     checked={canalTicket}
-                    onChange={(v) =>
-                      executer({
-                        titre: v
-                          ? 'Ouverture automatique de ticket activée'
-                          : 'Ouverture automatique de ticket coupée',
-                        detail: v
-                          ? 'Uniquement pour les alertes critiques, rattachées à la ressource concernée.'
-                          : undefined,
-                        effet: () => setCanalTicket(v),
-                      })
-                    }
+                    onChange={setCanalTicket}
                     label="Ouvrir automatiquement un ticket de support"
                     description="Uniquement pour les alertes critiques. Le ticket est rattaché à la ressource concernée."
                   />

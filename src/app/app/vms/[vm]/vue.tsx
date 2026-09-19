@@ -1942,11 +1942,16 @@ function OngletMateriel({ vm }: { vm: VM }) {
               titre="Paramètres avancés"
               actions={
                 <GatedAction
-                  autorise={autorise('vm.hardware.update')}
-                  message={refus('vm.hardware.update')}
+                  autorise={autorise('vm.hardware.update') && !estActif()}
+                  message={
+                    estActif()
+                      ? 'Indisponible : réservation, limite CPU et anti-affinité ne sont pas encore exposées par l’API.'
+                      : refus('vm.hardware.update')
+                  }
                 >
                   <Button
                     size="sm"
+                    disabled={estActif()}
                     onClick={() =>
                       executer({
                         action: 'vm.hardware.update',

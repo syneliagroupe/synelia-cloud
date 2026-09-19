@@ -1546,6 +1546,8 @@ function Variables({ service }: { service: ServiceProjet }) {
         titre: `Révélation de ${cle} journalisée`,
         detail:
           'Votre nom, l’heure et la variable concernée figurent désormais dans le journal d’audit de l’organisation.',
+        sansApi:
+          'Indisponible : il n’y a pas d’endpoint pour journaliser côté serveur la révélation d’une variable secrète.',
       })
     }
     setReveles((r) => ({ ...r, [id]: !r[id] }))

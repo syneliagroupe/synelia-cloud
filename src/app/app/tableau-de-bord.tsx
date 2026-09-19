@@ -669,6 +669,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                   ))}
               </ul>
             )}
+            <Link href="/app/facturation/ventilation" className="mt-2 block text-[11px] font-semibold text-p-700 hover:text-m-600">Voir ventilation →</Link>
             {factures.items.length === 0 && (
               <p className="mt-3 text-center text-[12px] text-g-500">Aucune facture ce mois</p>
             )}

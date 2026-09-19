@@ -297,6 +297,11 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
         </div>
       </Card>
 
+      {/* ─── Ressources développeur (PLAN-UI 3.5) — lien hub, pas sur accueil général */}
+      <div className="flex justify-end">
+        <a href="/app/docs" className="text-[12px] font-semibold text-p-700 hover:text-m-600">Ressources développeur → API · CLI · Terraform</a>
+      </div>
+
       {/* ─── Bande 1 : chiffres clés ─────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatTile

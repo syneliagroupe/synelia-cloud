@@ -31,7 +31,7 @@ export function champParLabel(scope: Page | Locator, texteLabel: string): Locato
   return label.locator('xpath=..').locator('input, select, textarea').first()
 }
 
-export const API = process.env.NEXT_PUBLIC_API_URL ?? 'https://api.synelia.dev01.ovh.smile.ci/v1'
+export const API = process.env.NEXT_PUBLIC_API_URL ?? 'https://api.cloud.dev01.ovh.smile.ci/v1' // was api.synelia.dev01 (503)
 
 interface SessionApi {
   accessToken: string

@@ -37,7 +37,7 @@ Faits vérifiés le 2026-09-08 sur lesquels ce plan repose (ne pas re-dériver) 
   amont par paire `*Simule`/`*OpenStack|*Reel` dans
   `packages/openstack/synelia_openstack/`. CORS par défaut `["*"]`
   (`packages/kernel/synelia_kernel/config.py`), non restreint sur dev01. API de
-  référence : `https://api.synelia.dev01.ovh.smile.ci/v1` (répond 200 sur
+  référence : `https://api.cloud.dev01.ovh.smile.ci/v1` (anciennement `api.synelia.dev01`, répond 200 sur
   `/public/statut` ce jour). Compte d'amorçage `admin@synelia.cloud` /
   `Synelia!2026` (README backend, `SYNELIA_SEED_*`). Chaque `DELETE`
   destructif passe par `exiger_confirmation(<champ>, confirmation)` — les
@@ -526,7 +526,7 @@ Fichiers :
   - `maquette` : `baseURL = BASE_MAQUETTE ?? 'http://127.0.0.1:3111'` — le
     même serveur que l'audit, construit **sans** variable.
   - `api` : `baseURL = BASE_API ?? 'http://127.0.0.1:3113'`, construit
-    **avec** `NEXT_PUBLIC_API_URL=https://api.synelia.dev01.ovh.smile.ci/v1` ;
+    **avec** `NEXT_PUBLIC_API_URL=https://api.cloud.dev01.ovh.smile.ci/v1` ;
     ou directement `BASE_API=https://app.synelia.dev01.ovh.smile.ci`.
   - `workers: 1`, `fullyParallel: false` (organisation partagée, capacité
     comp1 ~20 Go), `retries: 0` (un test réel qui échoue doit être lu, pas
@@ -540,11 +540,11 @@ Fichiers :
     NEXT_PUBLIC_API_URL= bun run build && bun run start -p 3111 &   # maquette
     bun run test:integration --project maquette ; BASE=http://127.0.0.1:3111 node outils/audit.mjs
     pkill -f next-server
-    NEXT_PUBLIC_API_URL=https://api.synelia.dev01.ovh.smile.ci/v1 bun run build && bun run start -p 3113 &
+    NEXT_PUBLIC_API_URL=https://api.cloud.dev01.ovh.smile.ci/v1 bun run build && bun run start -p 3113 &
     SYNELIA_TEST_EMAIL=… SYNELIA_TEST_MDP=… bun run test:integration --project api
     ```
 - `fixtures.ts` :
-  - `api` : client `fetch` vers `API = process.env.NEXT_PUBLIC_API_URL ?? 'https://api.synelia.dev01.ovh.smile.ci/v1'`
+  - `api` : client `fetch` vers `API = process.env.NEXT_PUBLIC_API_URL ?? 'https://api.cloud.dev01.ovh.smile.ci/v1'`
     avec `Bearer` + `X-Organisation-Id`, sur le modèle de l'ancien
     `/tmp/w2-verif.mjs` (login `POST /auth/connexion { email, motDePasse }`,
     identifiants **uniquement** depuis `SYNELIA_TEST_EMAIL` /

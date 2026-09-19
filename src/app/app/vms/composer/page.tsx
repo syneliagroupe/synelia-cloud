@@ -18,6 +18,8 @@ import {
 } from '@/components/business/composeur-serveurs'
 import { useApp } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
+import { useOperation } from '@/components/app/actions'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
 
 /** Systèmes proposés au lot — le libellé sert de nom d'image sur la machine. */
 const IMAGES: Record<'debian' | 'ubuntu' | 'rocky' | 'windows', { nom: string }> = {
@@ -64,6 +66,7 @@ export default function ComposerServeurs() {
   const parc = useCollection<VM>('vms', VMS)
   const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const { lancerJob } = useAtelier()
+  const executer = useOperation()
   const [espaceId, setEspaceId] = useState(ESPACES[0].id)
   const [image, setImage] = useState<'debian' | 'ubuntu' | 'rocky' | 'windows'>('debian')
   const [lots, setLots] = useState<LotServeurs[]>(PLAN_INITIAL)
@@ -226,6 +229,62 @@ export default function ComposerServeurs() {
                     iconBefore={<Rocket size={14} />}
                     disabled={depasse || machines === 0}
                     onClick={() => {
+                      if (estActif()) {
+                        executer({
+                          action: 'vm.create_delete',
+                          titre: `Création de ${machines} machine${machines > 1 ? 's' : ''} lancée`,
+                          detail: 'Le lot est suivi dans le centre de tâches.',
+                          appel: () =>
+                            Promise.all([
+                              requete<Array<{ id: string; nom: string; famille?: string }>>(
+                                '/catalogue/images',
+                              ),
+                              requete<
+                                Array<{ vcpu: number; ramGo: number; diskGo: number }>
+                              >('/catalogue/gabarits'),
+                            ]).then(([images, gabarits]) => {
+                              if (images.length === 0) throw new Error('Aucune image système au catalogue.')
+                              if (gabarits.length === 0) throw new Error('Aucun gabarit au catalogue.')
+                              const motCle = image === 'windows' ? 'windows' : image
+                              const imageReelle =
+                                images.find((i) => i.nom.toLowerCase().includes(motCle)) ??
+                                images.find((i) => i.famille === (image === 'windows' ? 'windows' : 'linux')) ??
+                                images[0]
+                              const machinesReelles = lots.map((lot) => {
+                                const gabarit = [...gabarits].reduce((meilleur, candidat) => {
+                                  const ecart = (g: typeof candidat) =>
+                                    Math.abs(g.vcpu - lot.cpu) * 100 +
+                                    Math.abs(g.ramGo - lot.ramGo) * 10 +
+                                    Math.abs(g.diskGo - lot.diskGo)
+                                  return ecart(candidat) < ecart(meilleur) ? candidat : meilleur
+                                })
+                                return {
+                                  nom: lot.prefixe,
+                                  quantite: lot.quantite,
+                                  imageId: imageReelle.id,
+                                  vcpu: gabarit.vcpu,
+                                  ramGo: gabarit.ramGo,
+                                  diskGo: gabarit.diskGo,
+                                  nics: lot.nics,
+                                  role: lot.roleId,
+                                  logicielsPreinstalles: lot.logiciels,
+                                  backupPlanId: lot.sauvegarde ? 'bp-prod-quotidien' : undefined,
+                                }
+                              })
+                              return creerRessource('/vms/lot', {
+                                espaceId: espace.id,
+                                site: espace.site,
+                                antiAffinite: lots.some((lot) => lot.antiAffinite),
+                                machines: machinesReelles,
+                              }).then((travail) => {
+                                setLance(true)
+                                return travail
+                              })
+                            }),
+                          effetFinal: parc.recharger,
+                        })
+                        return
+                      }
                       setLance(true)
                       // Un lot livré crée réellement ses machines, à l'état
                       // « creating » : c'est ce que le centre de tâches fera

@@ -141,6 +141,21 @@ export default function AccueilInfrastructure() {
         }
       />
 
+      <Card>
+        <CardHeader titre="Accès rapide" sousTitre="Créer une ressource dans l’Espace Cloud courant." />
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink href="/app/vms/new" iconBefore={<Plus size={13} />}>
+            Nouvelle machine
+          </ButtonLink>
+          <ButtonLink href="/app/kubernetes/new" variant="secondary">
+            Nouveau cluster
+          </ButtonLink>
+          <ButtonLink href="/app/stockage" variant="secondary">
+            Nouveau volume
+          </ButtonLink>
+        </div>
+      </Card>
+
       {aSurveiller.length > 0 && (
         <Callout
           ton="warn"

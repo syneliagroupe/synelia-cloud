@@ -593,7 +593,21 @@ export function VueMessagerie({ id }: { id: string }) {
                 />
                 <div className="space-y-3">
                   <Field label="Niveau">
-                    <Select defaultValue={m.antispam.niveau}>
+                    <Select
+                      defaultValue={m.antispam.niveau}
+                      onChange={(e) =>
+                        executer({
+                          action: 'seat.assign',
+                          titre: `Niveau antispam ${e.target.value}`,
+                          appel: () =>
+                            requete(`/web/emails/${encodeURIComponent(m.id)}`, {
+                              methode: 'PATCH',
+                              corps: { antispam: { niveau: e.target.value } },
+                            }),
+                          effetFinal: () => messageries.recharger(),
+                        })
+                      }
+                    >
                       <option value="permissif">Permissif — presque rien n’est retenu</option>
                       <option value="standard">Standard — recommandé</option>
                       <option value="strict">Strict — retient aussi les envois de masse légitimes</option>
@@ -604,13 +618,21 @@ export function VueMessagerie({ id }: { id: string }) {
                     description="Analyse avant remise. Une pièce infectée est retirée et le message annoté."
                     checked={antivirus}
                     onChange={setAntivirus}
+                    disabled={estActif()}
                   />
                   <Switch
                     label="Rapport quotidien de quarantaine"
                     description="Chaque titulaire reçoit la liste de ce qui a été retenu pour lui."
                     checked={rapport}
                     onChange={setRapport}
+                    disabled={estActif()}
                   />
+                  {estActif() && (
+                    <Callout ton="info" titre="Réglages gérés dans Zimbra">
+                      Le niveau antispam, l’antivirus et les rapports ne sont pas encore modifiables
+                      depuis l’API Synelia.
+                    </Callout>
+                  )}
                 </div>
               </Card>
 

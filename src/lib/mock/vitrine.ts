@@ -1385,9 +1385,9 @@ export const FICHES_PRODUIT: FicheProduit[] = [
     surtitre: 'Web',
     accroche: 'Enregistrer, transférer, et ne jamais perdre la main.',
     resume:
-      'Enregistrement et transfert des extensions africaines et internationales, avec protection des coordonnées, verrouillage contre le transfert sortant et renouvellement surveillé. Le domaine reste à votre nom : nous en sommes le bureau d’enregistrement, pas le propriétaire.',
+      'Commande et suivi des extensions africaines et internationales. Le dépôt au registre est traité manuellement et confirmé sous 48 h avant tout prélèvement.',
     puces: [
-      'Le titulaire est votre organisation, jamais Synelia',
+      'Le titulaire demandé est votre organisation, jamais Synelia',
       'Verrouillage contre le transfert et alerte avant chaque échéance',
       'Zone DNS créée automatiquement, prête à recevoir vos enregistrements',
     ],
@@ -1441,7 +1441,7 @@ export const FICHES_PRODUIT: FicheProduit[] = [
       ],
     },
     faq: [
-      { question: 'Le domaine m’appartient-il vraiment ?', reponse: 'Oui. Le titulaire déclaré au registre est votre organisation. Nous sommes l’intermédiaire technique. Vous pouvez demander le code de transfert à tout moment, sans justification.' },
+      { question: 'Quand le domaine m’appartient-il ?', reponse: 'Après confirmation du dépôt effectif au registre. La commande est traitée manuellement sous 48 h et aucun paiement n’est prélevé avant cette confirmation.' },
       { question: 'Puis-je garder mes serveurs de noms actuels ?', reponse: 'Oui. Nous enregistrons le domaine et vous laissez pointer vers vos serveurs. La zone chez nous reste alors inactive, sans facturation supplémentaire.' },
       { question: 'Que se passe-t-il si j’oublie de renouveler ?', reponse: 'Le renouvellement est automatique par défaut. Si vous l’avez désactivé, trois alertes précèdent l’échéance, puis le domaine entre dans la période de rachat du registre, dont la date limite est affichée dans le portail.' },
     ],

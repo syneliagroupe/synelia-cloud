@@ -20,11 +20,10 @@ import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { ApiError, creerRessource, estActif, requete } from '@/lib/api/client'
-import { payerAvantDeCreer } from '@/components/composition/paystack'
 
 /** Tarifs annuels indicatifs, en francs CFA. */
 const EXTENSIONS = [
-  { ext: '.ci', prix: 18000, note: 'Extension ivoirienne — nous sommes bureau d’enregistrement accrédité' },
+  { ext: '.ci', prix: 18000, note: 'Extension ivoirienne — dépôt traité manuellement sous 48 h' },
   { ext: '.africa', prix: 15000, note: 'Extension continentale' },
   { ext: '.com', prix: 9500, note: 'La plus recherchée' },
   { ext: '.net', prix: 9500 },
@@ -226,13 +225,12 @@ export default function PortefeuilleWebCloud() {
                 const nom = `${String(v.nom).trim().toLowerCase()}${v.extension}`
                 const prixAnnuel = EXTENSIONS.find((x) => x.ext === v.extension)?.prix ?? 9500
                 return {
-                  titre: `${nom} enregistré`,
-                  detail: `${money(prixAnnuel)} par an${estActif() ? ', payé maintenant' : ', au prorata du mois en cours'}.`,
-                  appel: async () => {
-                    // Le paiement est exigé avant l'enregistrement au registre — pas de
-                    // domaine réservé sans réservation payée derrière.
-                    if (estActif()) await payerAvantDeCreer(prixAnnuel * Number(v.duree))
-                    return creerRessource('/web/domaines', {
+                  titre: estActif() ? `Commande de ${nom} reçue` : `${nom} enregistré`,
+                  detail: estActif()
+                    ? `Traitement manuel sous 48 h · aucun prélèvement avant confirmation du dépôt au registre.`
+                    : `${money(prixAnnuel)} par an, au prorata du mois en cours.`,
+                  appel: () =>
+                    creerRessource('/web/domaines', {
                       nom,
                       dureeAnnees: Number(v.duree),
                       renouvellementAuto: Boolean(v.auto),
@@ -246,8 +244,7 @@ export default function PortefeuilleWebCloud() {
                         pays: String(v.titulairePays),
                       },
                       creerZoneDns: true,
-                    })
-                  },
+                    }),
                   job: {
                     type: 'domaine.register',
                     label: `Enregistrement de ${nom}`,
@@ -331,6 +328,13 @@ export default function PortefeuilleWebCloud() {
           </>
         }
       />
+
+      {estActif() && (
+        <Callout ton="info" titre="Dépôt au registre traité manuellement">
+          La commande est vérifiée par notre équipe sous 48 h. Aucun paiement n’est prélevé avant la
+          confirmation du dépôt effectif du domaine.
+        </Callout>
+      )}
 
       {sansRenouvellement.length > 0 && (
         <Callout

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ArrowRight, Building2, Check, X } from 'lucide-react'
 import { cn, slugify } from '@/lib/utils'
 import { TVA_PCT } from '@/lib/format'
@@ -9,10 +10,12 @@ import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Checkbox, Field, Input, Select } from '@/components/ui/field'
 import { Callout } from '@/components/composition/card'
+import { estActif } from '@/lib/api/client'
 
 const REGEX_DOMAINE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.[a-z]{2,})+$/
 
 export default function CreationOrganisation() {
+  const router = useRouter()
   const [nom, setNom] = useState('')
   const [pays, setPays] = useState(PAYS[0])
   const [secteur, setSecteur] = useState('')
@@ -24,6 +27,12 @@ export default function CreationOrganisation() {
   const domaineValide = domaine === '' || REGEX_DOMAINE.test(domaine.trim().toLowerCase())
   const complet =
     nom.trim().length >= 2 && secteur !== '' && taille !== '' && domaineValide && conditions
+
+  useEffect(() => {
+    if (estActif()) router.replace('/select-organisation')
+  }, [router])
+
+  if (estActif()) return null
 
   return (
     <div className="space-y-6">

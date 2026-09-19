@@ -125,22 +125,24 @@ export function SelecteurOrganisation() {
           </button>
         ))}
 
-        <Link
-          href="/signup/organisation"
-          className="group flex items-center gap-4 rounded-[10px] border border-dashed border-g-300 bg-g-050 p-4 transition-colors hover:border-p-400 hover:bg-p-050"
-        >
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-p-700 ring-1 ring-g-300">
-            <Plus size={18} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-bold text-ink group-hover:text-p-700">
-              Créer une nouvelle organisation
-            </p>
-            <p className="mt-0.5 text-[12px] text-g-500">
-              Vous en deviendrez Org Admin, avec sa propre facturation et ses propres Espaces Cloud.
-            </p>
-          </div>
-        </Link>
+        {!estActif() && (
+          <Link
+            href="/signup/organisation"
+            className="group flex items-center gap-4 rounded-[10px] border border-dashed border-g-300 bg-g-050 p-4 transition-colors hover:border-p-400 hover:bg-p-050"
+          >
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-p-700 ring-1 ring-g-300">
+              <Plus size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-bold text-ink group-hover:text-p-700">
+                Créer une nouvelle organisation
+              </p>
+              <p className="mt-0.5 text-[12px] text-g-500">
+                Vous en deviendrez Org Admin, avec sa propre facturation et ses propres Espaces Cloud.
+              </p>
+            </div>
+          </Link>
+        )}
       </div>
 
       <Callout ton="info" titre="Basculer plus tard" className="mt-6">

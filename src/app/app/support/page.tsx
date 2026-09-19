@@ -599,6 +599,8 @@ export default function Support() {
                   titre: 'Rappel demandé',
                   detail:
                     'Un technicien vous rappelle sur le numéro du contact technique, dans les heures ouvrées ou immédiatement si l’astreinte est mobilisée.',
+                  sansApi:
+                    'Indisponible : les demandes de rappel ne sont pas encore enregistrées côté support.',
                 }}
               />
               <Button variant="ghost" onClick={() => setNouveau(true)}>

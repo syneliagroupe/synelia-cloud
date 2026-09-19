@@ -62,23 +62,32 @@ export function VueDrive({ id }: { id: string }) {
   }
 
   const reglerPartage = (patch: {
-    externeAutorise: boolean
-    motDePasseObligatoire: boolean
-  }) =>
+    externeAutorise?: boolean
+    motDePasseObligatoire?: boolean
+    expirationJours?: number
+  }) => {
+    const partage = {
+      externeAutorise: patch.externeAutorise ?? externe,
+      motDePasseObligatoire: patch.motDePasseObligatoire ?? motDePasse,
+      expirationJours: patch.expirationJours ?? d.partage.expirationJours,
+    }
+    return (
     executer({
       action: 'service.admin',
       titre: 'Politique de partage mise à jour',
-      detail: patch.externeAutorise
+      detail: partage.externeAutorise
         ? 'Le partage vers l’extérieur reste autorisé.'
         : 'Les fichiers ne se partagent plus qu’entre titulaires de sièges.',
       appel: () =>
         modifierRessource('/web/drive', d.id, {
-          partage: { ...patch, expirationJours: d.partage.expirationJours },
+          partage,
         }),
       effet: () =>
-        drives.modifier(d.id, (x) => ({ partage: { ...x.partage, ...patch } })),
+        drives.modifier(d.id, (x) => ({ partage: { ...x.partage, ...partage } })),
       effetFinal: () => drives.recharger(),
     })
+    )
+  }
   const config = configurationDuService('drive-pro')
   const titulaires = USERS.slice(0, d.sieges.attribues).filter((u) => !retires.includes(u.id))
 
@@ -285,7 +294,14 @@ export function VueDrive({ id }: { id: string }) {
                         <span className="tnum text-[11.5px] text-g-700">
                           {(((d.quota.utiliseGo / Math.max(1, titulaires.length)) * (1 + (i % 3) * 0.4)) / 1).toFixed(0)} Go
                         </span>
-                        <GatedAction autorise={autorise('seat.assign')} message={refus('seat.assign')}>
+                        <GatedAction
+                          autorise={autorise('seat.assign') && !estActif()}
+                          message={
+                            estActif()
+                              ? 'Indisponible : le retrait de siège Drive n’est pas encore exposé par l’API.'
+                              : refus('seat.assign')
+                          }
+                        >
                           <IconButton
                             label={`Retirer le siège de ${u.nom}`}
                             size="sm"
@@ -323,6 +339,12 @@ export function VueDrive({ id }: { id: string }) {
                   <Field label="Sièges souscrits" hint="modifiable à chaud, facturé au prorata">
                     <Select
                       value={String(d.sieges.souscrits)}
+                      disabled={estActif()}
+                      title={
+                        estActif()
+                          ? 'Indisponible : la souscription de sièges Drive n’est pas encore exposée par l’API.'
+                          : undefined
+                      }
                       onChange={(e) =>
                         executer({
                           action: 'seat.assign',
@@ -384,7 +406,10 @@ export function VueDrive({ id }: { id: string }) {
                     }}
                   />
                   <Field label="Expiration par défaut des liens">
-                    <Select defaultValue={String(d.partage.expirationJours)}>
+                    <Select
+                      defaultValue={String(d.partage.expirationJours)}
+                      onChange={(e) => reglerPartage({ expirationJours: Number(e.target.value) })}
+                    >
                       <option value="7">7 jours</option>
                       <option value="30">30 jours</option>
                       <option value="90">90 jours</option>

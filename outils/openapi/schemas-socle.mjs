@@ -1106,6 +1106,7 @@ const iaas = {
 
   BucketCreation: objet(
     {
+      espaceId: chaine(),
       nom: chaine(),
       region: liste(SITES),
       classe: liste(['chaud', 'froid']),
@@ -1116,7 +1117,7 @@ const iaas = {
       policy: liste(['prive', 'lecture_publique', 'json']),
       policyJson: chaine('Politique explicite, quand `policy` vaut `json`.'),
     },
-    ['nom', 'region', 'classe'],
+    ['espaceId', 'nom', 'region', 'classe'],
   ),
 
   CleS3: objet(

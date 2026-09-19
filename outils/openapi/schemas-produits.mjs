@@ -101,6 +101,34 @@ const paas = {
     ['id', 'nom', 'domaines', 'couleur', 'statut', 'sante'],
   ),
 
+  // Schémas UI legacy (plus de routes HTTP) — conservés pour la table de correspondances TypeScript.
+  Composant: objet(
+    {
+      id: chaine(),
+      envId: chaine(),
+      nom: chaine(),
+      kind: liste(['vm', 'k8s']),
+      role: liste(['web', 'api', 'db', 'cache', 'proxy', 'worker', 'cron', 'observabilite']),
+      image: chaine(),
+      version: chaine(),
+      ressources: objet({ cpu: nombre(), ramMo: entier(), diskGo: entier() }, ['cpu', 'ramMo', 'diskGo']),
+      ports: tableau(
+        objet(
+          { interne: entier(), expose: entier(), type: liste(['ClusterIP', 'LoadBalancer']) },
+          ['interne', 'type'],
+        ),
+      ),
+      envVars: tableau(ref('VariableEnvironnement')),
+      storage: tableau(
+        objet({ chemin: chaine(), tailleGo: entier(), classe: chaine() }, ['chemin', 'tailleGo', 'classe']),
+      ),
+      emplacement: objet({ vms: tableau(chaine()), namespace: chaine(), pods: tableau(chaine()) }),
+      statut: liste(['deployed', 'degraded', 'stopped', 'failed']),
+      dependances: tableau(chaine()),
+    },
+    ['id', 'envId', 'nom', 'kind', 'role', 'image', 'version', 'ressources', 'ports', 'envVars', 'emplacement', 'statut'],
+  ),
+
   VariableEnvironnement: objet(
     {
       cle: chaine(),

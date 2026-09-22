@@ -17,7 +17,7 @@ import { DOMAINES } from './web'
 
 // ─── Serveurs de bases de données ─────────────────────────────────────
 
-export type MoteurWeb = 'mariadb' | 'postgresql' | 'redis'
+export type MoteurWeb = 'mariadb' | 'postgresql' | 'redis' | 'mysql' | 'mongodb'
 
 export interface ServeurBases {
   id: string
@@ -170,13 +170,17 @@ export const SERVEURS_BASES: ServeurBases[] = [
 
 export const MOTEUR_WEB_LABEL: Record<MoteurWeb, string> = {
   mariadb: 'MariaDB',
+  mysql: 'MySQL',
   postgresql: 'PostgreSQL',
+  mongodb: 'MongoDB',
   redis: 'Redis',
 }
 
 export const MOTEUR_WEB_TEINTE: Record<MoteurWeb, string> = {
   mariadb: '#C0765A',
+  mysql: '#00758F',
   postgresql: '#336791',
+  mongodb: '#47A248',
   redis: '#DC382D',
 }
 

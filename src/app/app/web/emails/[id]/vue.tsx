@@ -594,8 +594,10 @@ export function VueMessagerie({ id }: { id: string }) {
                 <div className="space-y-3">
                   <Field label="Niveau">
                     <Select
-                      defaultValue={m.antispam.niveau}
-                      onChange={(e) =>
+                      value={m.antispam.niveau}
+                      disabled={estActif()}
+                      onChange={(e) => {
+                        if (estActif()) return
                         executer({
                           action: 'seat.assign',
                           titre: `Niveau antispam ${e.target.value}`,
@@ -606,7 +608,7 @@ export function VueMessagerie({ id }: { id: string }) {
                             }),
                           effetFinal: () => messageries.recharger(),
                         })
-                      }
+                      }}
                     >
                       <option value="permissif">Permissif — presque rien n’est retenu</option>
                       <option value="standard">Standard — recommandé</option>

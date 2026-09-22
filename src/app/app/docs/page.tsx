@@ -224,6 +224,27 @@ export default function Docs() {
 
       {onglet === 'api' && (
         <div className="space-y-4">
+          <Callout ton="info" titre="Contrat OpenAPI">
+            Le schéma machine-readable est versionné avec le backend (
+            <code className="font-mono text-[11px]">docs/api/openapi.json</code> dans le dépôt
+            portail). En lab, la même spec est servie par l’API à{' '}
+            <code className="font-mono text-[11px]">/openapi.json</code> (racine du service FastAPI).
+            <span className="mt-2 block">
+              <ButtonLink
+                variant="secondary"
+                size="sm"
+                href={
+                  process.env.NEXT_PUBLIC_API_URL
+                    ? `${process.env.NEXT_PUBLIC_API_URL.replace(/\/v1\/?$/, '')}/openapi.json`
+                    : 'https://api.cloud.dev01.ovh.smile.ci/openapi.json'
+                }
+                external
+                iconAfter={<ExternalLink size={13} />}
+              >
+                Télécharger openapi.json
+              </ButtonLink>
+            </span>
+          </Callout>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card>
               <CardHeader titre="Principes" sousTitre="Aucune surprise pour qui a déjà consommé une API REST." />

@@ -38,7 +38,7 @@ const RACCOURCIS = [
 ]
 
 export default function Lanceur() {
-  const { api, utilisateur } = useApp()
+  const { api, utilisateur, role } = useApp()
   // Le catalogue de sièges (`servicesAvecSiege`/`siegesDeLUtilisateur`) reste
   // une donnée de démonstration dans les deux modes : aucun module backend
   // n'existe encore pour l'attribution de sièges à un utilisateur réel
@@ -74,7 +74,14 @@ export default function Lanceur() {
         }
       />
 
-      {api && (
+      {api && role === 'service_admin' && (
+        <Callout ton="info" titre="Accueil adapté à votre rôle">
+          En tant qu’administrateur de services managés, vous arrivez ici plutôt que sur le tableau de
+          bord infrastructure. Facturation, support et sécurité restent accessibles via le menu ou les
+          raccourcis ci-dessous.
+        </Callout>
+      )}
+      {api && role !== 'service_admin' && (
         <Callout ton="info" titre="Services et sièges de démonstration">
           Le catalogue ci-dessous n’est pas encore branché sur votre organisation réelle : le
           backend expose déjà la souscription à un service managé et l’ouverture SSO en

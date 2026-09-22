@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import TableauDeBord from './tableau-de-bord'
+import AccueilClient from './accueil-client'
 
 // `TableauDeBord` est un composant client : il lit l'atelier et l'API pour
 // afficher des données réelles (`useCollection`, `useAtelier`), ce qu'un
@@ -18,5 +18,5 @@ export const metadata: Metadata = {
 }
 
 export default function Page() {
-  return <TableauDeBord />
+  return <AccueilClient />
 }

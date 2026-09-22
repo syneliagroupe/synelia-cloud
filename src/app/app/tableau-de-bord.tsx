@@ -32,15 +32,18 @@ import type {
   VM,
   WebHosting,
 } from '@/lib/types'
+import type { DriveDomaine, MessagerieDomaine } from '@/lib/mock'
 import {
   CATALOGUE,
   DOMAINES,
+  DRIVES,
   ESPACES,
   EVENEMENTS_SUPERVISION,
   FACTURES,
   HEBERGEMENTS,
   K8S_CLUSTERS,
   MEMBERSHIPS,
+  MESSAGERIES,
   ORG_COURANTE,
   PROJETS,
   SERVICES_MANAGES,
@@ -130,6 +133,8 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
   const memberships = useCollection<Membership>('memberships', MEMBERSHIPS)
   const domaines = useCollection<Domaine>('domaines', DOMAINES)
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
+  const messageries = useCollection<MessagerieDomaine>('messageries', MESSAGERIES)
+  const drives = useCollection<DriveDomaine>('drives', DRIVES)
   // Même motif que /app/securite : `journal` (atelier local) sert de repli,
   // `/audit` réel prime quand il répond — l'activité récente lisait jusqu'ici
   // uniquement le journal local, jamais le vrai journal d'audit en mode API.
@@ -249,7 +254,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
           titre="Mes ressources"
           sousTitre="Ce que vous possédez, où cliquer — comptages réels agrégés sur tous les univers."
         />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
           <Link href="/app/espaces" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Espaces</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{espacesN}</div>
@@ -270,6 +275,16 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{hebergements.items.length}</div>
             <div className="mt-1 text-[11px] text-g-500">serveurs web</div>
           </Link>
+          <Link href="/app/web/emails" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Messagerie</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{messageries.items.length}</div>
+            <div className="mt-1 text-[11px] text-g-500">domaines mail</div>
+          </Link>
+          <Link href="/app/web/drive" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Drive</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{drives.items.length}</div>
+            <div className="mt-1 text-[11px] text-g-500">espaces fichiers</div>
+          </Link>
           <Link href="/app/applications" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Projets</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{applicationsN}</div>
@@ -278,7 +293,22 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
           <Link href="/app/facturation" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Factures</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{factures.items.length}</div>
-            <div className="mt-1 text-[11px] text-g-500">{facturesImpayees.length} impayée(s)</div>
+            <div className="mt-1 text-[11px] text-g-500">
+              {facturesImpayees.length > 0
+                ? `${facturesImpayees.length} impayée(s)`
+                : factures.items.length === 0
+                  ? 'Aucune facture'
+                  : 'À jour'}
+            </div>
+          </Link>
+          <Link href="/app/support" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Support</div>
+            <div className="mt-1 text-[22px] font-bold leading-none text-ink">{ticketsOuverts.length}</div>
+            <div className="mt-1 text-[11px] text-g-500">
+              {attenteClient.length > 0
+                ? `${attenteClient.length} en attente de vous`
+                : 'tickets ouverts'}
+            </div>
           </Link>
         </div>
       </Card>
@@ -297,10 +327,21 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
         </div>
       </Card>
 
-      {/* ─── Ressources développeur (PLAN-UI 3.5) — lien hub, pas sur accueil général */}
-      <div className="flex justify-end">
-        <a href="/app/docs" className="text-[12px] font-semibold text-p-700 hover:text-m-600">Ressources développeur → API · CLI · Terraform</a>
-      </div>
+      {/* ─── Ressources développeur (PLAN-UI §3.5) — discret, hors bande SMB ─ */}
+      <Card className="border-dashed border-g-300 bg-g-050">
+        <CardHeader
+          titre="Ressources développeur"
+          sousTitre="API REST, CLI et Terraform — pour l’intégration technique, pas le pilotage quotidien."
+        />
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink href="/app/docs" variant="secondary" size="sm">
+            Documentation &amp; guides
+          </ButtonLink>
+          <ButtonLink href="/app/docs" variant="ghost" size="sm">
+            Référence API (onglet API)
+          </ButtonLink>
+        </div>
+      </Card>
 
       {/* ─── Bande 1 : chiffres clés ─────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -470,7 +511,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                 api
                   ? syntheseProjets
                     ? `${syntheseProjets.enEchec} sur ${syntheseProjets.services}`
-                    : '—'
+                    : 'Lecture en cours…'
                   : '2 sur 6'
               }
               ton={(api ? (syntheseProjets?.enEchec ?? 0) : 2) > 0 ? 'warn' : 'ok'}
@@ -595,9 +636,11 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
             <CardHeader titre="Facturation" />
             <dl className="space-y-2.5">
               <div className="flex items-baseline justify-between gap-2">
-                <dt className="text-[12.5px] text-g-500">Dépense du mois en cours</dt>
+                <dt className="text-[12.5px] text-g-500">Dépense du mois en cours ({periodeCourante})</dt>
                 <dd className="tnum text-[16px] font-bold [font-family:var(--font-display)] text-ink">
-                  {money(api ? depenseMoisReelle : s.depenseMois)}
+                  {api && depenseMoisReelle === 0 && factures.items.filter((f) => f.periode === periodeCourante).length === 0
+                    ? 'Aucune dépense ce mois'
+                    : money(api ? depenseMoisReelle : s.depenseMois)}
                 </dd>
               </div>
               {!api && (
@@ -671,7 +714,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
             )}
             <Link href="/app/facturation/ventilation" className="mt-2 block text-[11px] font-semibold text-p-700 hover:text-m-600">Voir ventilation →</Link>
             {factures.items.length === 0 && (
-              <p className="mt-3 text-center text-[12px] text-g-500">Aucune facture ce mois</p>
+              <p className="mt-3 text-center text-[12px] text-g-500">Aucune facture enregistrée pour cette organisation</p>
             )}
             {(api ? facturesImpayees.length : s.facturesEnAttente) > 0 && (
               <p className="mt-2 rounded-[6px] bg-err-bg px-2.5 py-2 text-[11.5px] text-err">
@@ -689,52 +732,68 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
               <Compteur libelle="Vous attendent" valeur={attenteClient.length} ton="err" />
               <Compteur libelle="Résolus" valeur={api ? ticketsResolus : 2} ton="ok" />
             </div>
-            <ul className="mt-3 space-y-2 border-t border-g-100 pt-3">
-              {ticketsOuverts
-                .slice()
-                .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
-                .slice(0, 3)
-                .map((t) => (
-                <li key={t.id}>
-                  <Link href={`/app/support/${t.id}`} className="group block">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 flex shrink-0 items-center gap-1">
-                        <Badge
-                          size="sm"
-                          tone={
-                            t.gravite === 'critique'
-                              ? 'err'
-                              : t.gravite === 'majeure'
-                                ? 'warn'
-                                : 'neutral'
-                          }
-                        >
-                          {t.numero}
-                        </Badge>
-                        <Badge
-                          size="sm"
-                          tone={t.statut === 'attente_client' ? 'warn' : t.statut === 'ouvert' ? 'err' : 'neutral'}
-                          className="hidden sm:inline-flex"
-                        >
-                          {t.statut === 'attente_client' ? 'Vous' : t.statut === 'ouvert' ? 'Ouvert' : t.statut}
-                        </Badge>
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] text-ink group-hover:text-p-700">
-                          {t.sujet}
-                        </span>
-                        {t.slaRestantMin !== undefined && (
-                          <span className="tnum block text-[10.5px] text-g-500">
-                            SLA restant : {Math.floor(t.slaRestantMin / 60)} h{' '}
-                            {String(t.slaRestantMin % 60).padStart(2, '0')}
+            {ticketsOuverts.length === 0 ? (
+              <p className="mt-3 border-t border-g-100 pt-3 text-center text-[12px] text-g-500">
+                Aucun ticket ouvert — tout est calme côté support.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-2 border-t border-g-100 pt-3">
+                {ticketsOuverts
+                  .slice()
+                  .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+                  .slice(0, 3)
+                  .map((t) => (
+                    <li key={t.id}>
+                      <Link href={`/app/support/${t.id}`} className="group block">
+                        <div className="flex items-start gap-2">
+                          <span className="mt-0.5 flex shrink-0 items-center gap-1">
+                            <Badge
+                              size="sm"
+                              tone={
+                                t.gravite === 'critique'
+                                  ? 'err'
+                                  : t.gravite === 'majeure'
+                                    ? 'warn'
+                                    : 'neutral'
+                              }
+                            >
+                              {t.numero}
+                            </Badge>
+                            <Badge
+                              size="sm"
+                              tone={
+                                t.statut === 'attente_client'
+                                  ? 'warn'
+                                  : t.statut === 'ouvert'
+                                    ? 'err'
+                                    : 'neutral'
+                              }
+                              className="hidden sm:inline-flex"
+                            >
+                              {t.statut === 'attente_client'
+                                ? 'En attente de vous'
+                                : t.statut === 'ouvert'
+                                  ? 'Ouvert'
+                                  : t.statut}
+                            </Badge>
                           </span>
-                        )}
-                      </span>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[12px] text-ink group-hover:text-p-700">
+                              {t.sujet}
+                            </span>
+                            {t.slaRestantMin !== undefined && (
+                              <span className="tnum block text-[10.5px] text-g-500">
+                                SLA restant : {Math.floor(t.slaRestantMin / 60)} h{' '}
+                                {String(t.slaRestantMin % 60).padStart(2, '0')}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+              </ul>
+            )}
             {/* Pas de planification de point d'exploitation réelle sur ce lab :
                 simplifié plutôt que de garder une date fabriquée en mode API. */}
             {!api && (

@@ -905,6 +905,8 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                   detail:
                     'Gratuit une fois par an et à la clôture. Vous recevrez un lien dès que l’archive est prête.',
                   job: { workflow: 'export.donnees', cible: 'données de l’organisation' },
+                  sansApi:
+                    'Indisponible : l’export complet multi-ressources n’est pas encore exposé par l’API.',
                 }}
               />
               <p className="mt-3 text-[11.5px] leading-relaxed text-g-500">
@@ -938,6 +940,12 @@ synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
                   variant="danger"
                   iconBefore={<Trash2 size={14} />}
                   onClick={() => setFermeture(true)}
+                  disabled={estActif()}
+                  title={
+                    estActif()
+                      ? 'Indisponible : la demande de clôture n’a pas encore de route backend équivalente.'
+                      : undefined
+                  }
                 >
                   Demander la clôture
                 </Button>

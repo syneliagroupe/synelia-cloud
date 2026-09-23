@@ -497,6 +497,8 @@ export function VueEspace({ id }: { id: string }) {
                             titre: `${c.nom} détaché de ${c.applicationId}`,
                             detail: 'Le cluster continue de tourner : seul le rattachement change.',
                             effet: () => grappes.modifier(c.id, { applicationId: undefined }),
+                            sansApi:
+                              'Indisponible : le rattachement d’un cluster à une application n’est pas un champ exposé par l’API (aucune trace côté backend, `PATCH /kubernetes/{id}` ne le porte pas).',
                           }}
                         />
                       ) : (
@@ -594,6 +596,20 @@ export function VueEspace({ id }: { id: string }) {
                                 ton: 'warn',
                                 titre: `Volume détaché de ${v.nom}`,
                                 detail: 'Le volume est conservé et reste facturé.',
+                                // Même route réelle que vms/[vm] et stockage : le détachement est un
+                                // DELETE dédié, pas un champ PATCH — PATCH /volumes/{id} n'accepte pas
+                                // attachedTo, donc effet seul (sans appel) envoyait un PATCH réel mais
+                                // vide (undefined disparaît de JSON.stringify) qui ne détachait rien.
+                                appel: () =>
+                                  Promise.all(
+                                    disques.items
+                                      .filter((d) => d.attachedTo === v.id)
+                                      .map((d) =>
+                                        requete(`/volumes/${encodeURIComponent(d.id)}/attachement`, {
+                                          methode: 'DELETE',
+                                        }),
+                                      ),
+                                  ),
                                 effet: () =>
                                   disques.modifierPlusieurs(
                                     disques.items
@@ -601,6 +617,7 @@ export function VueEspace({ id }: { id: string }) {
                                       .map((d) => d.id),
                                     { attachedTo: undefined, attachedLabel: undefined, montage: undefined },
                                   ),
+                                effetFinal: () => disques.recharger(),
                               }}
                             />
                           </td>

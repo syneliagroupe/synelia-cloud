@@ -360,6 +360,8 @@ export default function Stockage() {
                 titre: `Snapshot de ${ids.length} volume(s) demandé`,
                 detail:
                   'Un snapshot de volume vit sur le même stockage : ce n’est pas une sauvegarde hors site.',
+                sansApi:
+                  'Indisponible : la prise de snapshot d’un volume n’est pas encore exposée par l’API.',
                 job: {
                   type: 'volume.snapshot',
                   label: `Snapshot · ${ids.length} volume(s)`,

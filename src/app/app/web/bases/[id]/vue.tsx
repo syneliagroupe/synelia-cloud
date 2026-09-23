@@ -571,6 +571,8 @@ export function VueServeurBases({ id }: { id: string }) {
                       ton: 'info',
                       titre: 'Restauration lancée',
                       detail: `La copie est créée à côté de l’originale, qui reste intacte.`,
+                      sansApi:
+                        'Indisponible : restaurer une base à un point de sauvegarde antérieur n’est pas encore exposé par l’API (seul l’import d’une archive déjà téléversée l’est).',
                       job: { workflow: 'web.db.restore', cible: `${nomCopie ?? baseRestauree ?? s.bases[0]?.nom ?? 'base'}` },
                       effetFinal: () => {
                         const nomFinal =

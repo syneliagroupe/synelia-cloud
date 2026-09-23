@@ -221,18 +221,11 @@ export default function Securite() {
         titre="Sécurité et audit"
         sousTitre="Tout ce qui est fait sur votre organisation est enregistré : qui, quoi, quand, depuis quelle adresse, avec quel résultat. Les refus aussi — c’est souvent la ligne la plus utile du journal."
         actions={
-          <BoutonAction
-            libelle="Exporter le journal"
-            size="md"
-            icone={<Download size={14} />}
-            operation={{
-              action: 'compliance.export',
-              titre: 'Export du journal en préparation',
-              detail:
-                'Le lien de téléchargement arrive par courriel et expire après 24 heures. L’empreinte de chaînage permet de vérifier que rien n’a été retouché.',
-              effet: () => setOnglet('export'),
-            }}
-          />
+          <GatedAction autorise={autorise('compliance.export')} message={refus('compliance.export')}>
+            <Button size="md" iconBefore={<Download size={14} />} onClick={() => setOnglet('export')}>
+              Exporter le journal
+            </Button>
+          </GatedAction>
         }
         meta={
           <>

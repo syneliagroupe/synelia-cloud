@@ -674,6 +674,8 @@ function Sauvegardes({ service }: { service: ServiceProjet }) {
                   action: 'backup.plan.write',
                   titre: `Sauvegarde de ${service.nom} lancée`,
                   detail: `Destination : ${s.destination}`,
+                  sansApi:
+                    'Indisponible : la sauvegarde à la demande n’est pas encore exposée pour les services applicatifs (elle existe pour les VM, les bases managées et le web cloud).',
                   job: {
                     type: 'base.backup',
                     label: `Sauvegarde · ${service.nom}`,
@@ -709,6 +711,8 @@ function Sauvegardes({ service }: { service: ServiceProjet }) {
                     ton: 'info',
                     titre: `Restauration du ${dateHeure(p.date)}`,
                     detail: 'Une nouvelle base est créée : l’originale n’est jamais écrasée.',
+                    sansApi:
+                      'Indisponible : la restauration n’est pas encore exposée pour les services applicatifs (elle existe pour les VM, les bases et le web cloud).',
                     job: { workflow: 'web.db.restore', cible: service.nom },
                   }}
                 />
@@ -749,6 +753,8 @@ function Sauvegardes({ service }: { service: ServiceProjet }) {
               ton: 'info',
               titre: `Restauration vers ${baseCible.trim()} lancée`,
               detail: `Les journaux de transaction sont rejoués jusqu’au ${instant.replace('T', ' à ')}. La base d’origine n’est pas touchée : la restauration crée une nouvelle base.`,
+              sansApi:
+                'Indisponible : la restauration n’est pas encore exposée pour les services applicatifs (elle existe pour les VM, les bases et le web cloud).',
               job: {
                 type: 'base.pitr',
                 label: `Restauration à un instant précis · ${baseCible.trim()}`,
@@ -1867,6 +1873,8 @@ function Avance({ service }: { service: ServiceProjet }) {
                         ? `, sonde de santé sur ${sonde}`
                         : ''
                     }. Effet au prochain démarrage du conteneur.`,
+              sansApi:
+                'Indisponible : la politique de redémarrage et la sonde de santé ne sont pas encore exposées par l’API — seules les ressources (vCPU/RAM) le sont.',
               effet: () => services.modifier(service.id, { derniereMaj: MAINTENANT }),
             }}
           />
@@ -2114,6 +2122,8 @@ function Sieges({ service }: { service: ServiceProjet }) {
                     titre: `Siège de ${m.n} retiré`,
                     detail:
                       'La personne est déconnectée, ses données restent, et le siège se réattribue immédiatement.',
+                    sansApi:
+                      'Indisponible : le retrait d’un siège n’est pas encore exposé par l’API pour un service applicatif.',
                     effet: () =>
                       services.modifier(service.id, (x) => ({
                         sieges: x.sieges
@@ -2229,6 +2239,8 @@ function Versions({ service }: { service: ServiceProjet }) {
                     ton: 'warn',
                     titre: `Retour à la version ${h.v}`,
                     detail: 'Les données créées depuis la mise à jour sont conservées ; le schéma revient en arrière.',
+                    sansApi:
+                      'Indisponible : le retour à une version antérieure n’est pas encore exposé par l’API pour un service applicatif.',
                     job: {
                       type: 'modele.rollback',
                       label: `Retour arrière · ${service.nom} → ${h.v}`,
@@ -2275,6 +2287,8 @@ function Reversibilite({ service }: { service: ServiceProjet }) {
                 action: 'compliance.export',
                 titre: `Export de ${modele.solution} demandé`,
                 detail: `Format natif documenté · ${modele.sauvegardeParDefaut.inclut.join(' · ')}. Mise à disposition sous 24 h.`,
+                sansApi:
+                  'Indisponible : l’export de réversibilité n’est pas encore exposé par l’API pour un service applicatif.',
                 job: { workflow: 'export.donnees', cible: service.nom },
               }}
             />

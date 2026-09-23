@@ -1138,6 +1138,8 @@ export function VueOrganisation({ id }: { id: string }) {
                           titre: `Élévation de ${e.qui} révoquée`,
                           detail:
                             'L’accès est coupé immédiatement et la révocation apparaît dans l’audit de l’organisation, au même titre que l’élévation.',
+                          sansApi:
+                            'Indisponible : la révocation d’une élévation depuis la fiche organisation n’est pas encore exposée par l’API.',
                           effet: () => elevations.modifier(e.id, { actif: false }),
                         }}
                       />
@@ -1201,6 +1203,8 @@ export function VueOrganisation({ id }: { id: string }) {
                         titre: `Procédure de clôture ouverte pour ${org.nom}`,
                         detail:
                           '30 jours de récupération, 30 jours de conservation en lecture, puis effacement avec attestation. Rien n’est supprimé aujourd’hui.',
+                        sansApi:
+                          'Indisponible : l’ouverture d’une procédure de clôture avec calendrier de réversibilité n’est pas encore exposée par l’API (seule la fermeture immédiate l’est).',
                         job: { workflow: 'compte.cloture', cible: org.nom },
                       }}
                       confirmation={{

@@ -554,6 +554,8 @@ users:
                                 titre: 'Drainage du nœud lancé',
                                 detail:
                                   'Les pods sont évacués en respectant les budgets de perturbation. Si un budget bloque, nous ne forçons pas.',
+                                sansApi:
+                                  'Indisponible : le drainage d’un nœud pris individuellement n’est pas encore exposé par l’API (seul le pool peut être redimensionné ou supprimé, ce qui draine ses nœuds).',
                                 job: {
                                   type: 'k8s.node.drain',
                                   label: `Drainage d’un nœud · ${cluster.nom}`,

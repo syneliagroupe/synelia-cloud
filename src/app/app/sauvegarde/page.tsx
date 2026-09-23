@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Download, FileDown, Plus, RotateCcw, Shield, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { dateCourte, dateHeure, dureeMin, goHumain, num, pct } from '@/lib/format'
+import { MAINTENANT, dateCourte, dateHeure, dureeMin, goHumain, num, pct } from '@/lib/format'
 import { SITE_COURT } from '@/lib/types'
 import type { BackupPlan, ConformiteLigne, DRPlan, RestorePoint, VM, Volume } from '@/lib/types'
 import { BACKUP_PLANS, BUCKETS, CONFORMITE, DR_PLANS, RESTORE_POINTS, VMS, VOLUMES } from '@/lib/mock'
@@ -23,7 +23,13 @@ import { Regle321 } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource, estActif, modifierRessource, supprimerRessource } from '@/lib/api/client'
+import {
+  creerRessource,
+  estActif,
+  modifierRessource,
+  requete,
+  supprimerRessource,
+} from '@/lib/api/client'
 
 /** Valeurs du formulaire de plan — le tiroir doit être contrôlé pour
  *  qu'« Enregistrer » ait quelque chose à enregistrer. */
@@ -1299,6 +1305,15 @@ function OngletConformite() {
                   detail:
                     'PDF horodaté : état de protection, RPO constaté, règle 3-2-1 et dernier test de restauration par ressource.',
                   job: { workflow: 'export.plateforme', cible: 'conformité des sauvegardes' },
+                  appel: () =>
+                    requete('/conformite/rapports', {
+                      methode: 'POST',
+                      corps: {
+                        referentiel: '3-2-1',
+                        periode: MAINTENANT.slice(0, 7),
+                        perimetre: CONFORMITE_ITEMS.map((c) => c.ressourceId),
+                      },
+                    }),
                 }}
               />
             }

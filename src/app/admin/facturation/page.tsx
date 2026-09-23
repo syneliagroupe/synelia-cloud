@@ -604,6 +604,8 @@ export default function FacturationAdmin() {
                           titre: 'Recomptage lancé sur AMUGA',
                           detail:
                             'Le transfert sortant est recalculé depuis les journaux du répartiteur de charge, sur les trente derniers jours.',
+                          sansApi:
+                            'Indisponible : le recomptage automatisé des compteurs de facturation n’est pas encore exposé par l’API.',
                           job: {
                             type: 'metering.recount',
                             label: 'Recomptage du transfert sortant · AMUGA',
@@ -666,6 +668,8 @@ export default function FacturationAdmin() {
                         ton: 'warn',
                         titre: 'Anomalie rouverte',
                         detail: 'La facture repasse en attente de vérification avant émission.',
+                        sansApi:
+                          'Indisponible : la réouverture d’une anomalie de facturation n’est pas encore exposée par l’API.',
                         effet: () => setAnomalie('ouverte'),
                       }}
                     />

@@ -1213,6 +1213,8 @@ export function VueVm({ id }: { id: string }) {
                             action: 'vm.create_delete',
                             titre: `Clone de « ${s.nom} » lancé`,
                             detail: 'Une nouvelle machine est créée depuis ce snapshot.',
+                            sansApi:
+                              'Indisponible : cloner une machine virtuelle depuis un instantané n’est pas encore exposé par l’API.',
                             job: {
                               type: 'vm.clone',
                               label: `Clone depuis ${s.nom}`,

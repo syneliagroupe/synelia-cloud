@@ -416,6 +416,8 @@ export default function Sso() {
                     ton: 'info',
                     titre: 'Synchronisation de l’annuaire lancée',
                     detail: 'Les mouvements d’équipe de votre annuaire sont rejoués sur les rôles.',
+                    sansApi:
+                      'Indisponible : la synchronisation des groupes de l’annuaire avec les rôles n’est pas encore exposée par l’API.',
                     job: {
                       type: 'sso.sync',
                       label: 'Synchronisation de l’annuaire',

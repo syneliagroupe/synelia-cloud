@@ -543,6 +543,8 @@ export default function SantePlateforme() {
                         titre: `Rapport d’incident ${i.id} généré`,
                         detail:
                           'Chronologie, cause racine, impact client et actions correctives — le document qu’on remet au client sans qu’il le demande.',
+                        sansApi:
+                          'Indisponible : la génération d’un rapport de postmortem d’incident n’est pas encore exposée par l’API.',
                         job: {
                           type: 'incident.report',
                           label: `Rapport d’incident · ${i.titre}`,

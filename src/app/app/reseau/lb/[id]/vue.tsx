@@ -713,6 +713,8 @@ export function VueLb({ id }: { id: string }) {
                     action: 'lb.create',
                     ton: 'info',
                     titre: 'Renouvellement ACME lancé',
+                    sansApi:
+                      'Indisponible : le renouvellement du certificat TLS d’un load balancer n’est pas encore exposé par l’API.',
                     job: {
                       type: 'lb.tls.renew',
                       label: `Renouvellement TLS · ${lb.nom}`,

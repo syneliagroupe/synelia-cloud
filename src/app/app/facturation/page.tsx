@@ -981,6 +981,8 @@ export default function Facturation() {
                     action: 'invoice.view',
                     titre: 'Rapport de refacturation généré',
                     detail: 'Envoyé aux responsables de centre de coût, avec la ventilation par étiquette.',
+                    sansApi:
+                      'Indisponible : la génération du rapport de refacturation n’est pas encore exposée par l’API.',
                     job: {
                       type: 'showback.report',
                       label: 'Rapport de refacturation du mois',

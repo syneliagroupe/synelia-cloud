@@ -738,6 +738,8 @@ export default function MarketplaceAdmin() {
                             // exactement ce que le point d'arrêt autorise.
                             // Sans équivalent côté API (pas de `PATCH`
                             // campagnes) : maquette uniquement.
+                            sansApi:
+                              'Indisponible : lever un point d’arrêt ou clôturer une campagne n’est pas encore exposé par l’API (seuls le lancement et la suspension le sont).',
                             effet: () =>
                               campagnes.modifier(c.id, (camp) => {
                                 const suivantes = (camp.vagues ?? []).map((v) =>

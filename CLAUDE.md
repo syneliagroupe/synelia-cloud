@@ -33,6 +33,7 @@ décisions déjà prises.
 | Audit du rendu | `bun run build && bun run start` puis `node outils/audit.mjs` |
 | Contrat d'API | `bun run api:spec` — régénère `docs/api/openapi.json` |
 | Tests unitaires | `bun run test` (= `bun test src`, borné à `src/` — le glob par défaut de bun matcherait aussi `tests/integration/*.spec.ts`) |
+| Couverture | `bun run test:coverage` — texte au terminal + `coverage/lcov.info` ; ne mesure que les 3 fichiers testés (`src/lib/api/client.ts`, `collections.ts`, `auth/verification.ts`), pas l'app entière (aucun test de composant/écran n'existe encore) |
 | Tests d'intégration (backend réel) | `bun run test:integration` — `tests/integration/`, à la main, voir son en-tête |
 | Dérive du contrat | `bun run api:derive` — `types.ts` ↔ `openapi.json`, informatif |
 

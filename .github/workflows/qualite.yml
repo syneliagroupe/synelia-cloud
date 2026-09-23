@@ -28,10 +28,11 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
-      # `bun run test`, pas `bun test` : le glob par défaut de bun matche aussi
-      # `tests/integration/*.spec.ts` (Playwright, backend réel dev01) — le
-      # script npm le borne à `src/`.
-      - run: bun run test
+      # `bun run test:coverage`, pas `bun test` : le glob par défaut de bun
+      # matche aussi `tests/integration/*.spec.ts` (Playwright, backend réel
+      # dev01) — le script npm le borne à `src/`, `--coverage` en plus pour
+      # avoir le chiffre à chaque run sans repasser par un outil séparé.
+      - run: bun run test:coverage
       - run: bun run api:derive
         env:
           CONTRAT_STRICT: '1'

@@ -13,6 +13,7 @@
     "api:spec": "node outils/openapi/index.mjs",
     "api:derive": "node outils/contrat/derive.mjs",
     "test": "bun test src",
+    "test:coverage": "bun test src --coverage",
     "test:integration": "playwright test -c tests/integration/playwright.config.ts"
   },
   "dependencies": {

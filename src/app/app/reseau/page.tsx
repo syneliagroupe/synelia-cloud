@@ -22,6 +22,20 @@ import {
   requete,
   supprimerRessource,
 } from '@/lib/api/client'
+import { telechargerTexte } from '@/lib/export'
+
+interface ProfilOvpnReponse {
+  nom: string
+  configuration: string
+}
+
+function telechargerProfilOvpn(tunnelId: string, profilNom: string): Promise<void> {
+  return requete<ProfilOvpnReponse>(
+    `/vpn/${encodeURIComponent(tunnelId)}/profils/${encodeURIComponent(profilNom)}`,
+  ).then((r) =>
+    telechargerTexte(`${r.nom}.ovpn`, r.configuration, 'application/x-openvpn-profile'),
+  )
+}
 
 const ONGLETS = [
   { id: 'prives', label: 'Réseaux privés' },
@@ -865,12 +879,11 @@ export default function Reseau() {
                 </table>
               </div>
             )}
-            {tunnels.some((t) => t.statut === 'negociation') && (
-              <Callout ton="warn" className="mt-4" titre="Un tunnel est en cours de négociation">
-                Le tunnel vers l’agence de Yamoussoukro renégocie sa phase 2 depuis plusieurs
-                minutes. Vérifiez que les paramètres de chiffrement et les réseaux annoncés
-                correspondent de part et d’autre — un désaccord sur les sélecteurs de trafic est la
-                cause la plus fréquente.
+            {tunnels.some((t) => t.type === 'ipsec' && t.statut === 'negociation') && (
+              <Callout ton="warn" className="mt-4" titre="Un tunnel IPsec est en négociation">
+                La phase 2 IKE n’est pas encore établie. Vérifiez la passerelle distante, les
+                réseaux annoncés et les paramètres IKEv2 des deux côtés — un désaccord sur les
+                sélecteurs de trafic est la cause la plus fréquente.
               </Callout>
             )}
           </Card>
@@ -894,13 +907,27 @@ export default function Reseau() {
                   libelleValider="Générer"
                   operation={(v) => ({
                     titre: `Profil ${v.nom} généré`,
-                    detail: 'Le fichier .ovpn est disponible pendant 24 heures.',
-                    appel: () => {
+                    toast: false,
+                    appel: async () => {
                       const ssl = tunnels.find((t) => t.type === 'ssl')
-                      return creerRessource(
-                        `/vpn/${encodeURIComponent(ssl?.id ?? 'ssl')}/profils`,
+                      const tunnelId = ssl?.id ?? 'ssl'
+                      const r = await creerRessource<ProfilOvpnReponse>(
+                        `/vpn/${encodeURIComponent(tunnelId)}/profils`,
                         { nom: String(v.nom), utilisateur: String(v.utilisateur) },
                       )
+                      if (
+                        r &&
+                        typeof r === 'object' &&
+                        'configuration' in r &&
+                        typeof r.configuration === 'string'
+                      ) {
+                        telechargerTexte(
+                          `${r.nom}.ovpn`,
+                          r.configuration,
+                          'application/x-openvpn-profile',
+                        )
+                      }
+                      return r
                     },
                     effet: () =>
                       lesTunnels.modifier(
@@ -931,7 +958,10 @@ export default function Reseau() {
                       {t.statut === 'up' ? 'Service actif' : 'Service arrêté'}
                     </Badge>
                     <span className="text-[12px] text-g-500">
-                      Pool d’adresses clientes : 10.99.0.0/24
+                      Pool clients OpenVPN : 10.8.0.0/24
+                      {(t.reseauxAnnonces?.length ?? 0) > 0
+                        ? ` · route vers ${t.reseauxAnnonces?.join(', ')}`
+                        : null}
                     </span>
                   </div>
                   <div className="space-y-2">
@@ -963,9 +993,16 @@ export default function Reseau() {
                                 variant="ghost"
                                 icone={<Download size={12} />}
                                 operation={{
-                                  ton: 'info',
+                                  action: 'network.manage',
                                   titre: `Profil ${p.nom} téléchargé`,
-                                  detail: 'Le certificat client n’est téléchargeable qu’une fois : conservez-le.',
+                                  toast: false,
+                                  audit: false,
+                                  ...(estActif()
+                                    ? { appel: () => telechargerProfilOvpn(t.id, p.nom) }
+                                    : {
+                                        sansApi:
+                                          'Connectez l’API (NEXT_PUBLIC_API_URL) pour télécharger un profil réel.',
+                                      }),
                                 }}
                               />
                               <BoutonAction

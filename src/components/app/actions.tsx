@@ -72,6 +72,8 @@ export interface SpecOperation {
         scope?: AuditEvent['scope']
         detail?: string
       }
+  /** Pas de toast succès — l’effet est déjà visible (téléchargement, navigation). Les erreurs restent toastées. */
+  toast?: false
 }
 
 export function useOperation() {
@@ -176,7 +178,9 @@ export function useOperation() {
               // lieu côté backend, on réconcilie sans rejouer `effet`.
               spec.effetFinal?.()
               trace('ok')
-              pousser({ ton: spec.ton ?? 'ok', titre: spec.titre, detail: spec.detail })
+              if (spec.toast !== false) {
+                pousser({ ton: spec.ton ?? 'ok', titre: spec.titre, detail: spec.detail })
+              }
             }
           },
           (e: unknown) => echec(e),

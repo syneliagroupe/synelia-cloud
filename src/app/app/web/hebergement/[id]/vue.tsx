@@ -26,6 +26,7 @@ import { SITE_LABEL } from '@/lib/types'
 import type {
   BaseHebergement,
   CompteFichiers,
+  Domaine,
   SiteWeb,
   TachePlanifieeWeb,
   WebHosting,
@@ -35,7 +36,9 @@ import {
   HEBERGEMENTS,
   CATALOGUE_PARTAGE,
   COMPTES_FICHIERS,
+  DOMAINES,
   LOGS_EXECUTION,
+  ORG_COURANTE,
   SERVEURS_BASES,
   SITES_WEB,
   TACHES_WEB,
@@ -117,6 +120,7 @@ export function VueHebergement({ id }: { id: string }) {
   const tousComptes = useCollection<CompteFichiers>('comptes-fichiers', COMPTES_FICHIERS)
   const toutesTaches = useCollection<TachePlanifieeWeb>('taches-web', TACHES_WEB)
   const serveursBases = useCollection<ServeurBases>('serveurs-bases', SERVEURS_BASES)
+  const lesDomaines = useCollection<Domaine>('domaines', DOMAINES)
   /** Mot de passe remplacé d’un compte de transfert — montré une fois. */
   const [secretCompte, setSecretCompte] = useState<{ utilisateur: string; motDePasse: string } | null>(null)
   /** `GET /web/hebergements/{id}/metriques` : `424` → intégration nommée à la place des courbes. */
@@ -154,6 +158,13 @@ export function VueHebergement({ id }: { id: string }) {
   const baseOuverte = toutesBases.items.find((x) => x.id === baseOuverteId) ?? null
   const nom = nomServi(h)
   const abonnement = entree ? abonnementDeLEntree(entree) : null
+  // Domaines possédés par l'organisation, pas encore attachés à un hébergement (« un
+  // domaine, un serveur ») — proposés pour l'attachement direct, plutôt que de forcer
+  // un rachat quand le domaine existe déjà.
+  const domainesConnus = estActif()
+    ? lesDomaines.items
+    : DOMAINES.filter((d) => d.orgId === ORG_COURANTE.id)
+  const domainesDisponibles = domainesConnus.filter((d) => !d.hebergementId)
 
   return (
     <div className="space-y-5">
@@ -284,9 +295,43 @@ export function VueHebergement({ id }: { id: string }) {
           ton="warn"
           titre="L’hébergement tourne sur un nom provisoire"
           action={
-            <ButtonLink href="/app/web" size="sm" variant="secondary">
-              Acheter un domaine
-            </ButtonLink>
+            <div className="flex flex-wrap items-center gap-2">
+              {domainesDisponibles.length > 0 && (
+                <BoutonFormulaire
+                  libelle="Attacher un domaine possédé"
+                  action="network.manage"
+                  titre="Attacher un domaine à cet hébergement"
+                  description="Le domaine déjà enregistré est routé vers ce serveur ; un domaine ne peut être attaché qu’à un seul hébergement à la fois."
+                  champs={[
+                    {
+                      id: 'domaine',
+                      label: 'Domaine',
+                      type: 'select',
+                      obligatoire: true,
+                      options: domainesDisponibles.map((d) => ({ value: d.nom, label: d.nom })),
+                    },
+                  ]}
+                  libelleValider="Attacher"
+                  operation={(v) => ({
+                    titre: `${v.domaine} attaché à ${h.serveur.nom}`,
+                    appel: () =>
+                      requete(`/web/hebergements/${encodeURIComponent(h.id)}/attachement-domaine`, {
+                        methode: 'POST',
+                        corps: { domaine: String(v.domaine) },
+                      }),
+                    effet: () =>
+                      hebergements.modifier(h.id, (x) => ({ domaine: String(v.domaine) })),
+                    effetFinal: () => {
+                      hebergements.recharger()
+                      lesDomaines.recharger()
+                    },
+                  })}
+                />
+              )}
+              <ButtonLink href="/app/web" size="sm" variant="secondary">
+                Acheter un domaine
+              </ButtonLink>
+            </div>
           }
         >
           Vos sites sont servis sur <span className="font-mono">{h.domaineProvisoire}</span>, avec un

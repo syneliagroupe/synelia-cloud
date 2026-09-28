@@ -52,9 +52,8 @@ export default function SantePlateforme() {
   const jobs = useCollection<ProvisioningJob>('jobs-plateforme', JOBS_PLATEFORME)
   const { reprendreJob } = useAtelier()
   const incidents = useCollection<Incident>('incidents', INCIDENTS)
-  // Pas de `GET` pour les états publiés (seul `PUT /admin/statut/services`
-  // existe) : la collection porte le local, l’appel pousse la liste entière.
-  // `nom` sert d’identifiant, retiré du corps envoyé.
+  // `GET /admin/statut/services` en lecture ; `PUT` pousse la liste entière.
+  // `nom` sert d’identifiant côté UI, retiré du corps envoyé.
   const statutsServices = useCollection<StatutService & { id: string }>(
     'statut-services',
     STATUT_SERVICES.map((s) => ({ ...s, id: s.nom })),

@@ -7,6 +7,7 @@ import { money, num, pct, TVA_PCT, ventilationTva } from '@/lib/format'
 import { telechargerCsv } from '@/lib/export'
 import {
   HYPOTHESES_COMPARATEUR,
+  OFFRES,
   REFERENCES_COMPARATEUR,
   TARIFS_UNITAIRES as T,
 } from '@/lib/mock'
@@ -16,6 +17,8 @@ import { Field, Input, SegmentedControl, Select, Slider, Switch, Textarea } from
 import { Tabs } from '@/components/ui/display'
 import { Modal } from '@/components/ui/overlay'
 import { estActif, requete } from '@/lib/api/client'
+import { usePublic } from '@/lib/api/public'
+import type { FicheCataloguePublique, TarifsPublics } from '@/lib/api/vitrine'
 import { Callout, Card, CardHeader } from '@/components/composition/card'
 import { Container, HeroCourt, SiteSection, AppelFinal } from '@/components/site/blocs'
 
@@ -66,7 +69,52 @@ export function VueSimulateur() {
 
 // ─── Configurateur ────────────────────────────────────────────────────
 
+/** Forfaits « Espace Cloud » du catalogue dont l'enveloppe (« 12 vCPU · 48 Go · 2 To ») couvre le besoin. */
+function forfaitCouvrant(offres: typeof OFFRES, vcpu: number, ram: number, stockageGo: number) {
+  return offres
+    .filter((o) => o.categorie === 'espace_cloud' && o.statut === 'publiee')
+    .map((o) => {
+      const m = o.specs.match(/(\d+) vCPU · (\d+) Go · (\d+) (To|Go)/)
+      if (!m) return null
+      return { offre: o, vcpu: +m[1], ram: +m[2], go: +m[3] * (m[4] === 'To' ? 1000 : 1) }
+    })
+    .filter((f) => f && f.vcpu >= vcpu && f.ram >= ram && f.go >= stockageGo)
+    .sort((a, b) => a!.offre.prix - b!.offre.prix)[0]?.offre
+}
+
+const prixGo = (x: number) => `${String(x).replace('.', ',')} FCFA`
+
+type PalierCatalogue = NonNullable<FicheCataloguePublique['paliers']>[number]
+
+/**
+ * Chiffre `n` unités d'un service du catalogue publié : premier palier dont la
+ * capacité (« 50 sièges », « 25 boîtes »…) couvre `n`, à défaut le dernier.
+ * Prix au siège si le palier en publie un, sinon prix mensuel forfaitaire.
+ */
+function chiffrerCatalogue(
+  fiche: FicheCataloguePublique | undefined,
+  n: number,
+): { montant: number; detail: string } | null {
+  const paliers: PalierCatalogue[] = fiche?.paliers ?? []
+  if (paliers.length === 0 || n <= 0) return null
+  const capacite = (p: PalierCatalogue) => Number(p.specs.match(/(\d+)\s+(?:sièges|boîtes|utilisateurs|participants)/)?.[1]) || Infinity
+  const p = paliers.find((x) => capacite(x) >= n) ?? paliers[paliers.length - 1]
+  if (p.prixSiege) return { montant: n * p.prixSiege, detail: `${n} sièges × ${money(p.prixSiege)} · palier ${p.nom}` }
+  if (p.prixMois) return { montant: p.prixMois, detail: `Forfait mensuel · palier ${p.nom} (${p.specs})` }
+  return null
+}
+
 function Configurateur() {
+  // Mode API : les prix viennent de la grille et du catalogue publiés
+  // (`/public/tarifs`, `/public/catalogue/services`), jamais des jeux locaux.
+  const api = estActif()
+  const catalogue = usePublic<{ donnees: FicheCataloguePublique[] }>('/public/catalogue/services').donnees?.donnees
+  const grille = usePublic<TarifsPublics>('/public/tarifs').donnees
+  const offresPubliees = useMemo(
+    () => (api ? (grille?.familles ?? []).flatMap((f) => f.offres) : OFFRES),
+    [api, grille],
+  )
+  const fiche = (slug: string) => catalogue?.find((f) => f.slug === slug)
   const [volet, setVolet] = useState<'espace' | 'marketplace' | 'web'>('espace')
   const [annuel, setAnnuel] = useState(false)
 
@@ -76,9 +124,9 @@ function Configurateur() {
   const [stockage, setStockage] = useState(6000)
   const [nvme, setNvme] = useState(true)
   const [ips, setIps] = useState(4)
-  const [antiDdos, setAntiDdos] = useState(true)
+  const [antiDdos, setAntiDdos] = useState(!estActif())
   const [lbs, setLbs] = useState(1)
-  const [sauvegarde, setSauvegarde] = useState(4000)
+  const [sauvegarde, setSauvegarde] = useState(estActif() ? 0 : 4000)
   const [objet, setObjet] = useState(4000)
   const [k8s, setK8s] = useState<'aucun' | 'single' | 'ha'>('ha')
 
@@ -101,7 +149,7 @@ function Configurateur() {
       { libelle: 'Mémoire', detail: `${ram} Go × ${money(T.ramGo)}`, montant: ram * T.ramGo },
       {
         libelle: `Stockage ${nvme ? 'NVMe' : 'SSD'}`,
-        detail: `${num(stockage)} Go × ${money(nvme ? T.stockageGoNvme : T.stockageGoSsd)}`,
+        detail: `${num(stockage)} Go × ${prixGo(nvme ? T.stockageGoNvme : T.stockageGoSsd)}`,
         montant: Math.round(stockage * (nvme ? T.stockageGoNvme : T.stockageGoSsd)),
       },
     ]
@@ -126,13 +174,13 @@ function Configurateur() {
     if (sauvegarde > 0)
       l.push({
         libelle: 'Sauvegarde immuable',
-        detail: `${num(sauvegarde)} Go × ${money(T.sauvegardeGo)}`,
+        detail: `${num(sauvegarde)} Go × ${prixGo(T.sauvegardeGo)}`,
         montant: Math.round(sauvegarde * T.sauvegardeGo),
       })
     if (objet > 0)
       l.push({
         libelle: 'Stockage objet (chaud)',
-        detail: `${num(objet)} Go × ${money(T.objetGoChaud)}`,
+        detail: `${num(objet)} Go × ${prixGo(T.objetGoChaud)}`,
         montant: Math.round(objet * T.objetGoChaud),
       })
     if (k8s !== 'aucun')
@@ -144,6 +192,19 @@ function Configurateur() {
   }, [vcpu, ram, stockage, nvme, ips, antiDdos, lbs, sauvegarde, objet, k8s])
 
   const lignesMarketplace = useMemo<Ligne[]>(() => {
+    if (api) {
+      const services: Array<[string, string, number]> = [
+        ['drive-pro', 'Drive Pro', drive],
+        ['email-pro', 'Email Pro', mail],
+        ['visio', 'Visio', visio],
+        ['coffre', 'Coffre de mots de passe', coffre],
+        ['erp', 'ERP', erp],
+      ]
+      return services.flatMap(([slug, nom, n]) => {
+        const c = chiffrerCatalogue(fiche(slug), n)
+        return c ? [{ libelle: nom, detail: c.detail, montant: c.montant }] : []
+      })
+    }
     const maj = dedie ? T.majorationDedie : 1
     const services: Array<[string, number, number]> = [
       ['Drive Pro', drive, T.siegeDrive],
@@ -159,10 +220,24 @@ function Configurateur() {
         detail: `${n} sièges × ${money(prix)}${dedie ? ' + 20 %' : ''}`,
         montant: Math.round(n * prix * maj),
       }))
-  }, [dedie, drive, mail, visio, coffre, erp])
+  }, [api, catalogue, dedie, drive, mail, visio, coffre, erp])
 
   const lignesWeb = useMemo<Ligne[]>(() => {
     const l: Ligne[] = []
+    if (api) {
+      const entree = (slug: string) => fiche(slug)?.paliers?.find((p) => p.prixMois)
+      const mutualise = (grille?.familles.find((f) => f.code === 'web')?.offres ?? [])
+        .filter((o) => o.statut !== 'brouillon' && !o.surDevis && o.prix > 0)
+        .sort((a, b) => a.prix - b.prix)[0]
+      const lignes: Array<[string, number, { nom: string; prix: number } | undefined]> = [
+        ['Hébergement web', webMut, mutualise && { nom: mutualise.nom, prix: mutualise.prix }],
+        ['WordPress managé', webWp, entree('wordpress') && { nom: `palier ${entree('wordpress')!.nom}`, prix: entree('wordpress')!.prixMois! }],
+        ['PrestaShop managé', webPresta, entree('prestashop') && { nom: `palier ${entree('prestashop')!.nom}`, prix: entree('prestashop')!.prixMois! }],
+      ]
+      for (const [libelle, n, p] of lignes)
+        if (n > 0 && p) l.push({ libelle, detail: `${n} × ${money(p.prix)} · ${p.nom}`, montant: n * p.prix })
+      return l
+    }
     if (webMut > 0)
       l.push({
         libelle: 'Hébergement mutualisé',
@@ -182,11 +257,13 @@ function Configurateur() {
         montant: webPresta * T.webPrestashop,
       })
     return l
-  }, [webMut, webWp, webPresta])
+  }, [api, catalogue, grille, webMut, webWp, webPresta])
 
+  const forfait = forfaitCouvrant(offresPubliees, vcpu, ram, stockage)
+  const coutEspace = lignesEspace.reduce((a, l) => a + l.montant, 0)
   const toutes = [...lignesEspace, ...lignesMarketplace, ...lignesWeb]
   const sousTotal = toutes.reduce((a, l) => a + l.montant, 0)
-  const reduction = annuel ? Math.round(sousTotal * T.remiseAnnuelle) : 0
+  const reduction = annuel && !api ? Math.round(sousTotal * T.remiseAnnuelle) : 0
   const { tva, total } = ventilationTva(sousTotal - reduction)
 
   return (
@@ -204,6 +281,13 @@ function Configurateur() {
 
         {volet === 'espace' && (
           <div className="space-y-4">
+            {forfait && forfait.prix < coutEspace && (
+              <Callout ton="ok" titre={`Le forfait ${forfait.nom} couvre ce besoin`}>
+                {forfait.specs} pour {money(forfait.prix)} HT par mois, au lieu de{' '}
+                {money(coutEspace)} à la consommation : le forfait réserve l’enveloppe, la
+                consommation au-delà reste facturée au tarif ci-dessous.
+              </Callout>
+            )}
             <Card>
               <CardHeader
                 titre="Calcul et mémoire"
@@ -231,7 +315,7 @@ function Configurateur() {
                   checked={nvme}
                   onChange={setNvme}
                   label="Classe NVMe (12 000 IOPS garantis)"
-                  description={`${money(T.stockageGoNvme)} par Go au lieu de ${money(T.stockageGoSsd)} en SSD (6 000 IOPS).`}
+                  description={`${prixGo(T.stockageGoNvme)} par Go au lieu de ${prixGo(T.stockageGoSsd)} en SSD (6 000 IOPS).`}
                 />
                 <Slider
                   label="Stockage objet S3 (classe chaude)"
@@ -242,15 +326,17 @@ function Configurateur() {
                   step={500}
                   unite="Go"
                 />
-                <Slider
-                  label="Sauvegarde immuable"
-                  value={sauvegarde}
-                  onChange={setSauvegarde}
-                  min={0}
-                  max={20000}
-                  step={500}
-                  unite="Go"
-                />
+                {!api && (
+                  <Slider
+                    label="Sauvegarde immuable"
+                    value={sauvegarde}
+                    onChange={setSauvegarde}
+                    min={0}
+                    max={20000}
+                    step={500}
+                    unite="Go"
+                  />
+                )}
               </div>
             </Card>
 
@@ -258,12 +344,18 @@ function Configurateur() {
               <CardHeader titre="Réseau et exposition" />
               <div className="space-y-5">
                 <Slider label="IP publiques" value={ips} onChange={setIps} min={0} max={8} unite="IP" />
-                <Switch
-                  checked={antiDdos}
-                  onChange={setAntiDdos}
-                  label="Protection anti-DDoS volumétrique"
-                  description={`${money(T.antiDdos)} par IP et par mois.`}
-                />
+                {api ? (
+                  <p className="text-[12px] text-g-500">
+                    La protection anti-DDoS est incluse dans le prix de chaque IP publique.
+                  </p>
+                ) : (
+                  <Switch
+                    checked={antiDdos}
+                    onChange={setAntiDdos}
+                    label="Protection anti-DDoS volumétrique"
+                    description={`${money(T.antiDdos)} par IP et par mois.`}
+                  />
+                )}
                 <Slider label="Load balancers" value={lbs} onChange={setLbs} min={0} max={4} unite="LB" />
               </div>
             </Card>
@@ -289,23 +381,29 @@ function Configurateur() {
 
         {volet === 'marketplace' && (
           <div className="space-y-4">
-            <Card>
+            {api && !catalogue && (
+              <Callout ton="info" titre="Tarifs du catalogue en cours de chargement">
+                Les sièges sont chiffrés avec les prix publiés par la plateforme. Si rien ne
+                s’affiche, le catalogue est momentanément indisponible : demandez un devis.
+              </Callout>
+            )}
+            {!api && <Card>
               <Switch
                 checked={dedie}
                 onChange={setDedie}
                 label="Mode dédié (instances isolées)"
                 description="Majoration de 20 % sur le prix du siège. En mutualisé, vos comptes vivent sur une instance partagée entre plusieurs organisations, cloisonnée logiquement."
               />
-            </Card>
+            </Card>}
             <Card>
               <CardHeader
                 titre="Sièges par service"
-                sousTitre="Palier Business. Le siège est l’unité de facturation."
+                sousTitre={api ? 'Le palier est retenu selon le nombre de sièges ; certains services sont au forfait mensuel.' : 'Palier Business. Le siège est l’unité de facturation.'}
               />
               <div className="space-y-5">
                 <Slider label="Drive Pro" value={drive} onChange={setDrive} min={0} max={200} step={5} unite="sièges" />
                 <Slider label="Email Pro" value={mail} onChange={setMail} min={0} max={200} step={5} unite="sièges" />
-                <Slider label="Visio & Chat" value={visio} onChange={setVisio} min={0} max={200} step={5} unite="sièges" />
+                <Slider label={api ? 'Visio' : 'Visio & Chat'} value={visio} onChange={setVisio} min={0} max={200} step={5} unite="sièges" />
                 <Slider label="Coffre de mots de passe" value={coffre} onChange={setCoffre} min={0} max={200} step={5} unite="sièges" />
                 <Slider label="ERP" value={erp} onChange={setErp} min={0} max={100} step={5} unite="sièges" />
               </div>
@@ -320,7 +418,7 @@ function Configurateur() {
               sousTitre="Le contenu s’édite dans WordPress ou PrestaShop ; nous opérons le socle."
             />
             <div className="space-y-5">
-              <Slider label="Hébergements mutualisés" value={webMut} onChange={setWebMut} min={0} max={10} unite="offres" />
+              <Slider label={api ? 'Hébergements web' : 'Hébergements mutualisés'} value={webMut} onChange={setWebMut} min={0} max={10} unite="offres" />
               <Slider label="WordPress managé" value={webWp} onChange={setWebWp} min={0} max={10} unite="offres" />
               <Slider label="PrestaShop managé" value={webPresta} onChange={setWebPresta} min={0} max={5} unite="offres" />
             </div>
@@ -333,15 +431,17 @@ function Configurateur() {
           <div className="border-b border-p-300/60 bg-p-050 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <MicroLabel className="text-p-700">Estimation mensuelle</MicroLabel>
-              <SegmentedControl
-                size="sm"
-                value={annuel ? 'annuel' : 'mensuel'}
-                onChange={(v) => setAnnuel(v === 'annuel')}
-                options={[
-                  { value: 'mensuel', label: 'Mensuel' },
-                  { value: 'annuel', label: '−15 %' },
-                ]}
-              />
+              {!api && (
+                <SegmentedControl
+                  size="sm"
+                  value={annuel ? 'annuel' : 'mensuel'}
+                  onChange={(v) => setAnnuel(v === 'annuel')}
+                  options={[
+                    { value: 'mensuel', label: 'Mensuel' },
+                    { value: 'annuel', label: '−15 %' },
+                  ]}
+                />
+              )}
             </div>
           </div>
           <div className="max-h-80 overflow-y-auto px-4 py-3">
@@ -585,13 +685,37 @@ const EQUIVALENT_SYNELIA: Record<string, number> = {
   azure: 10200,
 }
 
+/** « cœurs sous licence » → « cœur sous licence », « vCPU équivalents » → « vCPU équivalent », « utilisateurs » → « utilisateur ». */
+const auSingulier = (u: string) => u.replace(/^cœurs/, 'cœur').replace(/s$/, '')
+
+const HYPOTHESES_API = [
+  'Les prix Synelia sont ceux de la grille publiée : pour VMware, AWS et Azure, un cœur ou vCPU équivaut à 1 vCPU et 4 Go de mémoire, hors stockage et hors réseau ; pour Microsoft 365, Drive Pro et Email Pro au meilleur prix du siège.',
+  'Les tarifs des références (VMware, AWS, Azure, Microsoft 365) préremplis sont indicatifs : remplacez-les par votre facture réelle pour une comparaison fidèle.',
+  'Les coûts de migration ne sont pas inclus dans la comparaison — ils font l’objet d’un devis distinct.',
+  'La TVA de 18 % s’applique dans les deux colonnes et n’influe donc pas sur l’écart relatif.',
+]
+
 function Comparateur() {
+  // Mode API : l'équivalent Synelia découle de la grille publiée (un cœur =
+  // 1 vCPU + 4 Go de mémoire ; un utilisateur M365 = Drive Pro + Email Pro au
+  // meilleur prix du siège), pas de constantes locales.
+  const api = estActif()
+  const catalogue = usePublic<{ donnees: FicheCataloguePublique[] }>('/public/catalogue/services').donnees?.donnees
+  const equivalents = useMemo<Record<string, number>>(() => {
+    if (!api) return EQUIVALENT_SYNELIA
+    const calcul = T.vcpu + 4 * T.ramGo
+    const siege = (slug: string) =>
+      Math.min(...(catalogue?.find((f) => f.slug === slug)?.paliers ?? []).map((p) => p.prixSiege || Infinity))
+    const m365 = siege('drive-pro') + siege('email-pro')
+    return { vmware: calcul, aws: calcul, azure: calcul, ...(Number.isFinite(m365) ? { m365 } : {}) }
+  }, [api, catalogue])
+  const references = REFERENCES_COMPARATEUR.filter((r) => r.id in equivalents)
   const [refId, setRefId] = useState(REFERENCES_COMPARATEUR[0].id)
   const [quantite, setQuantite] = useState(32)
   const [montantActuel, setMontantActuel] = useState(7_520_000)
 
-  const reference = REFERENCES_COMPARATEUR.find((r) => r.id === refId)!
-  const equivalent = Math.round(quantite * (EQUIVALENT_SYNELIA[refId] ?? 10000))
+  const reference = references.find((r) => r.id === refId) ?? references[0]
+  const equivalent = Math.round(quantite * equivalents[reference.id])
   const ecart = montantActuel - equivalent
   const ecartPct = montantActuel > 0 ? Math.round((ecart / montantActuel) * 100) : 0
   const favorable = ecart > 0
@@ -618,7 +742,7 @@ function Comparateur() {
                   if (r) setMontantActuel(quantite * r.prixUnitaireIndicatif)
                 }}
               >
-                {REFERENCES_COMPARATEUR.map((r) => (
+                {references.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.nom}
                   </option>
@@ -655,7 +779,7 @@ function Comparateur() {
             </Field>
             <p className="text-[12px] leading-relaxed text-g-500">
               Le montant est prérempli à partir d’un tarif public indicatif de{' '}
-              {money(reference.prixUnitaireIndicatif)} par {reference.unite.replace(/s$/, '')} et par
+              {money(reference.prixUnitaireIndicatif)} par {auSingulier(reference.unite)} et par
               mois. Remplacez-le par votre montant réel pour une comparaison fidèle.
             </p>
           </div>
@@ -672,7 +796,7 @@ function Comparateur() {
               <dl className="mt-4 space-y-1.5 border-t border-g-100 pt-3">
                 <Comp cle="Sur 12 mois" valeur={money(montantActuel * 12)} />
                 <Comp cle="Sur 36 mois" valeur={money(montantActuel * 36)} />
-                <Comp cle={`Par ${reference.unite.replace(/s$/, '')}`} valeur={money(Math.round(montantActuel / quantite))} />
+                <Comp cle={`Par ${auSingulier(reference.unite)}`} valeur={money(Math.round(montantActuel / quantite))} />
               </dl>
             </Card>
 
@@ -685,7 +809,7 @@ function Comparateur() {
               <dl className="mt-4 space-y-1.5 border-t border-p-300/60 pt-3">
                 <Comp cle="Sur 12 mois" valeur={money(equivalent * 12)} />
                 <Comp cle="Sur 36 mois" valeur={money(equivalent * 36)} />
-                <Comp cle={`Par ${reference.unite.replace(/s$/, '')}`} valeur={money(Math.round(equivalent / quantite))} />
+                <Comp cle={`Par ${auSingulier(reference.unite)}`} valeur={money(Math.round(equivalent / quantite))} />
               </dl>
             </Card>
           </div>
@@ -716,7 +840,9 @@ function Comparateur() {
                 </p>
                 <p className="mt-2 text-[13px] leading-relaxed text-g-700">
                   {favorable
-                    ? 'Cet écart s’explique principalement par l’absence de licence propriétaire, par la localisation du calcul en Côte d’Ivoire — qui supprime les coûts de transit international — et par des quotas de trafic sortant inclus plutôt que facturés à l’usage.'
+                    ? api
+                      ? 'Cet écart s’explique principalement par l’absence de licence propriétaire et par la localisation du calcul en Côte d’Ivoire, qui supprime les coûts de transit international.'
+                      : 'Cet écart s’explique principalement par l’absence de licence propriétaire, par la localisation du calcul en Côte d’Ivoire — qui supprime les coûts de transit international — et par des quotas de trafic sortant inclus plutôt que facturés à l’usage.'
                     : 'Sur ce dimensionnement, la comparaison n’est pas à notre avantage. C’est souvent le cas sur les très petites configurations, où l’effet d’échelle joue contre nous. Un architecte peut affiner : le socle, le plan de sauvegarde et le niveau de service ne sont pas comparables à l’identique.'}
                 </p>
               </div>
@@ -735,7 +861,7 @@ function Comparateur() {
                   décision. Voici exactement ce que nous supposons.
                 </p>
                 <ul className="mt-2.5 space-y-1.5">
-                  {HYPOTHESES_COMPARATEUR.map((h) => (
+                  {(api ? HYPOTHESES_API : HYPOTHESES_COMPARATEUR).map((h) => (
                     <li key={h} className="flex items-start gap-2">
                       <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-info" />
                       <span className="text-[12px] leading-relaxed text-g-700">{h}</span>

@@ -10,7 +10,7 @@ import {
   TicketCheck,
 } from 'lucide-react'
 import { cn, seededSeries, trendSeries } from '@/lib/utils'
-import { dateHeure, goHumain, money, num, pct, relatif } from '@/lib/format'
+import { dateHeure, goHumain, money, nomPays, num, pct, relatif, toHumain } from '@/lib/format'
 import {
   ALERTES_PLATEFORME,
   BACKENDS,
@@ -28,12 +28,12 @@ import { BACKEND_LABEL, SITE_COURT } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Card, CardHeader, Callout, NavCard, PageHeader } from '@/components/composition/card'
-import { QuotaBar, StatTile } from '@/components/composition/metrics'
+import { QuotaBar, StatTile, HistoriqueSimule } from '@/components/composition/metrics'
 import { EventList } from '@/components/business/observabilite'
 import { BackendGauge } from '@/components/business/infra'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction } from '@/components/app/actions'
-import type { Backend, Incident, ProvisioningJob, Ticket } from '@/lib/types'
+import type { AuditEvent, Backend, Incident, Organisation, ProvisioningJob, Ticket } from '@/lib/types'
 import { useLectureDegradable } from '@/lib/api/degradable'
 import { estActif } from '@/lib/api/client'
 import { useMaintenant } from '@/components/app/contexte'
@@ -59,8 +59,13 @@ export default function VuePlateforme() {
   const maintenant = useMaintenant()
   // Le journal vit dans l'atelier : les actions faites pendant la session s'y
   // ajoutent, refus compris. Sans atelier touché, il retombe sur la graine.
-  const { journal: AUDIT, reprendreJob } = useAtelier()
+  const { journal: journalLocal, reprendreJob } = useAtelier()
   const api = estActif()
+  const { donnees: journalDistant } = useLectureDegradable<{ donnees: AuditEvent[] }>(
+    '/admin/audit',
+    { parPage: '200' },
+  )
+  const AUDIT = journalDistant?.donnees ?? (api ? [] : journalLocal)
 
   // Socles, incidents, tickets, impayés et provisionnements ont chacun un
   // vrai backend admin (`/admin/backends`, `/admin/statut/incidents`,
@@ -74,6 +79,10 @@ export default function VuePlateforme() {
   const incidents = useCollection<Incident>('incidents', INCIDENTS)
   const ticketsPlateforme = useCollection<Ticket>('tickets-plateforme', TICKETS_PLATEFORME)
   const impayes = useCollection<Impaye>('impayes', IMPAYES)
+  const orgsReelles = useCollection<Organisation>('organisations', ORGANISATIONS)
+  const topOrganisations = api
+    ? [...orgsReelles.items].sort((a, b) => (b.consommationVcpu ?? 0) - (a.consommationVcpu ?? 0)).slice(0, 5)
+    : TOP_ORGANISATIONS
   const { donnees: syntheseDistante } = useLectureDegradable<SynthesePlateformeDistante>(
     '/admin/tableau-de-bord',
   )
@@ -104,9 +113,11 @@ export default function VuePlateforme() {
             <Badge tone="neutral" size="sm">
               {synthese.backendsEnLigne}/{synthese.backendsTotal} socles en ligne
             </Badge>
-            <Badge tone="neutral" size="sm">
-              Données à {dateHeure('2026-08-19T15:20:00Z')}
-            </Badge>
+            {!api && (
+              <Badge tone="neutral" size="sm">
+                Données à {dateHeure('2026-08-19T15:20:00Z')}
+              </Badge>
+            )}
           </>
         }
         actions={
@@ -158,13 +169,17 @@ export default function VuePlateforme() {
         />
         <StatTile
           libelle="Mémoire installée"
-          valeur={`${num(Math.round(synthese.ramTotalGo / 1024))} Tio`}
-          detail={`${num(synthese.ramTotalGo)} Go sur ${synthese.backendsTotal} socles`}
+          valeur={synthese.ramTotalGo >= 1024 ? `${num(Math.round(synthese.ramTotalGo / 1024))} Tio` : `${num(synthese.ramTotalGo)} Go`}
+          detail={`${synthese.backendsTotal} socle${synthese.backendsTotal > 1 ? 's' : ''}`}
         />
         <StatTile
           libelle="Stockage installé"
-          valeur={`${num(synthese.stockageTotalTo)} To`}
-          detail="Bloc et objet confondus"
+          valeur={toHumain(
+            backends.items.length > 0
+              ? backends.items.reduce((a, b) => a + b.capacite.stockageTo, 0)
+              : synthese.stockageTotalTo,
+          )}
+          detail={api ? 'Somme des socles' : 'Bloc et objet confondus'}
         />
         <StatTile
           libelle="Chiffre d’affaires mensuel"
@@ -219,18 +234,20 @@ export default function VuePlateforme() {
         </Card>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader
-              titre="Alertes de plateforme"
-              sousTitre="Les huit dernières, toutes sévérités."
-            />
-            <EventList
-              evenements={ALERTES_PLATEFORME}
-              max={8}
-              lienSortie="Ouvrir Centreon"
-              hrefSortie="https://centreon.synelia.cloud/monitoring/resources"
-            />
-          </Card>
+          {!api && (
+            <Card>
+              <CardHeader
+                titre="Alertes de plateforme"
+                sousTitre="Les huit dernières, toutes sévérités."
+              />
+              <EventList
+                evenements={ALERTES_PLATEFORME}
+                max={8}
+                lienSortie="Ouvrir Centreon"
+                hrefSortie="https://centreon.synelia.tech/monitoring/resources"
+              />
+            </Card>
+          )}
 
           <Card>
             <CardHeader
@@ -270,11 +287,8 @@ export default function VuePlateforme() {
           <div className="border-b border-g-100 px-4 py-3.5">
             <CardHeader
               titre="Organisations les plus consommatrices"
-              sousTitre={
-                api
-                  ? 'Démonstration — pas encore une lecture réelle, y compris la colonne CA mensuel (qui ne reflète pas le chiffre d’affaires ci-dessus)'
-                  : 'Par processeur alloué. Une organisation qui croît vite mérite un contact commercial avant qu’elle ne se heurte à un quota.'
-              }
+              sousTitre="Par processeur alloué. Une organisation qui croît vite mérite un contact commercial avant qu’elle ne se heurte à un quota."
+
               className="mb-0"
               actions={
                 <ButtonLink size="sm" variant="ghost" href="/admin/organisations">
@@ -303,7 +317,7 @@ export default function VuePlateforme() {
                     « plus consommatrices » n'a pas d'équivalent réel à ce jour et
                     reste sur la graine plutôt que d'inventer un tri sur des champs
                     absents de la réponse. */}
-                {TOP_ORGANISATIONS.map((o) => (
+                {topOrganisations.map((o) => (
                   <tr key={o.id} className="border-b border-g-100 last:border-0">
                     <td className="px-3 py-2.5">
                       <Link
@@ -314,13 +328,13 @@ export default function VuePlateforme() {
                         {o.nom}
                       </Link>
                       <span className="block pl-[20px] text-[10.5px] text-g-500">
-                        {o.pays}
+                        {nomPays(o.pays)}
                         {o.secteur ? ` · ${o.secteur}` : ''}
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
                       <Badge tone="neutral" size="sm">
-                        {libellePlan(o.tenantPlan ?? 'Standard')}
+                        {libellePlan(o.tenantPlan)}
                       </Badge>
                     </td>
                     <td className="tnum px-3 py-2.5 text-[12px] text-g-700">{o.espaces ?? 0}</td>
@@ -464,7 +478,7 @@ export default function VuePlateforme() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <NavCard
-          titre="Santé plateforme"
+          titre="Santé de la plateforme"
           description="Incidents, socles, jobs et communication publique sur la page de statut."
           href="/admin/sante"
           meta={`${incidentsOuverts.length} incident${incidentsOuverts.length > 1 ? 's' : ''} en cours`}
@@ -479,7 +493,7 @@ export default function VuePlateforme() {
           titre="Migration entre socles"
           description="Trajectoire de sortie des socles propriétaires, vagues de migration, fenêtres."
           href="/admin/migration"
-          meta={`${enSortie.length} socles en sortie`}
+          meta={`${enSortie.length} socle${enSortie.length > 1 ? 's' : ''} en sortie`}
         />
         <NavCard
           titre="Audit de la plateforme"
@@ -540,6 +554,11 @@ export default function VuePlateforme() {
               </Badge>
             }
           />
+          {!AUDIT.some((a) => a.result === 'refuse') && (
+            <p className="rounded-[6px] border border-dashed border-g-300 px-3 py-4 text-center text-[12px] text-g-500">
+              Aucun accès refusé dans le journal récent.
+            </p>
+          )}
           <div className="space-y-2">
             {AUDIT.filter((a) => a.result === 'refuse')
               .slice(0, 4)
@@ -601,6 +620,7 @@ export default function VuePlateforme() {
             ))}
           </div>
           <MicroLabel className="mt-4 mb-2">Volume de tickets sur 30 jours</MicroLabel>
+          <HistoriqueSimule>
           <div className="flex items-end gap-1">
             {seededSeries('tickets-30j', 30, 2, 14).map((v, i) => (
               <span
@@ -610,6 +630,7 @@ export default function VuePlateforme() {
               />
             ))}
           </div>
+          </HistoriqueSimule>
           <ButtonLink size="sm" variant="ghost" className="mt-3" href="/admin/tickets">
             Ouvrir la file
           </ButtonLink>

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Download, FileCheck2, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { dateCourte, dureeMin, MAINTENANT, num, pct } from '@/lib/format'
+import { dateCourte, dateHeure, dureeMin, MAINTENANT, num, pct } from '@/lib/format'
 import { telechargerCsv } from '@/lib/export'
 import { CONFORMITE_PLATEFORME, EQUIPE_SYNELIA, ORGANISATIONS } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -17,6 +17,8 @@ import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { estActif, requete } from '@/lib/api/client'
+import { useLectureDegradable } from '@/lib/api/degradable'
+import { LIEUX_HEBERGEMENT, SITES, type Organisation, type ProvisioningJob } from '@/lib/types'
 
 const ONGLETS = [
   { id: 'restauration', label: 'Tests de restauration' },
@@ -75,9 +77,11 @@ const ATTESTATIONS_GENEREES: AttestationGeneree[] = [
 const MODELES_ATTESTATION: Record<string, { affirme: string[]; naffirme: string[] }> = {
   'Résidence des données': {
     affirme: [
-      'Les données de l’organisation sont stockées sur les sites d’Abidjan et de Grand-Bassam, en Côte d’Ivoire.',
+      `Les données de l’organisation sont stockées ${SITES.length > 1 ? 'sur les sites' : 'sur le site'} d’${LIEUX_HEBERGEMENT}, en Côte d’Ivoire.`,
       'Aucune réplication n’est effectuée vers un site hors du territoire national.',
-      'Les sauvegardes hors site restent sur le second site national.',
+      SITES.length > 1
+        ? 'Les sauvegardes hors site restent sur le second site national.'
+        : 'Les sauvegardes restent sur le territoire national.',
     ],
     naffirme: [
       'Aucune certification de souveraineté délivrée par un tiers — nous n’en avons pas.',
@@ -149,9 +153,25 @@ const PLANIFICATION = [
   },
 ]
 
+const LIBELLE_FENETRE = { planifiee: 'planifiée', en_cours: 'en cours', terminee: 'terminée', annulee: 'annulée' }
+
 export default function Conformite() {
   const { autorise, refus } = useApp()
-  const generees = useCollection<AttestationGeneree>('attestations-generees', ATTESTATIONS_GENEREES)
+  const api = estActif()
+  const generees = useCollection<AttestationGeneree & { titre?: string; description?: string }>(
+    'attestations-generees', ATTESTATIONS_GENEREES)
+  const travaux = useCollection<ProvisioningJob>('jobs-plateforme', [])
+  const fenetresReelles = useCollection<{
+    id: string
+    perimetre: string
+    debut: string
+    dureeMin: number
+    statut: keyof typeof LIBELLE_FENETRE
+  }>('fenetres-patching', [])
+  const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
+  const { donnees: journalAttestations } = useLectureDegradable<{
+    donnees: Array<{ id: string; ts: string; target: string; actor: { nom: string }; orgNom?: string }>
+  }>('/admin/audit', { action: 'conformite.attestation', parPage: '10' })
   const executer = useOperation()
   const [onglet, setOnglet] = useState('restauration')
   const [attestation, setAttestation] = useState<string | null>(null)
@@ -162,8 +182,8 @@ export default function Conformite() {
     Object.fromEntries(PLANIFICATION.map((r) => [r.id, r.defaut])),
   )
   const [orgAttestation, setOrgAttestation] = useState('')
-  const [duAttestation, setDuAttestation] = useState('2026-01-01')
-  const [auAttestation, setAuAttestation] = useState('2026-08-19')
+  const [duAttestation, setDuAttestation] = useState(`${MAINTENANT.slice(0, 4)}-01-01`)
+  const [auAttestation, setAuAttestation] = useState(MAINTENANT.slice(0, 10))
   const [destinataire, setDestinataire] = useState('')
   const [motif, setMotif] = useState('')
   const [signature, setSignature] = useState(true)
@@ -182,11 +202,24 @@ export default function Conformite() {
     executer({
       action: 'compliance.export',
       titre: `Attestation « ${attestation} » générée`,
-      detail: signature
+      detail: api
+        ? 'La génération est suivie dans le centre de tâches et journalisée dans l’audit.'
+        : signature
         ? 'Le document signé est disponible au téléchargement. La génération est journalisée dans l’audit.'
         : 'Document produit sans signature électronique : le destinataire devra nous contacter pour en vérifier l’authenticité.',
-      sansApi:
-        'Indisponible : ce modèle d’attestation n’a pas d’identifiant reconnu par l’API (elle ne connaît que ses propres modèles), et le formulaire ne les propose pas encore.',
+      appel: api
+        ? () =>
+            requete(
+              `/attestations/${encodeURIComponent(generees.items.find((x) => x.titre === attestation)?.id ?? '')}`,
+              {
+                methode: 'POST',
+                corps: {
+                  periode: auAttestation.slice(0, 7),
+                  ...(destinataire.trim() ? { destinataire: destinataire.trim() } : {}),
+                },
+              },
+            )
+        : undefined,
       effet: () => {
         if (estActif()) return
         generees.creer({
@@ -194,7 +227,7 @@ export default function Conformite() {
           date: MAINTENANT.slice(0, 10),
           attestation,
           org: orgAttestation
-            ? (ORGANISATIONS.find((o) => o.id === orgAttestation)?.nom ?? orgAttestation)
+            ? (orgs.items.find((o) => o.id === orgAttestation)?.nom ?? orgAttestation)
             : 'Toute la plateforme',
           qui: EQUIPE_SYNELIA[0].nom,
           motif: motif.trim() || destinataire.trim() || 'Motif non renseigné',
@@ -206,9 +239,72 @@ export default function Conformite() {
     setAttestation(null)
   }
 
-  const c = CONFORMITE_PLATEFORME
-  const testsCourants = c.testsRestauration[0]
+  // Mode API : seules les sources réelles (travaux de test de restauration, fenêtres de
+  // patching, attestations) alimentent l’écran ; pas de scanner de vulnérabilités, d’audits
+  // ou d’exercices PRA plateforme branchés, donc rien d’inventé pour eux.
+  const campagnesReelles = Object.values(
+    Object.groupBy(
+      travaux.items.filter((j) => j.type === 'admin.tests_restauration'),
+      (j) => j.startedAt.slice(0, 7),
+    ),
+  ).map((js) => {
+    const ls = js ?? []
+    const mois = new Date(ls[0].startedAt).toLocaleDateString('fr-FR', {
+      month: 'long',
+      year: 'numeric',
+    })
+    const echecs = ls.filter((j) => j.statut === 'failed' || j.statut === 'rolled_back').length
+    const succes = ls.filter((j) => j.statut === 'done').length
+    return {
+      id: ls[0].startedAt.slice(0, 7),
+      periode: mois.charAt(0).toUpperCase() + mois.slice(1),
+      perimetre: 'Campagnes lancées depuis le portail',
+      planifies: ls.length,
+      executes: succes + echecs,
+      succes,
+      echecs,
+      statut: ls.some((j) => j.statut === 'running' || j.statut === 'queued')
+        ? 'en cours'
+        : 'clôturée',
+    }
+  })
+  const c = api
+    ? {
+        ...CONFORMITE_PLATEFORME,
+        testsRestauration: campagnesReelles,
+        exercicesPra: [] as typeof CONFORMITE_PLATEFORME.exercicesPra,
+        cve: [] as typeof CONFORMITE_PLATEFORME.cve,
+        audits: [] as typeof CONFORMITE_PLATEFORME.audits,
+        fenetresPatching: fenetresReelles.items.map((f) => ({
+          id: f.id,
+          perimetre: f.perimetre,
+          fenetre: `${dateHeure(f.debut)} · ${dureeMin(f.dureeMin)}`,
+          statut: LIBELLE_FENETRE[f.statut] ?? f.statut,
+        })),
+        attestations: generees.items.map((x) => ({
+          id: x.id,
+          nom: x.titre ?? '',
+          description: x.description ?? '',
+        })),
+      }
+    : CONFORMITE_PLATEFORME
+  const onglets = api
+    ? ONGLETS.filter((t) => t.id !== 'pra' && t.id !== 'audits').map((t) =>
+        t.id === 'vulnerabilites' ? { ...t, label: 'Correctifs' } : t,
+      )
+    : ONGLETS
+  const testsCourants = c.testsRestauration[0] ?? {
+    id: '',
+    periode: '',
+    perimetre: '',
+    planifies: 0,
+    executes: 0,
+    succes: 0,
+    echecs: 0,
+    statut: 'aucune campagne',
+  }
   const tauxSucces = Math.round((testsCourants.succes / Math.max(1, testsCourants.executes)) * 1000) / 10
+  const fenetresAVenir = c.fenetresPatching.filter((f) => f.statut === 'planifiée').length
   const praEchoues = c.exercicesPra.filter((e) => !e.succes)
   const cveOuvertes = c.cve.reduce((a, x) => a + x.ouvertes, 0)
   const cveCritiques = c.cve.find((x) => x.gravite === 'critique')?.ouvertes ?? 0
@@ -219,7 +315,7 @@ export default function Conformite() {
       <PageHeader
         fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Conformité' }]}
         titre="Conformité"
-        sousTitre="Tests de restauration réellement exécutés, exercices de reprise avec leurs échecs, vulnérabilités ouvertes, constats d’audit non clos. Un tableau de conformité qui n’affiche que du vert n’a aucune valeur : celui-ci montre aussi ce qui ne va pas."
+        sousTitre={`${api ? 'Tests de restauration réellement exécutés, fenêtres de correctifs et attestations.' : 'Tests de restauration réellement exécutés, exercices de reprise avec leurs échecs, vulnérabilités ouvertes, constats d’audit non clos.'} Un tableau de conformité qui n’affiche que du vert n’a aucune valeur : celui-ci montre aussi ce qui ne va pas.`}
         actions={
           <BoutonAction
             libelle="Rapport de conformité"
@@ -232,7 +328,7 @@ export default function Conformite() {
                 'Les écarts y figurent au même titre que les indicateurs verts : un rapport qui ne montre que le vert ne vaut rien devant un auditeur.',
               effet: () =>
                 telechargerCsv(
-                  'conformite-plateforme-2026-08',
+                  `conformite-plateforme-${new Date().toISOString().slice(0, 7)}`,
                   ['Domaine', 'Indicateur', 'Valeur', 'Écart'],
                   [
                     ...c.testsRestauration.map((t) => [
@@ -266,6 +362,12 @@ export default function Conformite() {
         }
         meta={
           <>
+            {api ? (
+              <Badge tone={testsCourants.echecs === 0 ? 'ok' : 'warn'} dot size="sm">
+                {testsCourants.echecs} échec{testsCourants.echecs > 1 ? 's' : ''} de restauration ce mois
+              </Badge>
+            ) : (
+              <>
             <Badge tone={cveCritiques === 0 ? 'ok' : 'err'} dot size="sm">
               {cveCritiques === 0 ? 'Aucune vulnérabilité critique ouverte' : `${cveCritiques} critique ouverte`}
             </Badge>
@@ -278,11 +380,13 @@ export default function Conformite() {
               {constatsOuverts} constat{constatsOuverts > 1 ? 's' : ''} d’audit ouvert
               {constatsOuverts > 1 ? 's' : ''}
             </Badge>
+              </>
+            )}
           </>
         }
       />
 
-      {praEchoues.length > 0 && (
+      {!api && praEchoues.length > 0 && (
         <Callout ton="warn" titre={`${praEchoues.length} exercice de reprise a dépassé son objectif`}>
           {praEchoues
             .map(
@@ -303,10 +407,18 @@ export default function Conformite() {
         />
         <StatTile
           libelle="Taux de réussite"
-          valeur={pct(tauxSucces, 1)}
+          valeur={testsCourants.executes ? pct(tauxSucces, 1) : '—'}
           ton={tauxSucces > 95 ? 'ok' : 'warn'}
           detail={`${testsCourants.echecs} échec${testsCourants.echecs > 1 ? 's' : ''} analysé${testsCourants.echecs > 1 ? 's' : ''}`}
         />
+        {api ? (
+          <StatTile
+            libelle="Fenêtres de correctifs à venir"
+            valeur={fenetresAVenir}
+            detail={`${c.fenetresPatching.length} au total`}
+          />
+        ) : (
+          <>
         <StatTile
           libelle="Exercices de reprise"
           valeur={c.exercicesPra.length}
@@ -324,17 +436,20 @@ export default function Conformite() {
           ton={constatsOuverts > 0 ? 'warn' : 'ok'}
           detail={`sur ${c.audits.reduce((a, x) => a + x.constats, 0)} constats émis`}
         />
+          </>
+        )}
       </div>
 
-      <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
+      <Tabs tabs={onglets} active={onglet} onChange={setOnglet} />
 
       {onglet === 'restauration' && (
         <div className="space-y-4">
+{!api && (
           <Callout ton="violet" titre="Restauration réelle de 10 % du parc chaque mois">
             Le tirage est aléatoire, et le test va jusqu’au démarrage du système restauré : ce n’est
             pas une vérification d’intégrité d’archive.
           </Callout>
-
+)}
           <Card padding={false}>
             <div className="border-b border-g-100 px-4 py-3.5">
               <CardHeader
@@ -405,10 +520,16 @@ export default function Conformite() {
                   })}
                 </tbody>
               </table>
+              {c.testsRestauration.length === 0 && (
+                <p className="px-4 py-6 text-center text-[12px] text-g-500">
+                  Aucune campagne de test lancée. Utilisez « Lancer une campagne » ci-dessous : l’échantillon est tiré au sort.
+                </p>
+              )}
             </div>
           </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {!api && (
             <Card>
               <CardHeader
                 titre="Échecs de restauration analysés"
@@ -449,14 +570,14 @@ export default function Conformite() {
                 journées d’ingénieur et corrigé un défaut de conception.
               </Callout>
             </Card>
-
+            )}
             <Card>
               <CardHeader
-                titre="Planification des tests"
-                sousTitre="Comment l’échantillon est constitué, et ce qui est testé."
+                titre={api ? 'Lancer une campagne de test' : 'Planification des tests'}
+                sousTitre={api ? 'Part du parc tirée au sort pour une campagne de restauration, suivie dans le centre de tâches.' : 'Comment l’échantillon est constitué, et ce qui est testé.'}
               />
               <div className="space-y-4">
-                <Field label="Part du parc testée par mois" hint="tirage au sort, pas de sélection manuelle">
+                <Field label={api ? 'Part du parc testée' : 'Part du parc testée par mois'} hint="tirage au sort, pas de sélection manuelle">
                   <Input
                     type="number"
                     value={partParc}
@@ -466,6 +587,7 @@ export default function Conformite() {
                     onChange={(e) => setPartParc(Number(e.target.value))}
                   />
                 </Field>
+                {!api && (<>
                 <Field label="Profondeur du test">
                   <Select value={profondeur} onChange={(e) => setProfondeur(e.target.value)}>
                     <option value="integrite">Vérification d’intégrité de l’archive seulement</option>
@@ -490,18 +612,18 @@ export default function Conformite() {
                 {profondeur === 'integrite' && (
                   <Callout ton="warn" titre="Vérifier l’intégrité n’est pas restaurer">
                     Une archive dont la somme de contrôle est bonne peut très bien ne pas redémarrer :
-                    les deux échecs de ce mois-ci sont exactement de ce type. Ce niveau de test ne les
-                    aurait pas trouvés.
+                    ce niveau de test ne détecte pas ce type d’échec.
                   </Callout>
                 )}
+                </>)}
               </div>
               <BoutonAction
-                libelle="Enregistrer"
+                libelle={api ? 'Lancer la campagne' : 'Enregistrer'}
                 size="md"
                 className="mt-4"
                 operation={{
                   action: 'compliance.export',
-                  titre: 'Planification des tests enregistrée',
+                  titre: api ? 'Campagne de test lancée' : 'Planification des tests enregistrée',
                   // `POST /admin/conformite/tests-restauration` → `202` : la
                   // campagne du mois part sur l’échantillon réglé ici et se
                   // suit dans le centre de tâches.
@@ -510,7 +632,7 @@ export default function Conformite() {
                       methode: 'POST',
                       corps: { perimetre: 'toutes', echantillonPct: partParc },
                     }),
-                  detail: `${partParc} % du parc tiré au sort chaque mois, ${
+                  detail: api ? `${partParc} % du parc tiré au sort. Le suivi est dans le centre de tâches.` : `${partParc} % du parc tiré au sort chaque mois, ${
                     profondeur === 'complet'
                       ? 'en restauration complète avec vérification des données'
                       : profondeur === 'restauration'
@@ -678,6 +800,7 @@ export default function Conformite() {
 
       {onglet === 'vulnerabilites' && (
         <div className="space-y-4">
+          {!api && (
           <Card padding={false}>
             <div className="border-b border-g-100 px-4 py-3.5">
               <CardHeader
@@ -774,6 +897,7 @@ export default function Conformite() {
               </div>
             )}
           </Card>
+          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
@@ -782,6 +906,9 @@ export default function Conformite() {
                 sousTitre="Les correctifs non critiques sont regroupés dans des fenêtres annoncées à l’avance."
               />
               <div className="space-y-2">
+                {c.fenetresPatching.length === 0 && (
+                  <p className="text-[12px] text-g-500">Aucune fenêtre planifiée.</p>
+                )}
                 {c.fenetresPatching.map((f) => (
                   <div
                     key={f.id}
@@ -852,12 +979,14 @@ export default function Conformite() {
                   </div>
                 ))}
               </div>
+              {!api && (
               <Callout ton="violet" className="mt-4" titre="112 vulnérabilités faibles ouvertes">
                 Nous l’affichons parce que c’est la vérité. La plupart ne sont pas exploitables dans
                 notre configuration — service non exposé, fonctionnalité désactivée, prérequis absent —
                 et nous le documentons vulnérabilité par vulnérabilité. Afficher zéro en les masquant
                 serait plus confortable et complètement malhonnête.
               </Callout>
+              )}
             </Card>
           </div>
         </div>
@@ -1001,7 +1130,7 @@ export default function Conformite() {
                   {
                     t: 'ISO 27001',
                     e: 'En cours',
-                    d: 'Démarche engagée, audit de certification prévu au premier semestre 2027. Nous ne prétendons pas être certifiés aujourd’hui.',
+                    d: 'Démarche en cours, aucune date de certification annoncée. Nous ne prétendons pas être certifiés aujourd’hui.',
                     ton: 'info' as const,
                   },
                   {
@@ -1084,9 +1213,11 @@ export default function Conformite() {
                       Générer
                     </Button>
                   </GatedAction>
-                  <Button size="sm" variant="ghost" onClick={() => setModele(a.nom)}>
-                    Modèle
-                  </Button>
+                  {!api && (
+                    <Button size="sm" variant="ghost" onClick={() => setModele(a.nom)}>
+                      Modèle
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
@@ -1098,13 +1229,17 @@ export default function Conformite() {
               sousTitre="Chaque génération est journalisée dans l’audit, avec le demandeur et le périmètre."
             />
             <div className="space-y-1.5">
-              {generees.items
-                // En mode API, `GET /attestations` renvoie des modèles à
-                // générer, pas des lignes de journal : on ne garde que les
-                // lignes qui en sont (attestation + date), les autres
-                // n’ont rien à faire dans cet historique.
-                .filter((x) => typeof x.attestation === 'string' && typeof x.date === 'string')
-                .map((x) => (
+              {(api
+                ? (journalAttestations?.donnees ?? []).map((e) => ({
+                    id: e.id,
+                    attestation: e.target,
+                    org: e.orgNom ?? 'Plateforme',
+                    motif: 'Génération journalisée',
+                    qui: e.actor.nom,
+                    date: e.ts,
+                  }))
+                : generees.items
+              ).map((x) => (
                 <div
                   key={x.id}
                   className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
@@ -1119,6 +1254,11 @@ export default function Conformite() {
                   </span>
                 </div>
               ))}
+              {(api ? (journalAttestations?.donnees ?? []) : generees.items).length === 0 && (
+                <p className="py-3 text-center text-[12px] text-g-500">
+                  Aucune attestation générée pour l’instant.
+                </p>
+              )}
             </div>
           </Card>
         </div>
@@ -1145,25 +1285,29 @@ export default function Conformite() {
         }
       >
         <div className="space-y-4">
-          <Field label="Organisation concernée">
-            <Select value={orgAttestation} onChange={(e) => setOrgAttestation(e.target.value)}>
-              <option value="">Toute la plateforme</option>
-              {ORGANISATIONS.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.nom}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Période couverte — du">
-              <Input
-                type="date"
-                value={duAttestation}
-                onChange={(e) => setDuAttestation(e.target.value)}
-              />
+          {!api && (
+            <Field label="Organisation concernée">
+              <Select value={orgAttestation} onChange={(e) => setOrgAttestation(e.target.value)}>
+                <option value="">Toute la plateforme</option>
+                {orgs.items.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.nom}
+                  </option>
+                ))}
+              </Select>
             </Field>
-            <Field label="au">
+          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {!api && (
+              <Field label="Période couverte — du">
+                <Input
+                  type="date"
+                  value={duAttestation}
+                  onChange={(e) => setDuAttestation(e.target.value)}
+                />
+              </Field>
+            )}
+            <Field label={api ? 'Période couverte (mois de la date)' : 'au'}>
               <Input
                 type="date"
                 value={auAttestation}
@@ -1178,6 +1322,7 @@ export default function Conformite() {
               onChange={(e) => setDestinataire(e.target.value)}
             />
           </Field>
+          {!api && (
           <Field label="Motif" hint="journalisé dans l’audit, visible du client">
             <Input
               placeholder="Dossier de conformité réglementaire"
@@ -1185,6 +1330,8 @@ export default function Conformite() {
               onChange={(e) => setMotif(e.target.value)}
             />
           </Field>
+          )}
+          {!api && (
           <div className="space-y-3">
             <Switch
               checked
@@ -1205,7 +1352,8 @@ export default function Conformite() {
               description="Le client est informé qu’une attestation le concernant a été produite, et pour qui."
             />
           </div>
-          {!notifierOrg && (
+          )}
+          {!api && !notifierOrg && (
             <Callout ton="warn" titre="Une attestation produite dans le dos du client">
               Le client ne saura pas qu’un document le concernant a été remis à un tiers. La
               génération reste journalisée dans son propre journal d’audit — il le découvrira là, plus

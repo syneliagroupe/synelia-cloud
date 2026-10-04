@@ -6,7 +6,7 @@ import type { Metadata } from 'next'
  */
 export const metadata: Metadata = {
   title: 'Nouveau projet',
-  description: 'Nom, étiquettes, Espace Cloud et cluster Kubernetes dédié.',
+  description: 'Nom, cluster Kubernetes et load balancer dédié.',
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {

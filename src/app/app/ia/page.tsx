@@ -12,7 +12,13 @@ import {
 import Link from 'next/link'
 import { seededSeries } from '@/lib/utils'
 import { estActif } from '@/lib/api/client'
-import { TYPE_AGENT_LABEL, type AgentIA, type CleIA, type ModeleIA } from '@/lib/types'
+import {
+  LIEUX_HEBERGEMENT,
+  TYPE_AGENT_LABEL,
+  type AgentIA,
+  type CleIA,
+  type ModeleIA,
+} from '@/lib/types'
 import { jetons, money, num, pct } from '@/lib/format'
 import {
   AGENTS_IA,
@@ -67,7 +73,7 @@ const SECTIONS = [
     titre: 'Modèles',
     icone: <Boxes size={17} />,
     description:
-      'Ce qui est disponible, où le calcul a lieu, combien coûte un million de jetons et quelle latence attendre.',
+      'Ce qui est disponible, où le calcul a lieu, combien coûte un million de jetons.',
   },
   {
     href: '/app/ia/consommation',
@@ -109,20 +115,28 @@ export default function AccueilIA() {
     : agentsCol.items.filter((a) => a.espaceId === espace.id && a.statut === 'publie')
 
   const partExterne = 100 - PASSERELLE_IA.partTerritoirePct
+  // En mode API, la passerelle ne journalise ni requêtes, ni répartition par modèle, ni
+  // événements : seuls les compteurs des clés sont réels (comme sur « Consommation »).
+  // On n'affiche donc pas les chiffres de la graine, qui contrediraient « 0 clé active ».
+  const api = estActif()
+  const jetonsCles = cles.reduce((a, c) => a + c.jetonsConsommes, 0)
+  const depenseCles = cles.reduce((a, c) => a + c.budgetConsomme, 0)
+  const plafondCles = cles.reduce((a, c) => a + c.budgetMensuel, 0)
+  const appelables = modelesCol.items.filter((m) => m.invocable).length
 
   return (
     <div className="space-y-5">
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'IA & Agents' }]}
         titre="IA & Agents"
-        sousTitre="Une passerelle unique devant deux mondes : les modèles que nous hébergeons à Abidjan et à Grand-Bassam, et ceux des fournisseurs étrangers. Vous décidez, usage par usage, ce qui reste sur le territoire — et le portail compte ce qui en sort."
+        sousTitre={`Une passerelle unique devant deux mondes : les modèles que nous hébergeons à ${LIEUX_HEBERGEMENT}, et ceux des fournisseurs étrangers. Vous décidez, usage par usage, ce qui reste sur le territoire — et le portail compte ce qui en sort.`}
         meta={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone="violet" size="sm">
-              Région {PASSERELLE_IA.region}
+              {api ? 'Abidjan' : `Région ${PASSERELLE_IA.region}`}
             </Badge>
             <Badge tone="ok" dot size="sm">
-              {souverains.length} modèles souverains
+              {souverains.length} modèle{souverains.length > 1 ? 's' : ''} souverain{souverains.length > 1 ? 's' : ''}
             </Badge>
             <Badge tone="neutral" size="sm">
               {cles.length} clés actives sur {espace.code}
@@ -131,6 +145,30 @@ export default function AccueilIA() {
         }
       />
 
+      {api ? (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile
+            libelle="Modèles appelables"
+            valeur={appelables}
+            detail="Génération de texte, via la passerelle"
+          />
+          <StatTile
+            libelle="Clés actives"
+            valeur={cles.length}
+            detail={`Espace ${espace.code}`}
+          />
+          <StatTile
+            libelle="Jetons du mois"
+            valeur={jetons(jetonsCles)}
+            detail="Somme des compteurs des clés actives"
+          />
+          <StatTile
+            libelle="Dépense du mois"
+            valeur={money(depenseCles)}
+            detail={plafondCles > 0 ? `Plafonds cumulés ${money(plafondCles)}` : 'Aucun plafond posé'}
+          />
+        </div>
+      ) : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           libelle="Requêtes 24 h"
@@ -155,6 +193,7 @@ export default function AccueilIA() {
           detail={`Prévision ${money(BUDGET_IA.prevision)} · plafond ${money(BUDGET_IA.plafondMensuel)}`}
         />
       </div>
+      )}
 
       <Callout ton="violet" titre="Ce que la plateforme fait, et ce qu’elle ne fait pas">
         Elle distribue les accès, choisit le modèle, exécute vos agents, applique les garde-fous,
@@ -232,6 +271,14 @@ export default function AccueilIA() {
         )}
       </Card>
 
+      {api ? (
+        <Callout ton="info" titre="Trafic, événements et santé de la passerelle">
+          La passerelle LiteLLM ne journalise pas encore la répartition par modèle, ni les
+          événements ni la latence : seuls les compteurs de jetons et de dépense de chaque clé sont
+          réels, et ils se lisent sous « Consommation ».
+        </Callout>
+      ) : (
+        <>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader
@@ -309,6 +356,8 @@ export default function AccueilIA() {
         cinq ans et exportable depuis le journal d’audit. C’est la pièce que réclame un contrôle :
         non pas la promesse que rien ne sort, mais la trace de ce qui est sorti et pourquoi.
       </Callout>
+        </>
+      )}
     </div>
   )
 }

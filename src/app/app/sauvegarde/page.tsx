@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { Download, FileDown, Plus, RotateCcw, Shield, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, dateHeure, dureeMin, goHumain, num, pct } from '@/lib/format'
-import { SITE_COURT } from '@/lib/types'
+import { LIEUX_HEBERGEMENT, UN_SEUL_SITE, trajetSites } from '@/lib/types'
 import type { BackupPlan, ConformiteLigne, DRPlan, RestorePoint, VM, Volume } from '@/lib/types'
 import { BACKUP_PLANS, BUCKETS, CONFORMITE, DR_PLANS, RESTORE_POINTS, VMS, VOLUMES } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -50,15 +50,17 @@ interface FormulairePlan {
 
 const PLAN_VIDE: FormulairePlan = {
   nom: '',
-  scopeType: 'tag',
-  scopeValeur: 'production',
+  // En mode API seule la portée « par ressource » est exécutable (voir `OngletPlans`).
+  scopeType: estActif() ? 'ressource' : 'tag',
+  scopeValeur: estActif() ? '' : 'production',
   frequence: 'quotidien',
   mode: 'incrementale_complete_hebdo',
   retentionJours: 35,
   immutable: true,
   local: true,
-  autreSite: true,
-  immuableCopie: true,
+  // Un seul site : pas de copie « hors site » ; pas de stockage objet verrouillé en mode API.
+  autreSite: !UN_SEUL_SITE,
+  immuableCopie: !estActif(),
   chiffrement: 'synelia',
   kmsRef: '',
 }
@@ -92,9 +94,16 @@ const ONGLETS = [
 type ConformiteAvecId = ConformiteLigne & { id: string }
 const CONFORMITE_AVEC_ID: ConformiteAvecId[] = CONFORMITE.map((c) => ({ ...c, id: c.ressourceId }))
 
+// L'API ne renvoie pas d'`id` : la ressource en tient lieu.
+function useConformite(): ConformiteAvecId[] {
+  return useCollection<ConformiteAvecId>('conformite-sauvegarde', CONFORMITE_AVEC_ID).items.map(
+    (c) => ({ ...c, id: c.id ?? c.ressourceId }),
+  )
+}
+
 export default function Sauvegarde() {
   const [onglet, setOnglet] = useState('plans')
-  const conformite = useCollection<ConformiteAvecId>('conformite-sauvegarde', CONFORMITE_AVEC_ID).items
+  const conformite = useConformite()
   const plans = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS).items
   const points = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS).items
   const protegees = conformite.filter((c) => c.protection === 'protegee').length
@@ -106,7 +115,11 @@ export default function Sauvegarde() {
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Sauvegardes' }]}
         titre="Sauvegardes"
-        sousTitre="Des plans réutilisables applicables par étiquette, par Espace Cloud ou par ressource. L’immuabilité garantit qu’un point de restauration sous rétention ne peut être supprimé par personne — pas même par un attaquant ayant obtenu vos droits."
+        sousTitre={
+          estActif()
+            ? 'Des plans de sauvegarde appliqués à une machine ou un volume. L’immuabilité interdit la suppression d’un point de restauration pendant sa durée de rétention.'
+            : 'Des plans réutilisables applicables par étiquette, par Espace Cloud ou par ressource. L’immuabilité garantit qu’un point de restauration sous rétention ne peut être supprimé par personne — pas même par un attaquant ayant obtenu vos droits.'
+        }
         meta={
           <>
             <Badge tone="ok">{protegees} ressources protégées</Badge>
@@ -132,7 +145,11 @@ export default function Sauvegarde() {
           libelle="Ressources en échec"
           valeur={echecs}
           ton={echecs > 0 ? 'err' : 'ok'}
-          detail={echecs > 0 ? 'GED · Mayan' : 'Aucun échec'}
+          detail={
+            echecs > 0
+              ? conformite.filter((c) => c.protection === 'echec').map((c) => c.ressourceNom).join(', ')
+              : 'Aucun échec'
+          }
         />
       </div>
 
@@ -155,6 +172,7 @@ function OngletPlans() {
   const plans = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
   const vms = useCollection<VM>('vms', VMS).items
   const volumes = useCollection<Volume>('volumes', VOLUMES).items
+  const pointsPlans = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS).items
   const [drawer, setDrawer] = useState<BackupPlan | 'nouveau' | null>(null)
   const [f, setF] = useState<FormulairePlan>(PLAN_VIDE)
 
@@ -176,8 +194,9 @@ function OngletPlans() {
     setF((p) => ({ ...p, [cle]: valeur }))
 
   const destinations = (): BackupPlan['destinations'] => [
-    ...(f.local ? [{ type: 'local' as const, bucketId: BUCKETS[0]?.id }] : []),
-    ...(f.autreSite ? [{ type: 'autre_site' as const, bucketId: BUCKETS[1]?.id }] : []),
+    // En mode API les buckets de la maquette n'existent pas : pas d'identifiant inventé.
+    ...(f.local ? [{ type: 'local' as const, bucketId: estActif() ? undefined : BUCKETS[0]?.id }] : []),
+    ...(f.autreSite ? [{ type: 'autre_site' as const, bucketId: estActif() ? undefined : BUCKETS[1]?.id }] : []),
     ...(f.immuableCopie ? [{ type: 'immuable' as const }] : []),
   ]
 
@@ -308,22 +327,29 @@ function OngletPlans() {
       id: 'prochaine',
       entete: 'Prochaine exécution',
       cle: (p) => p.prochaineExecution,
-      rendu: (p) => dateHeure(p.prochaineExecution),
+      // Aucun planificateur de sauvegarde côté API : la date n'est qu'un décalage de 24 h
+      // posé à la création, jamais exécuté. On dit la vérité plutôt que d'afficher une date passée.
+      rendu: (p) => (estActif() ? 'Non planifiée' : dateHeure(p.prochaineExecution)),
       masquable: true,
     },
     {
       id: 'resultat',
       entete: 'Dernier résultat',
       cle: (p) => p.dernierResultat,
-      rendu: (p) => (
-        <Badge
-          tone={p.dernierResultat === 'ok' ? 'ok' : p.dernierResultat === 'partiel' ? 'warn' : 'err'}
-          dot
-          size="sm"
-        >
-          {p.dernierResultat === 'ok' ? 'Succès' : p.dernierResultat === 'partiel' ? 'Partiel' : 'Échec'}
-        </Badge>
-      ),
+      rendu: (p) =>
+        estActif() && !pointsPlans.some((pt) => pt.planId === p.id) && p.dernierResultat === 'ok' ? (
+          <Badge tone="neutral" size="sm">
+            Jamais exécuté
+          </Badge>
+        ) : (
+          <Badge
+            tone={p.dernierResultat === 'ok' ? 'ok' : p.dernierResultat === 'partiel' ? 'warn' : 'err'}
+            dot
+            size="sm"
+          >
+            {p.dernierResultat === 'ok' ? 'Succès' : p.dernierResultat === 'partiel' ? 'Partiel' : 'Échec'}
+          </Badge>
+        ),
     },
     {
       id: 'actions',
@@ -347,7 +373,11 @@ function OngletPlans() {
         <div className="px-4 pt-4">
           <CardHeader
             titre="Plans de sauvegarde"
-            sousTitre="Un plan par étiquette couvre automatiquement les ressources créées plus tard — c’est la façon la plus fiable de ne pas oublier une machine."
+            sousTitre={
+              estActif()
+                ? 'Un plan désigne une machine ou un volume. Les sauvegardes sont des instantanés pris sur la plateforme.'
+                : 'Un plan par étiquette couvre automatiquement les ressources créées plus tard — c’est la façon la plus fiable de ne pas oublier une machine.'
+            }
             actions={
               <GatedAction
                 autorise={autorise('backup.plan.write')}
@@ -368,20 +398,31 @@ function OngletPlans() {
             placeholderRecherche="Rechercher un plan…"
             vide={{
               titre: 'Aucun plan de sauvegarde',
-              phrase:
-                'Sans plan, aucune restauration n’est possible. Commencez par un plan quotidien immuable sur l’étiquette production, avec copie sur le second site.',
+              phrase: UN_SEUL_SITE
+                ? 'Sans plan, aucune restauration n’est possible. Commencez par un plan quotidien sur une machine de production.'
+                : 'Sans plan, aucune restauration n’est possible. Commencez par un plan quotidien immuable sur l’étiquette production, avec copie sur le second site.',
               action: { libelle: 'Créer un plan', onClick: () => ouvrir('nouveau') },
             }}
           />
         </div>
       </Card>
 
-      <Callout ton="violet" titre="Pourquoi l’immuabilité change tout">
-        Un point de restauration sous rétention WORM ne peut être supprimé ni raccourci par personne
-        — ni par un attaquant ayant obtenu des droits d’administration, ni par nos propres équipes.
-        C’est la seule protection qui résiste à une compromission de compte privilégié, et c’est ce
-        qui distingue une sauvegarde d’une simple copie.
-      </Callout>
+      {estActif() ? (
+        <Callout ton="info" titre="Ce que couvrent ces sauvegardes">
+          Chaque exécution prend un instantané de la machine ou du volume, sur la même plateforme
+          qu’eux. L’immuabilité interdit de supprimer un point avant la fin de sa rétention. La
+          plateforme n’a qu’un site : ces points ne remplacent pas une copie conservée en dehors
+          de Synelia. Les plans ne se déclenchent pas encore seuls — aucune exécution n’est
+          planifiée automatiquement.
+        </Callout>
+      ) : (
+        <Callout ton="violet" titre="Pourquoi l’immuabilité change tout">
+          Un point de restauration sous rétention WORM ne peut être supprimé ni raccourci par
+          personne — ni par un attaquant ayant obtenu des droits d’administration, ni par nos
+          propres équipes. C’est la seule protection qui résiste à une compromission de compte
+          privilégié, et c’est ce qui distingue une sauvegarde d’une simple copie.
+        </Callout>
+      )}
 
       <Drawer
         open={drawer !== null}
@@ -394,7 +435,7 @@ function OngletPlans() {
             <Button variant="ghost" onClick={() => setDrawer(null)}>
               Annuler
             </Button>
-            <Button disabled={!f.nom.trim()} onClick={enregistrer}>
+            <Button disabled={!f.nom.trim() || !f.scopeValeur.trim()} onClick={enregistrer}>
               {plan ? 'Enregistrer' : 'Créer le plan'}
             </Button>
           </>
@@ -419,30 +460,40 @@ function OngletPlans() {
                   ['ressource', 'Par ressource', 'Sélection explicite. À réserver aux cas particuliers.'],
                   ['service', 'Par service managé', 'Instances du marketplace.'],
                 ] as const
-              ).map(([v, l, d]) => (
-                <Radio
-                  key={v}
-                  name="portee"
-                  checked={f.scopeType === v}
-                  onChange={() => poser('scopeType', v)}
-                  label={l}
-                  description={d}
-                />
-              ))}
+              ).map(([v, l, d]) => {
+                // Seule la portée « par ressource » est exécutable côté API (`_cible_du_scope`).
+                const indisponible = estActif() && v !== 'ressource'
+                return (
+                  <Radio
+                    key={v}
+                    name="portee"
+                    checked={f.scopeType === v}
+                    onChange={() => poser('scopeType', v)}
+                    disabled={indisponible}
+                    label={l}
+                    description={
+                      indisponible
+                        ? 'Non pris en charge aujourd’hui : la sauvegarde ne sait exécuter qu’une machine ou un volume désigné.'
+                        : d
+                    }
+                  />
+                )
+              })}
             </div>
             <div className="mt-3">
               <Field label="Valeur de la portée">
                 <Input
                   value={f.scopeValeur}
                   onChange={(e) => poser('scopeValeur', e.target.value)}
+                  placeholder={estActif() ? 'Identifiant de la machine ou du volume' : undefined}
                   className="font-mono"
                 />
               </Field>
             </div>
             {vmSansVolume && vmCiblee && (
               <Callout
-                ton="warn"
-                titre="Cette machine ne pourra pas être réellement protégée"
+                ton="info"
+                titre="Sauvegarde par instantané de la machine entière"
                 className="mt-3"
                 action={
                   <ButtonLink href="/app/stockage" size="sm" variant="ghost">
@@ -450,11 +501,9 @@ function OngletPlans() {
                   </ButtonLink>
                 }
               >
-                {vmCiblee.nom} démarre sur le disque éphémère de l’hyperviseur, sans volume de
-                données Cinder attaché. Le plan sera créé, mais son exécution échouera à l’étape
-                « Créer le snapshot » : la sauvegarde d’un disque racine seul passe par Karbor, non
-                déployé sur cette plateforme. Seule une machine avec un volume séparé attaché est
-                aujourd’hui protégée pour de vrai.
+                {vmCiblee.nom} n’a pas de volume de données séparé : le plan prendra un instantané
+                de la machine entière. Pour sauvegarder et restaurer les données seules, attachez-
+                leur un volume.
               </Callout>
             )}
           </div>
@@ -507,20 +556,30 @@ function OngletPlans() {
               <Checkbox
                 checked={f.local}
                 onChange={(e) => poser('local', e.target.checked)}
-                label="Bucket local"
-                description={BUCKETS[0].nom}
+                label={estActif() ? 'Sur la plateforme' : 'Bucket local'}
+                description={estActif() ? `Instantané conservé à ${LIEUX_HEBERGEMENT}, avec la machine` : BUCKETS[0].nom}
               />
               <Checkbox
                 checked={f.autreSite}
                 onChange={(e) => poser('autreSite', e.target.checked)}
+                disabled={UN_SEUL_SITE}
                 label="Bucket sur l’autre site"
-                description={`${BUCKETS[1].nom} · satisfait la règle « une copie hors site »`}
+                description={
+                  UN_SEUL_SITE
+                    ? 'Indisponible : la plateforme n’a qu’un site, aucune copie hors site n’est possible.'
+                    : `${BUCKETS[1].nom} · satisfait la règle « une copie hors site »`
+                }
               />
               <Checkbox
                 checked={f.immuableCopie}
                 onChange={(e) => poser('immuableCopie', e.target.checked)}
+                disabled={estActif()}
                 label="Copie immuable"
-                description="Verrouillage WORM sur la durée de rétention"
+                description={
+                  estActif()
+                    ? 'Indisponible : aucune copie verrouillée sur un stockage objet. L’immuabilité du plan suffit à bloquer la suppression.'
+                    : 'Verrouillage WORM sur la durée de rétention'
+                }
               />
             </div>
           </div>
@@ -730,7 +789,7 @@ function OngletPoints() {
           {
             id: 'ressourceType',
             libelle: 'Nature',
-            options: Array.from(new Set(RESTORE_POINTS.map((p) => p.resourceType))).map((t) => ({
+            options: Array.from(new Set(points.items.map((p) => p.resourceType))).map((t) => ({
               value: t,
               label: t,
             })),
@@ -757,9 +816,20 @@ function OngletPoints() {
         }}
       />
       <Callout ton="info" titre="Suppression bloquée sur les points immuables">
-        L’icône de suppression est désactivée sur les points sous rétention WORM. Ce n’est pas une
-        limitation de l’interface : le verrouillage est appliqué au niveau du stockage objet, et
-        personne — pas même nos administrateurs — ne peut le contourner avant l’expiration.
+        {estActif() ? (
+          <>
+            L’icône de suppression est désactivée sur les points sous rétention, et l’API refuse
+            aussi de les supprimer avant l’expiration. Ces points sont des instantanés pris sur la
+            plateforme.
+          </>
+        ) : (
+          <>
+            L’icône de suppression est désactivée sur les points sous rétention WORM. Ce n’est pas
+            une limitation de l’interface : le verrouillage est appliqué au niveau du stockage
+            objet, et personne — pas même nos administrateurs — ne peut le contourner avant
+            l’expiration.
+          </>
+        )}
       </Callout>
     </div>
   )
@@ -804,7 +874,8 @@ function AssistantRestauration() {
   const pointsCol = useCollection<RestorePoint>('points-restauration', RESTORE_POINTS)
   const points = pointsCol.items
   const [etape, setEtape] = useState(1)
-  const [granularite, setGranularite] = useState('fichiers')
+  // En mode API la restauration est toujours complète (machine ou volume) : voir `GRANULARITES`.
+  const [granularite, setGranularite] = useState(estActif() ? 'machine' : 'fichiers')
   const [ressource, setRessource] = useState(points[0]?.resourceId ?? '')
   const [chemin, setChemin] = useState('/srv/uploads/comptabilite/2026')
   const [pointId, setPointId] = useState(points[0]?.id ?? '')
@@ -870,24 +941,33 @@ function AssistantRestauration() {
                 heures et perturbe la production.
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {GRANULARITES.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => setGranularite(g.id)}
-                    className={cn(
-                      'rounded-[8px] border-2 bg-white p-3.5 text-left transition-colors',
-                      granularite === g.id
-                        ? 'border-p-700 bg-p-050'
-                        : 'border-g-300 hover:border-p-400',
-                    )}
-                  >
-                    <span className="block text-[13px] font-semibold text-ink">{g.titre}</span>
-                    <span className="mt-1 block text-[12px] leading-snug text-g-700">
-                      {g.detail}
-                    </span>
-                  </button>
-                ))}
+                {GRANULARITES.map((g) => {
+                  // L'exécuteur de restauration reconstruit toujours la machine ou le volume en
+                  // entier : proposer un fichier ou une base reviendrait à écraser bien plus.
+                  const indisponible = estActif() && g.contrat !== 'complete'
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      disabled={indisponible}
+                      onClick={() => setGranularite(g.id)}
+                      className={cn(
+                        'rounded-[8px] border-2 bg-white p-3.5 text-left transition-colors',
+                        indisponible && 'cursor-not-allowed opacity-50',
+                        granularite === g.id
+                          ? 'border-p-700 bg-p-050'
+                          : 'border-g-300 hover:border-p-400',
+                      )}
+                    >
+                      <span className="block text-[13px] font-semibold text-ink">{g.titre}</span>
+                      <span className="mt-1 block text-[12px] leading-snug text-g-700">
+                        {indisponible
+                          ? 'Non pris en charge aujourd’hui : la restauration est toujours complète, jamais partielle.'
+                          : g.detail}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
               <Field label="Ressource à restaurer">
                 <Select value={ressource} onChange={(e) => setRessource(e.target.value)}>
@@ -1005,7 +1085,9 @@ function AssistantRestauration() {
               ).map(([v, l, d]) => {
                 // Le contrat (`DemandeRestauration.cible`) n’a que trois valeurs — pas de
                 // téléchargement local. Désactivé plutôt que simulé en mode API.
-                const indisponible = v === 'local' && estActif()
+                // Seule la restauration sur place est exécutée : l'exécuteur ignore `cible`, et il
+                // n'existe pas de second site.
+                const indisponible = estActif() && v !== 'meme'
                 return (
                   <button
                     key={v}
@@ -1021,7 +1103,9 @@ function AssistantRestauration() {
                     <span className="block text-[13px] font-semibold text-ink">{l}</span>
                     <span className="mt-1 block text-[12px] leading-snug text-g-700">
                       {indisponible
-                        ? 'Non pris en charge par l’API aujourd’hui — le contrat de restauration ne prévoit pas de destination locale.'
+                        ? v === 'autre_site'
+                          ? 'Indisponible : la plateforme n’a qu’un site.'
+                          : 'Non pris en charge aujourd’hui : la restauration se fait uniquement sur place.'
                         : d}
                     </span>
                   </button>
@@ -1165,7 +1249,7 @@ function AssistantRestauration() {
 
 function OngletConformite() {
   const { autorise, refus } = useApp()
-  const CONFORMITE_ITEMS = useCollection<ConformiteAvecId>('conformite-sauvegarde', CONFORMITE_AVEC_ID).items
+  const CONFORMITE_ITEMS = useConformite()
 
   const colonnes: Array<Colonne<ConformiteLigne & { id: string }>> = [
     {
@@ -1275,7 +1359,7 @@ function OngletConformite() {
         <StatTile
           libelle="Restauration testée avec succès"
           valeur={`${testees}/${CONFORMITE_ITEMS.length}`}
-          ton="ok"
+          ton={testees === CONFORMITE_ITEMS.length ? 'ok' : 'warn'}
         />
         <StatTile
           libelle="RPO médian constaté"
@@ -1354,6 +1438,14 @@ function OngletConformite() {
         </div>
       </Card>
 
+      {estActif() ? (
+        <Callout ton="info" titre="Pourquoi aucune ressource n’est conforme 3-2-1">
+          La règle 3-2-1 demande une copie hors site. La plateforme n’a qu’un site
+          ({LIEUX_HEBERGEMENT}) et ses sauvegardes sont des instantanés pris au même endroit que
+          la ressource : aucun plan Synelia ne peut cocher la troisième case. Gardez une copie sur
+          un support que vous maîtrisez, en dehors de la plateforme.
+        </Callout>
+      ) : (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Callout ton="err" titre="GED · Mayan : sauvegarde en échec">
           La dernière sauvegarde réussie remonte au 17 août, soit un RPO constaté de plus de 37
@@ -1368,6 +1460,7 @@ function OngletConformite() {
           bancaire, cela mérite une décision explicite et documentée.
         </Callout>
       </div>
+      )}
     </div>
   )
 }
@@ -1391,10 +1484,28 @@ function OngletReprise() {
   return (
     <div className="space-y-4">
       <Callout ton="info" titre="Sauvegarde et reprise ne se remplacent pas">
-        Une sauvegarde restaure un état passé, en quelques minutes à quelques heures. Un plan de
-        reprise redémarre tout un périmètre sur l’autre site, dans un ordre défini, avec un
-        engagement de délai. Le premier couvre l’erreur, le second couvre la perte du site.
+        {UN_SEUL_SITE ? (
+          <>
+            Une sauvegarde restaure un état passé, en quelques minutes à quelques heures. Un plan
+            de reprise décrit dans quel ordre redémarrer tout un périmètre, avec un délai cible.
+            La plateforme n’a qu’un site ({LIEUX_HEBERGEMENT}) : le plan se rejoue sur place, il
+            ne couvre pas la perte du site.
+          </>
+        ) : (
+          <>
+            Une sauvegarde restaure un état passé, en quelques minutes à quelques heures. Un plan
+            de reprise redémarre tout un périmètre sur l’autre site, dans un ordre défini, avec un
+            engagement de délai. Le premier couvre l’erreur, le second couvre la perte du site.
+          </>
+        )}
       </Callout>
+      {DR_PLANS_ITEMS.length === 0 && (
+        <EmptyState
+          titre="Aucun plan de reprise"
+          phrase="Créez un plan pour fixer l’ordre de redémarrage de vos ressources et vos cibles de RPO et de RTO."
+          action={{ libelle: 'Ouvrir les plans de reprise', href: '/app/pra' }}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {DR_PLANS_ITEMS.map((p) => {
@@ -1429,7 +1540,7 @@ function OngletReprise() {
                     </Badge>
                   </span>
                 }
-                sousTitre={`${SITE_COURT[p.siteSource]} → ${SITE_COURT[p.siteRepli]} · ${p.groupes.length} groupes de démarrage · réplication ${p.replication.mode === 'continu' ? 'continue' : 'planifiée'}`}
+                sousTitre={`${trajetSites(p.siteSource, p.siteRepli)} · ${p.groupes.length} groupes de démarrage${UN_SEUL_SITE ? '' : ` · réplication ${p.replication.mode === 'continu' ? 'continue' : 'planifiée'}`}`}
                 actions={
                   <ButtonLink href={`/app/pra/${p.id}`} variant="secondary" size="sm">
                     Ouvrir le plan

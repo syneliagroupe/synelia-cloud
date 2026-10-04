@@ -38,6 +38,7 @@ import { Logo, BadgeSuperAdmin } from '@/components/brand/logo'
 import { RechercheGlobale } from './recherche'
 import { useApp, useEspace, useMaintenant } from './contexte'
 import { useAtelier, useCollection } from './atelier'
+import { estActif } from '@/lib/api/client'
 
 const NOTIFICATIONS = [
   {
@@ -178,7 +179,12 @@ function BarreUnivers({
         </Popover>
       </div>
 
-      {!superAdmin && <SelecteurContexte avecEspace={!courant.panneauEspace} />}
+      {/* Web Cloud et IAM ne dépendent pas d'un Espace Cloud : l'organisation seule. */}
+      {!superAdmin && (
+        <SelecteurContexte
+          avecEspace={!courant.panneauEspace && courant.id !== 'web' && courant.id !== 'iam'}
+        />
+      )}
 
       <RechercheGlobale portee={portee} />
 
@@ -283,6 +289,9 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
   const espace = useEspace()
   const listeEspaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
+  // Organisation neuve : aucun Espace, ne pas afficher le code de la graine.
+  const codeEspace =
+    listeEspaces.items.length === 0 && !listeEspaces.chargement ? 'Aucun Espace' : espace.code
 
   return (
     <Popover
@@ -291,7 +300,7 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
       trigger={() => (
         <span
           className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-white/15 bg-white/10 px-2 py-1.5 text-[11.5px] font-semibold text-p-300 transition-colors hover:bg-white/15"
-          title={avecEspace ? `${orgActive?.nom} · ${espace.code}` : (orgActive?.nom ?? '')}
+          title={avecEspace ? `${orgActive?.nom} · ${codeEspace}` : (orgActive?.nom ?? '')}
         >
           <Building2 size={12} className="shrink-0" />
           {/* Le nom de l'organisation n'apparaît qu'au-delà de 1536 px quand le
@@ -309,7 +318,7 @@ function SelecteurContexte({ avecEspace }: { avecEspace: boolean }) {
           {avecEspace && (
             <>
               <span className="hidden text-p-400 2xl:inline">·</span>
-              <span className="hidden font-mono xl:inline">{espace.code}</span>
+              <span className="hidden font-mono xl:inline">{codeEspace}</span>
             </>
           )}
           <ChevronDown size={12} className="shrink-0 text-p-400" />
@@ -511,6 +520,9 @@ function CentreDeTachesCorps({ jobs, superAdmin }: { jobs: ProvisioningJob[]; su
 
 function NotificationsPopover() {
   const maintenant = useMaintenant()
+  // Pas de flux de notifications côté backend : la liste de démonstration ne
+  // doit pas se faire passer pour l'état réel de la plateforme.
+  const liste = estActif() ? [] : NOTIFICATIONS
   return (
     <Popover
       width="w-80"
@@ -521,7 +533,9 @@ function NotificationsPopover() {
           title="Notifications"
         >
           <Bell size={16} />
-          <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-m-600" />
+          {liste.length > 0 && (
+            <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-m-600" />
+          )}
         </span>
       )}
     >
@@ -530,7 +544,12 @@ function NotificationsPopover() {
           <p className="text-[13px] font-bold text-ink">Notifications</p>
         </div>
         <div className="max-h-80 divide-y divide-g-100 overflow-y-auto">
-          {NOTIFICATIONS.map((n) => (
+          {liste.length === 0 && (
+            <p className="px-3 py-6 text-center text-[12.5px] text-g-500">
+              Aucune notification. Les opérations en cours et leurs échecs sont dans le centre de tâches.
+            </p>
+          )}
+          {liste.map((n) => (
             <div key={n.id} className="px-3 py-2.5">
               <div className="flex items-start gap-2">
                 <span

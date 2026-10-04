@@ -36,6 +36,7 @@ export const REGISTRE_COLLECTIONS: Record<string, string> = {
   jobs: '/travaux',
   organisations: '/organisations',
   offres: '/admin/catalogue/offres',
+  'offres-publiques': '/public/offres',
   backends: '/admin/backends',
   placements: '/admin/placements',
   incidents: '/admin/statut/incidents',
@@ -67,6 +68,7 @@ export const REGISTRE_COLLECTIONS: Record<string, string> = {
   'tickets-plateforme': '/admin/tickets',
   'jobs-plateforme': '/admin/travaux',
   'attestations-generees': '/attestations',
+  'fenetres-patching': '/admin/conformite/fenetres-patching',
 }
 
 /** Endpoint d’une collection, ou `undefined` quand elle reste locale. */
@@ -92,6 +94,14 @@ export function endpointDe(nom: string): string | undefined {
   if (variables) return `/projets/${encodeURIComponent(variables[1])}/variables`
   const elevations = /^elevations-(.+)$/.exec(nom)
   if (elevations) return `/admin/equipe/${encodeURIComponent(elevations[1])}/elevation`
+  const comptesHebergement = /^comptes-hebergement-(.+)$/.exec(nom)
+  if (comptesHebergement) {
+    return `/web/hebergements/${encodeURIComponent(comptesHebergement[1])}/comptes-fichiers`
+  }
+  const tachesHebergement = /^taches-hebergement-(.+)$/.exec(nom)
+  if (tachesHebergement) {
+    return `/web/hebergements/${encodeURIComponent(tachesHebergement[1])}/taches`
+  }
   return undefined
 }
 

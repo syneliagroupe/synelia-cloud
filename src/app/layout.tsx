@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { JetBrains_Mono, Montserrat, Open_Sans } from 'next/font/google'
 import './globals.css'
+import { LIEUX_HEBERGEMENT, SITES } from '@/lib/types'
 
 const montserrat = Montserrat({
   subsets: ['latin'],
@@ -29,7 +30,8 @@ export const metadata: Metadata = {
     template: '%s · Synelia Cloud',
   },
   description:
-    'Espaces Cloud, machines virtuelles, Kubernetes managé, sauvegarde immuable, plan de reprise et solutions open source opérées par Synelia. Deux sites en Côte d’Ivoire : Abidjan et Grand-Bassam.',
+    'Espaces Cloud, machines virtuelles, Kubernetes managé, sauvegarde immuable, plan de reprise et solutions open source opérées par Synelia. ' +
+    (SITES.length > 1 ? 'Deux sites en Côte d’Ivoire : Abidjan et Grand-Bassam.' : 'Hébergé à Abidjan, en Côte d’Ivoire.'),
   applicationName: 'Synelia Cloud',
   authors: [{ name: 'Synelia Group Afrique', url: 'https://synelia.tech' }],
   keywords: [
@@ -61,7 +63,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Synelia Cloud — Infrastructure cloud souveraine en Côte d’Ivoire',
     description:
-      'Une plateforme de gestion de cloud multi-tenant : infrastructure, applications et solutions open source opérées, hébergées à Abidjan et Grand-Bassam.',
+      'Une plateforme de gestion de cloud multi-tenant : infrastructure, applications et solutions open source opérées, hébergées à ' + LIEUX_HEBERGEMENT + '.',
     type: 'website',
     locale: 'fr_CI',
     siteName: 'Synelia Cloud',
@@ -79,7 +81,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Synelia Cloud — Infrastructure cloud souveraine en Côte d’Ivoire',
     description:
-      'Infrastructure, applications et solutions open source opérées, hébergées à Abidjan et Grand-Bassam.',
+      'Infrastructure, applications et solutions open source opérées, hébergées à ' + LIEUX_HEBERGEMENT + '.',
     images: ['/photos/og.jpg'],
   },
 }

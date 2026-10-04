@@ -46,7 +46,7 @@ const JALONS = [
   },
 ]
 
-export function PanneauOnboarding() {
+export function PanneauOnboarding({ faits: etat }: { faits: Record<string, boolean> }) {
   const [ferme, setFerme] = useState(false)
   const [ouvert, setOuvert] = useState<string | null>('domaine')
   // En mode API le backend sait si le guide est terminé ou masqué : on ne
@@ -62,14 +62,15 @@ export function PanneauOnboarding() {
       () => {},
     )
   }, [])
-  const faits = JALONS.filter((j) => j.fait).length
+  const jalons = JALONS.map((j) => ({ ...j, fait: etat[j.id] ?? j.fait }))
+  const faits = jalons.filter((j) => j.fait).length
 
   const masquer = () => {
     setFerme(true)
     if (estActif()) requete('/onboarding', { methode: 'PATCH', corps: { masque: true } }).catch(() => {})
   }
 
-  if (ferme || masqueDistant || faits === JALONS.length) return null
+  if (ferme || masqueDistant || faits === jalons.length) return null
 
   return (
     <section className="overflow-hidden rounded-[10px] border border-p-300 bg-p-050">
@@ -77,7 +78,7 @@ export function PanneauOnboarding() {
         <div className="flex items-center gap-3">
           <MicroLabel className="text-p-700">Prise en main</MicroLabel>
           <div className="flex items-center gap-1.5">
-            {JALONS.map((j) => (
+            {jalons.map((j) => (
               <span
                 key={j.id}
                 className={cn('h-1.5 w-8 rounded-full', j.fait ? 'bg-p-700' : 'bg-p-300')}
@@ -85,7 +86,7 @@ export function PanneauOnboarding() {
             ))}
           </div>
           <span className="tnum text-[12px] font-semibold text-p-700">
-            {faits} sur {JALONS.length}
+            {faits} sur {jalons.length}
           </span>
         </div>
         <button
@@ -99,7 +100,7 @@ export function PanneauOnboarding() {
       </div>
 
       <ul className="divide-y divide-p-300/50 border-t border-p-300/50">
-        {JALONS.map((j) => (
+        {jalons.map((j) => (
           <li key={j.id}>
             <button
               type="button"

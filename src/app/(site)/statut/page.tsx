@@ -4,13 +4,15 @@ import { Fragment, useMemo, useState } from 'react'
 import { Bell, CheckCircle2, Rss, Webhook } from 'lucide-react'
 import { cn, groupBy, seededSeries } from '@/lib/utils'
 import { dateHeure, pct, relatif } from '@/lib/format'
-import { SITE_COURT, type Site } from '@/lib/types'
+import { SITE_COURT, SITES, type Site } from '@/lib/types'
 import { INCIDENTS as INCIDENTS_GRAINE, STATUT_SERVICES as STATUT_GRAINE } from '@/lib/mock'
 import { usePublic } from '@/lib/api/public'
+import { estActif } from '@/lib/api/client'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, SegmentedControl } from '@/components/ui/field'
 import { Card, CardHeader } from '@/components/composition/card'
+import { SkeletonTable } from '@/components/composition/states'
 import { Timeline } from '@/components/composition/flow'
 import { Container, HeroCourt, SectionTitle, SiteSection } from '@/components/site/blocs'
 
@@ -31,6 +33,7 @@ export default function Statut() {
   const distant = usePublic<{
     services: typeof STATUT_GRAINE
     incidents: typeof INCIDENTS_GRAINE
+    derniereMaj?: string
   }>('/public/statut')
   const STATUT_SERVICES = distant.donnees?.services ?? STATUT_GRAINE
   const INCIDENTS = distant.donnees?.incidents ?? INCIDENTS_GRAINE
@@ -55,7 +58,46 @@ export default function Statut() {
     degrades.length > 0 ? 'degrade' : maintenance.length > 0 ? 'maintenance' : 'operationnel'
 
   const jours = periode === '90j' ? 90 : 30
-  const frise = seededSeries('frise-statut', jours, 0, 6.4).map((v) => Math.floor(v))
+  // Réponse distante : une case par jour d'après les incidents réellement publiés.
+  // `new Date()` ne s'exécute qu'après la lecture, jamais au rendu serveur.
+  const frise = distant.donnees
+    ? Array.from({ length: jours }, (_, i) => {
+        const jour = new Date().getTime() - (jours - 1 - i) * 86_400_000
+        const j = new Date(jour).toISOString().slice(0, 10)
+        const touches = INCIDENTS.filter(
+          (inc) => inc.debut.slice(0, 10) <= j && (!inc.fin || inc.fin.slice(0, 10) >= j),
+        )
+        return touches.some((inc) => inc.gravite === 'majeur')
+          ? 6
+          : touches.length > 0
+            ? 5
+            : 0
+      })
+    : seededSeries('frise-statut', jours, 0, 6.4).map((v) => Math.floor(v))
+  // En mode API, rien de la graine ne s'affiche en attendant la sonde : un état neutre.
+  const enAttente = estActif() && !distant.termine
+  const sites = (
+    distant.donnees
+      ? [...new Set(STATUT_SERVICES.flatMap((s) => Object.keys(s.etats)))]
+      : [...SITES]
+  ) as Site[]
+
+  if (enAttente) {
+    return (
+      <>
+        <HeroCourt
+          surtitre="État des services"
+          titre="Disponibilité en direct, par service et par site"
+          chapeau="Lecture de l’état des services en cours…"
+        />
+        <SiteSection className="!py-8">
+          <Container>
+            <SkeletonTable lignes={4} colonnes={3} />
+          </Container>
+        </SiteSection>
+      </>
+    )
+  }
 
   return (
     <>
@@ -100,7 +142,11 @@ export default function Statut() {
                         : 'Maintenance planifiée en cours'}
                   </p>
                   <p className="mt-0.5 text-[13px] text-g-700">
-                    Dernière actualisation {relatif('2026-08-19T15:18:00Z')} ·{' '}
+                    Dernière actualisation{' '}
+                    {distant.donnees?.derniereMaj
+                      ? dateHeure(distant.donnees.derniereMaj)
+                      : relatif('2026-08-19T15:18:00Z')}{' '}
+                    ·{' '}
                     {maintenance.length > 0 &&
                       `${maintenance.length} fenêtre de maintenance en cours · `}
                     disponibilité moyenne sur 90 jours : {pct(uptimeMoyen, 2)}
@@ -136,7 +182,7 @@ export default function Statut() {
                   <th className="type-micro sticky left-0 z-10 min-w-56 bg-g-050 px-4 py-2.5 text-left text-g-500">
                     Service
                   </th>
-                  {(['ABJ', 'GBM'] as Site[]).map((s) => (
+                  {sites.map((s) => (
                     <th key={s} className="type-micro px-4 py-2.5 text-left text-g-500">
                       {SITE_COURT[s]}
                     </th>
@@ -150,7 +196,7 @@ export default function Statut() {
                 {parCategorie.map(([cat, services]) => (
                   <Fragment key={`cat-${cat}`}>
                     <tr className="border-b border-g-300 bg-p-050">
-                      <td colSpan={4} className="px-4 py-2">
+                      <td colSpan={sites.length + 2} className="px-4 py-2">
                         <span className="type-micro text-p-700">{cat}</span>
                       </td>
                     </tr>
@@ -159,7 +205,7 @@ export default function Statut() {
                         <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-[13px] text-ink">
                           {s.nom}
                         </td>
-                        {(['ABJ', 'GBM'] as Site[]).map((site) => {
+                        {sites.map((site) => {
                           const e = ETATS[s.etats[site]]
                           return (
                             <td key={site} className="px-4 py-2.5">
@@ -290,6 +336,9 @@ export default function Statut() {
           <div className="mt-6">
             <MicroLabel className="mb-3">Incidents résolus</MicroLabel>
             <div className="space-y-2.5">
+              {resolus.length === 0 && (
+                <p className="text-[13px] text-g-500">Aucun incident résolu sur la période.</p>
+              )}
               {resolus.map((inc) => (
                 <details
                   key={inc.id}
@@ -360,6 +409,8 @@ export default function Statut() {
               Pas encore disponible : cette page publie l’état en direct, mais rien n’envoie encore
               de notification par e-mail.
             </p>
+            {/* Ni webhook d'état ni flux RSS n'existent côté plateforme : ils ne figurent qu'en maquette. */}
+            {!estActif() && (
             <div className="mt-4 grid grid-cols-1 gap-3 border-t border-g-100 pt-4 sm:grid-cols-2">
               <div className="flex items-start gap-2.5">
                 <Webhook size={14} className="mt-0.5 shrink-0 text-p-700" />
@@ -381,6 +432,7 @@ export default function Statut() {
                 </div>
               </div>
             </div>
+            )}
             <p className="mt-4 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
               Les clients sous contrat reçoivent en plus une notification dans le portail et, pour les
               incidents majeurs, un appel de l’équipe d’astreinte lorsque leurs ressources sont

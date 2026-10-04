@@ -19,6 +19,8 @@ import { useApp, useEspace } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { useOperation } from '@/components/app/actions'
 import { creerRessource, estActif } from '@/lib/api/client'
+import { PRIX } from '@/lib/tarifs'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 
 export default function LoadBalancers() {
   const espace = useEspace()
@@ -147,7 +149,11 @@ export default function LoadBalancers() {
           { label: 'Load balancers' },
         ]}
         titre="Load balancers"
-        sousTitre="Répartition de charge en couche 4 ou 7, publique ou interne, avec terminaison TLS automatique, règles de routage, pare-feu applicatif OWASP et limitation de débit."
+        sousTitre={
+          estActif()
+            ? 'Répartition de charge Octavia en couche 4 ou 7, publique ou interne, avec règles de routage et health checks. Le pare-feu applicatif, la limitation de débit et la terminaison TLS automatique ne sont pas encore portés.'
+            : 'Répartition de charge en couche 4 ou 7, publique ou interne, avec terminaison TLS automatique, règles de routage, pare-feu applicatif OWASP et limitation de débit.'
+        }
         actions={
           <GatedAction autorise={autorise('lb.create')} message={refus('lb.create')}>
             <Button iconBefore={<Plus size={14} />} onClick={() => setAssistant(true)}>
@@ -169,11 +175,13 @@ export default function LoadBalancers() {
           valeur={`${lbs.reduce((a, l) => a + l.pool.filter((p) => p.sante === 'ok').length, 0)}/${lbs.reduce((a, l) => a + l.pool.length, 0)}`}
           ton="ok"
         />
-        <StatTile
-          libelle="WAF actifs"
-          valeur={lbs.filter((l) => l.waf?.actif).length}
-          detail="Jeu de règles OWASP CRS 4.3"
-        />
+        {!estActif() && (
+          <StatTile
+            libelle="WAF actifs"
+            valeur={lbs.filter((l) => l.waf?.actif).length}
+            detail="Jeu de règles OWASP CRS 4.3"
+          />
+        )}
       </div>
 
       <DataTable
@@ -202,9 +210,14 @@ export default function LoadBalancers() {
         href={(l) => `/app/reseau/lb/${l.id}`}
         vide={{
           titre: 'Aucun load balancer',
-          phrase:
-            'Un load balancer répartit le trafic entre plusieurs cibles, termine le TLS et applique un pare-feu applicatif. C’est la brique qui rend une application réellement redondante.',
+          phrase: phraseVideEspace(
+            espace.code,
+            estActif()
+              ? 'Un load balancer répartit le trafic entre vos machines et retire celles qui ne répondent plus à son health check.'
+              : 'Un load balancer répartit le trafic, termine le TLS et peut appliquer un pare-feu applicatif.',
+          ),
           action: { libelle: 'Créer un load balancer', onClick: () => setAssistant(true) },
+          actionSecondaire: actionChangerEspace,
         }}
       />
 
@@ -243,12 +256,17 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
   const [vip, setVip] = useState('')
   const [portHttps, setPortHttps] = useState(443)
   const [tlsMin, setTlsMin] = useState('TLS 1.2')
-  const [certAuto, setCertAuto] = useState(true)
-  const [redirection, setRedirection] = useState(true)
+  // Le backend (Octavia) ne termine pas le TLS, ne redirige pas HTTP vers HTTPS et
+  // refuse le WAF : en mode API ces options sont proposées éteintes et désactivées.
+  const api = estActif()
+  const [certAuto, setCertAuto] = useState(!api)
+  const [redirection, setRedirection] = useState(!api)
+  const [protoL4, setProtoL4] = useState('TCP')
+  const [portL4, setPortL4] = useState(5432)
   const [algo, setAlgo] = useState<LoadBalancer['algo']>('least_conn')
   const [sticky, setSticky] = useState(true)
   const [cibles, setCibles] = useState<string[]>([])
-  const [waf, setWaf] = useState(true)
+  const [waf, setWaf] = useState(!api)
   const [rateLimit, setRateLimit] = useState(1200)
   const [hcChemin, setHcChemin] = useState('/healthz')
   const [hcIntervalle, setHcIntervalle] = useState(10)
@@ -275,9 +293,9 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
   const vmsEspace = vmsCol.items.filter((v) => v.espaceId === espace.id)
 
   const lignesCout = [
-    { libelle: `Load balancer ${layer.toUpperCase()}`, detail: nom, montant: 18000 },
+    { libelle: `Load balancer ${layer.toUpperCase()}`, detail: nom, montant: PRIX.lbMois },
     ...(vipMode === 'nouvelle' && exposure === 'public'
-      ? [{ libelle: 'IP publique supplémentaire', detail: 'Commande immédiate', montant: 3500 }]
+      ? [{ libelle: 'IP publique supplémentaire', detail: 'Commande immédiate', montant: PRIX.ipPubliqueMois }]
       : []),
     ...(waf ? [{ libelle: 'Pare-feu applicatif (WAF)', detail: 'OWASP CRS 4.3', montant: 12000 }] : []),
   ]
@@ -325,10 +343,13 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   vip: vip || `102.176.20.${190 + collection.items.length}`,
                   algo,
                   sticky: sticky ? 'cookie' : undefined,
-                  listeners: [
-                    { protocole: 'HTTPS', port: portHttps, certId: certAuto ? 'cert-auto' : undefined, tlsMin },
-                    ...(redirection ? [{ protocole: 'HTTP', port: 80 }] : []),
-                  ],
+                  listeners:
+                    layer === 'l4'
+                      ? [{ protocole: protoL4, port: portL4 }]
+                      : [
+                          { protocole: 'HTTPS', port: portHttps, certId: certAuto ? 'cert-auto' : undefined, tlsMin },
+                          ...(redirection ? [{ protocole: 'HTTP', port: 80 }] : []),
+                        ],
                   pool: cibles.map((cible) => ({
                     targetId: cible,
                     targetLabel: vmsEspace.find((v) => v.id === cible)?.nom ?? cible,
@@ -374,15 +395,18 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                         exposure,
                         algo,
                         ...(sticky ? { sticky: 'cookie' } : {}),
-                        listeners: [
-                          {
-                            protocole: 'HTTPS',
-                            port: portHttps,
-                            ...(certAuto ? { certId: 'cert-auto' } : {}),
-                            tlsMin,
-                          },
-                          ...(redirection ? [{ protocole: 'HTTP', port: 80 }] : []),
-                        ],
+                        listeners:
+                          layer === 'l4'
+                            ? [{ protocole: protoL4, port: portL4 }]
+                            : [
+                                {
+                                  protocole: 'HTTPS',
+                                  port: portHttps,
+                                  ...(certAuto ? { certId: 'cert-auto' } : {}),
+                                  tlsMin,
+                                },
+                                ...(redirection ? [{ protocole: 'HTTP', port: 80 }] : []),
+                              ],
                         cibles: cibles.map((cible) => ({ targetId: cible, poids: 10 })),
                         healthCheck: {
                           protocole: layer === 'l7' ? 'HTTP' : 'TCP',
@@ -597,25 +621,39 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                     checked={certAuto}
                     onChange={setCertAuto}
                     label="Certificat Let’s Encrypt automatique"
-                    description="Émission et renouvellement automatiques, trente jours avant expiration. Vous pouvez aussi téléverser votre propre certificat après création."
+                    disabled={api}
+                    description={
+                      api
+                        ? 'Indisponible : le load balancer relaie le HTTPS sans le terminer, le certificat reste celui de vos machines.'
+                        : 'Émission et renouvellement automatiques, trente jours avant expiration. Vous pouvez aussi téléverser votre propre certificat après création.'
+                    }
                   />
                   <Switch
                     checked={redirection}
                     onChange={setRedirection}
                     label="Rediriger HTTP vers HTTPS"
-                    description="Un écouteur sur le port 80 renvoie une redirection 301 permanente vers HTTPS."
+                    disabled={api}
+                    description={
+                      api
+                        ? 'Indisponible : aucune redirection HTTP vers HTTPS n’est portée par le load balancer.'
+                        : 'Un écouteur sur le port 80 renvoie une redirection 301 permanente vers HTTPS.'
+                    }
                   />
                 </>
               ) : (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field label="Protocole">
-                    <Select defaultValue="TCP">
+                    <Select value={protoL4} onChange={(e) => setProtoL4(e.target.value)}>
                       <option value="TCP">TCP</option>
                       <option value="UDP">UDP</option>
                     </Select>
                   </Field>
                   <Field label="Port">
-                    <Input type="number" defaultValue={5432} />
+                    <Input
+                      type="number"
+                      value={portL4}
+                      onChange={(e) => setPortL4(Number(e.target.value))}
+                    />
                   </Field>
                 </div>
               )}
@@ -726,7 +764,12 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   checked={waf}
                   onChange={setWaf}
                   label="Pare-feu applicatif (WAF) — OWASP CRS 4.3"
-                  description="Démarre en mode détection : les requêtes suspectes sont journalisées sans être bloquées. Passez en blocage après avoir posé vos exceptions."
+                  disabled={api}
+                  description={
+                    api
+                      ? 'Indisponible : ni le WAF ni la limitation de débit ne sont portés par cette plateforme.'
+                      : 'Démarre en mode détection : les requêtes suspectes sont journalisées sans être bloquées. Passez en blocage après avoir posé vos exceptions.'
+                  }
                 />
                 {waf && (
                   <Slider
@@ -836,9 +879,18 @@ function AssistantLb({ onFermer }: { onFermer: () => void }) {
                   valeur:
                     layer === 'l7'
                       ? `HTTPS ${portHttps} · ${tlsMin}${redirection ? ' · HTTP → HTTPS' : ''}`
-                      : 'TCP 5432',
+                      : `${protoL4} ${portL4}`,
                 },
-                { cle: 'Certificat', valeur: certAuto ? 'Let’s Encrypt automatique' : 'Téléversé' },
+                {
+                  cle: 'Certificat',
+                  valeur: layer === 'l4'
+                    ? '—'
+                    : api
+                    ? 'Aucun — HTTPS relayé sans terminaison'
+                    : certAuto
+                      ? 'Let’s Encrypt automatique'
+                      : 'Téléversé',
+                },
                 { cle: 'Algorithme', valeur: algo },
                 { cle: 'Sessions persistantes', valeur: sticky ? 'Activées' : 'Désactivées' },
                 { cle: 'Cibles', valeur: `${cibles.length} machine(s)` },

@@ -101,7 +101,7 @@ export function SelecteurRessource({
       <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {visibles.length === 0 ? (
           <li className="px-2 py-6 text-center text-[12px] text-g-500">
-            Aucune entrée ne correspond.
+            {entrees.length === 0 ? 'Rien à lister pour l’instant.' : 'Aucune entrée ne correspond.'}
           </li>
         ) : (
           visibles.map((e) => {

@@ -13,6 +13,7 @@ import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { GrilleSparkCharts } from '@/components/business/observabilite'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'fiche', label: 'Fiche' },
@@ -58,6 +59,8 @@ export function VueModele({ modeleId }: { modeleId: string }) {
   const modelesCol = useCollection<ModeleIA>('modeles-ia', MODELES_IA)
   const modeles = modelesCol.items
   const modele = modeles.find((m) => m.id === modeleId)
+  // Latence, débit et file d'attente ne sont pas mesurés côté API : l'onglet n'existerait que fictif.
+  const onglets = estActif() ? ONGLETS.filter((o) => o.id !== 'performance') : ONGLETS
 
   // Garde après les crochets : la vue dit ce qu'elle ne trouve pas.
   if (!modele) {
@@ -98,7 +101,7 @@ export function VueModele({ modeleId }: { modeleId: string }) {
 
       {modele && (
         <>
-          <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
+          <Tabs tabs={onglets} active={onglet} onChange={setOnglet} />
 
           {onglet === 'fiche' && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -142,7 +145,7 @@ export function VueModele({ modeleId }: { modeleId: string }) {
                   </Callout>
                 ) : (
                   <Callout ton="ok" titre="Le calcul a lieu en Côte d’Ivoire">
-                    La requête entre et sort de {modele.site === 'ABJ' ? 'Abidjan' : 'Grand-Bassam'} :
+                    La requête entre et sort de {modele.site === 'GBM' ? 'Grand-Bassam' : 'Abidjan'} :
                     aucune donnée ne franchit la frontière, aucun sous-traitant étranger n’intervient,
                     et la latence n’inclut pas d’aller-retour transatlantique.
                   </Callout>
@@ -289,6 +292,13 @@ export function VueModele({ modeleId }: { modeleId: string }) {
 
           {onglet === 'appel' && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {modele.invocable === false && (
+                <Callout ton="warn" titre="Pas encore appelable" className="lg:col-span-2">
+                  Ce modèle figure au catalogue mais la passerelle ne l’expose pas pour l’instant :
+                  les exemples ci-dessous montrent la forme de l’appel, ils ne fonctionneront pas
+                  avant son ouverture.
+                </Callout>
+              )}
               <Card>
                 <CardHeader
                   titre="En ligne de commande"

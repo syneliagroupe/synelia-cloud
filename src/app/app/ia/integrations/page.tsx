@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { num } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
 import { CANAUX_AGENT, OUTILS_AGENT, ROUTEUR_OMNICANAL } from '@/lib/mock'
 import { MicroLabel, Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,12 +14,15 @@ import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/component
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
 import { useApp } from '@/components/app/contexte'
+import { AvisDemoApi } from '../avis-demo'
 
 export default function Integrations() {
   const { autorise, refus, pousser } = useApp()
   const [declaration, setDeclaration] = useState(false)
 
-  const peutDeclarer = autorise('ia.tool.register')
+  // Canaux et outils n'ont pas de contrepartie côté API : tout ce qui suit est la graine.
+  const api = estActif()
+  const peutDeclarer = autorise('ia.tool.register') && !api
   const connectes = CANAUX_AGENT.filter((c) => c.etat === 'connecte')
   const messages = CANAUX_AGENT.reduce((a, c) => a + c.messages24h, 0)
   const actifs = OUTILS_AGENT.filter((o) => o.statut === 'actif')
@@ -36,13 +40,21 @@ export default function Integrations() {
         titre="Intégrations"
         sousTitre="Deux directions opposées, réunies parce qu’elles décident ensemble de ce qu’un agent peut faire : les canaux sont ce qui l’appelle, les outils ce qu’il appelle. Un agent sans outil ne sait que parler ; un agent sans canal ne parle à personne. Choisissez une intégration dans le panneau."
         actions={
-          <GatedAction autorise={peutDeclarer} message={refus('ia.tool.register')}>
+          <GatedAction
+            autorise={peutDeclarer}
+            message={api ? 'Les canaux et les outils ne sont pas encore branchés à l’API.' : refus('ia.tool.register')}
+          >
             <Button iconBefore={<Plus size={14} />} onClick={() => setDeclaration(true)}>
               Déclarer un outil
             </Button>
           </GatedAction>
         }
       />
+
+      <AvisDemoApi>
+        Les canaux, les outils et leurs compteurs ci-dessous sont un jeu de données d’exemple :
+        l’API ne gère pas encore les intégrations des agents, rien n’est connecté ni appelé.
+      </AvisDemoApi>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

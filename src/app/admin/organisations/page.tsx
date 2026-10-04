@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Building2, Plus, ShieldAlert, UserCog } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { dateCourte, MAINTENANT, money, num, relatif } from '@/lib/format'
+import { dateCourte, MAINTENANT, money, nomPays, num, relatif } from '@/lib/format'
 import { ELEVATIONS, EQUIPE_SYNELIA, IMPAYES, libellePlan, ORGANISATIONS, USERS } from '@/lib/mock'
 import type { Elevation, Impaye } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
@@ -20,7 +20,18 @@ import { useApp } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire, useOperation } from '@/components/app/actions'
 import type { Organisation } from '@/lib/types'
-import { creerRessource, requete } from '@/lib/api/client'
+import { creerRessource, estActif, requete } from '@/lib/api/client'
+
+/** L'API stocke le code ISO du pays (« CI ») ; l'écran affiche le nom. */
+const PAYS = [
+  { code: 'CI', nom: 'Côte d’Ivoire' },
+  { code: 'SN', nom: 'Sénégal' },
+  { code: 'BJ', nom: 'Bénin' },
+  { code: 'TG', nom: 'Togo' },
+  { code: 'BF', nom: 'Burkina Faso' },
+  { code: 'ML', nom: 'Mali' },
+  { code: 'FR', nom: 'France' },
+]
 
 export default function Organisations() {
   const { autorise, refus, pousser } = useApp()
@@ -32,10 +43,11 @@ export default function Organisations() {
   // La collection d'élévations est propre à chaque organisation : la fiche de
   // l'organisation lit exactement la même, sous le même nom.
   const creerElevation = (orgId: string, e: Elevation) =>
-    atelier.creer(`elevations-${orgId}`, ELEVATIONS, e)
+    atelier.creer(`emprunts-${orgId}`, ELEVATIONS, e)
   const [creation, setCreation] = useState(false)
   const [nom, setNom] = useState('')
-  const [pays, setPays] = useState('Côte d’Ivoire')
+  const api = estActif()
+  const [pays, setPays] = useState(api ? 'CI' : 'Côte d’Ivoire')
   const [secteur, setSecteur] = useState('')
   const [plan, setPlan] = useState('standard')
   const [tva, setTva] = useState('')
@@ -48,9 +60,11 @@ export default function Organisations() {
     executer({
       action: 'org.manage',
       titre: `${nom.trim()} créée`,
-      detail: `Le royaume d’identité est provisionné et l’invitation de ${
-        adminCourriel.trim() || 'l’administrateur'
-      } est envoyée.`,
+      detail: api
+        ? `L’organisation est créée${adminCourriel.trim() ? ` et ${adminCourriel.trim()} est désigné administrateur` : ''}.`
+        : `Le royaume d’identité est provisionné et l’invitation de ${
+            adminCourriel.trim() || 'l’administrateur'
+          } est envoyée.`,
       job: { workflow: 'org.create', cible: nom.trim() },
       appel: () =>
         creerRessource('/organisations', {
@@ -107,11 +121,11 @@ export default function Organisations() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {orgs.items.length} organisations
+              {orgs.items.length} organisation{orgs.items.length > 1 ? 's' : ''}
             </Badge>
             {suspendues.length > 0 && (
               <Badge tone="warn" dot size="sm">
-                {suspendues.length} suspendue
+                {suspendues.length} suspendue{suspendues.length > 1 ? 's' : ''}
               </Badge>
             )}
           </>
@@ -119,7 +133,7 @@ export default function Organisations() {
       />
 
       {orgsImpayees.size > 0 && (
-        <Callout ton="warn" titre={`${orgsImpayees.size} organisations en situation d’impayé`}>
+        <Callout ton="warn" titre={`${orgsImpayees.size} organisation${orgsImpayees.size > 1 ? 's' : ''} en situation d’impayé`}>
           {[...orgsImpayees].join(', ')}. Notre politique interdit la suspension automatique : un
           impayé déclenche une relance écrite, puis un appel, puis une proposition d’échelonnement.
           La suspension est une décision humaine, prise en dernier recours et journalisée.
@@ -130,7 +144,7 @@ export default function Organisations() {
         <StatTile libelle="Organisations actives" valeur={actives.length} ton="ok" />
         <StatTile
           libelle="Secteurs représentés"
-          valeur={new Set(orgs.items.map((o) => o.secteur ?? o.pays)).size}
+          valeur={new Set(orgs.items.map((o) => o.secteur).filter(Boolean)).size}
           ton="violet"
           detail={`sur ${orgs.items.length} organisations`}
         />
@@ -148,7 +162,7 @@ export default function Organisations() {
         <StatTile
           libelle="Utilisateurs"
           valeur={num(orgs.items.reduce((a, o) => a + (o.utilisateurs ?? 0), 0))}
-          detail={`${USERS.length} identités connues`}
+          detail={api ? undefined : `${USERS.length} identités connues`}
         />
       </div>
 
@@ -187,7 +201,7 @@ export default function Organisations() {
                   { value: 'tous', label: 'Tous les pays' },
                   ...[...new Set(orgs.items.map((o) => o.pays))].map((p) => ({
                     value: p,
-                    label: p,
+                    label: nomPays(p),
                   })),
                 ],
               },
@@ -217,7 +231,7 @@ export default function Organisations() {
                         {o.nom}
                       </span>
                       <span className="block truncate text-[11px] text-g-500">
-                        {o.pays}
+                        {nomPays(o.pays)}
                         {o.secteur ? ` · ${o.secteur}` : ''}
                       </span>
                     </span>
@@ -341,7 +355,7 @@ export default function Organisations() {
                           type: 'zone',
                           obligatoire: true,
                           placeholder:
-                            'Ticket SYN-8814 — diagnostic de la latence signalée sur app-metier, lecture des métriques et des journaux de production.',
+                            'Ex. : diagnostic d’une latence signalée par le client, lecture des métriques et des journaux.',
                         },
                         {
                           id: 'duree',
@@ -450,13 +464,11 @@ export default function Organisations() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Pays">
               <Select value={pays} onChange={(e) => setPays(e.target.value)}>
-                <option value="Côte d’Ivoire">Côte d’Ivoire</option>
-                <option value="Sénégal">Sénégal</option>
-                <option value="Bénin">Bénin</option>
-                <option value="Togo">Togo</option>
-                <option value="Burkina Faso">Burkina Faso</option>
-                <option value="Mali">Mali</option>
-                <option value="France">France</option>
+                {PAYS.map((x) => (
+                  <option key={x.code} value={api ? x.code : x.nom}>
+                    {x.nom}
+                  </option>
+                ))}
               </Select>
             </Field>
             <Field label="Secteur">
@@ -468,13 +480,15 @@ export default function Organisations() {
             </Field>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Plan de service">
-              <Select value={plan} onChange={(e) => setPlan(e.target.value)}>
-                <option value="standard">Standard</option>
-                <option value="avance">Avancé — support prioritaire</option>
-                <option value="entreprise">Entreprise — interlocuteur dédié</option>
-              </Select>
-            </Field>
+            {!api && (
+              <Field label="Plan de service">
+                <Select value={plan} onChange={(e) => setPlan(e.target.value)}>
+                  <option value="standard">Standard</option>
+                  <option value="avance">Avancé — support prioritaire</option>
+                  <option value="entreprise">Entreprise — interlocuteur dédié</option>
+                </Select>
+              </Field>
+            )}
             <Field label="Numéro de contribuable" hint="détermine le régime de TVA">
               <Input
                 placeholder="CI-ABJ-2024-B-00000"
@@ -494,6 +508,7 @@ export default function Organisations() {
               onChange={(e) => setAdminCourriel(e.target.value)}
             />
           </Field>
+          {!api && (
           <div className="space-y-3">
             <Switch
               checked={royaume}
@@ -514,7 +529,8 @@ export default function Organisations() {
               description="4 vCPU, 8 Go, 100 Go de disque, gratuit pendant 30 jours puis supprimé automatiquement après avertissement."
             />
           </div>
-          <CostPreview
+          )}
+          {!api && <CostPreview
             lignes={[
               {
                 libelle: `Plan de service ${
@@ -538,11 +554,11 @@ export default function Organisations() {
                   ]
                 : []),
             ]}
-          />
+          />}
           <Callout ton="info" titre="Ce que la création déclenche">
-            Un royaume d’identité isolé, une organisation dans le portail, un compte de facturation,
-            et une invitation pour l’administrateur désigné. Aucune ressource technique n’est créée
-            avant que le client ne souscrive lui-même une offre.
+            {api
+              ? 'Une organisation dans le portail, avec l’administrateur désigné s’il est renseigné. Aucune ressource technique n’est créée avant que le client ne souscrive lui-même une offre.'
+              : 'Un royaume d’identité isolé, une organisation dans le portail, un compte de facturation, et une invitation pour l’administrateur désigné. Aucune ressource technique n’est créée avant que le client ne souscrive lui-même une offre.'}
           </Callout>
         </div>
       </Modal>

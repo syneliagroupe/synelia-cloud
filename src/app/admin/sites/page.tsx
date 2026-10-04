@@ -10,6 +10,7 @@ import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Tabs } from '@/components/ui/display'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
 import { GrilleSparkCharts } from '@/components/business/observabilite'
 import { useCollection } from '@/components/app/atelier'
@@ -85,16 +86,26 @@ export default function Sites() {
   const [onglet, setOnglet] = useState('sites')
   // `GET /admin/sites` ne sert que son `424` : le descriptif reste local,
   // mais un site dont l’état réel est inconnu se signale.
-  const { degrade } = useLectureDegradable('/admin/sites')
+  const { donnees: sitesReels, degrade } = useLectureDegradable<
+    { code: string; nom: string; ville: string; operateur: string }[]
+  >('/admin/sites')
+  const api = estActif()
 
   const BACKENDS = parc.items
+  const hotes = BACKENDS.reduce((a, b) => a + b.hosts, 0)
+  const vcpuTotal = BACKENDS.reduce((a, b) => a + b.capacite.vcpu, 0)
+  const vcpuUtilise = BACKENDS.reduce((a, b) => a + (b.capacite.vcpu * b.usage.vcpuPct) / 100, 0)
 
   return (
     <div className="space-y-5">
       <PageHeader
         fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Sites physiques' }]}
         titre="Sites physiques"
-        sousTitre="Deux sites en Côte d’Ivoire, à 42 kilomètres l’un de l’autre. Assez proches pour une réplication synchrone, assez éloignés pour qu’un même sinistre — inondation, coupure de réseau électrique, incendie — ne les touche pas ensemble."
+        sousTitre={
+          api
+            ? 'Le site physique d’Abidjan et les socles qui y sont hébergés.'
+            : 'Deux sites en Côte d’Ivoire, à 42 kilomètres l’un de l’autre. Assez proches pour une réplication synchrone, assez éloignés pour qu’un même sinistre — inondation, coupure de réseau électrique, incendie — ne les touche pas ensemble.'
+        }
         actions={
           <ButtonLink variant="secondary" external href="/datacenters">
             Voir la page publique
@@ -103,10 +114,10 @@ export default function Sites() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {SITES.length} sites
+              {SITES.length} {SITES.length > 1 ? 'sites' : 'site'}
             </Badge>
             <Badge tone="neutral" size="sm">
-              {BACKENDS.length} socles répartis
+              {BACKENDS.length} socle{BACKENDS.length > 1 ? 's' : ''} hébergé{BACKENDS.length > 1 ? 's' : ''}
             </Badge>
             <Badge tone="ok" size="sm">
               Aucune donnée hors de Côte d’Ivoire
@@ -126,29 +137,39 @@ export default function Sites() {
         </Callout>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          libelle="Baies installées"
-          valeur={92}
-          detail="sur 144 emplacements, les deux sites"
-        />
-        <StatTile
-          libelle="Puissance utile"
-          valeur="660 kW"
-          detail="1 040 kW installés"
-        />
-        <StatTile
-          libelle="Indicateur d’efficacité moyen"
-          valeur="1,46"
-          ton="ok"
-          detail="Moyenne mondiale des centres de données : 1,55"
-        />
-        <StatTile
-          libelle="Latence entre sites"
-          valeur="2,4 ms"
-          ton="ok"
-          detail="Fibre dédiée, deux chemins distincts"
-        />
+      <div className={cn('grid grid-cols-2 gap-3', api ? 'lg:grid-cols-3' : 'lg:grid-cols-4')}>
+        {api ? (
+          <>
+            <StatTile libelle="Socles" valeur={BACKENDS.length} />
+            <StatTile libelle="Hôtes" valeur={hotes} />
+            <StatTile
+              libelle="Processeur alloué"
+              valeur={vcpuTotal ? pct((vcpuUtilise / vcpuTotal) * 100) : '—'}
+              detail={`${num(Math.round(vcpuUtilise))} sur ${num(vcpuTotal)} vCPU`}
+            />
+          </>
+        ) : (
+          <>
+            <StatTile
+              libelle="Baies installées"
+              valeur={92}
+              detail="sur 144 emplacements, les deux sites"
+            />
+            <StatTile libelle="Puissance utile" valeur="660 kW" detail="1 040 kW installés" />
+            <StatTile
+              libelle="Indicateur d’efficacité moyen"
+              valeur="1,46"
+              ton="ok"
+              detail="Moyenne mondiale des centres de données : 1,55"
+            />
+            <StatTile
+              libelle="Latence entre sites"
+              valeur="2,4 ms"
+              ton="ok"
+              detail="Fibre dédiée, deux chemins distincts"
+            />
+          </>
+        )}
       </div>
 
       <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
@@ -157,6 +178,7 @@ export default function Sites() {
         <div className="space-y-4">
           {SITES.map((s) => {
             const c = CARACTERISTIQUES[s]
+            const reel = sitesReels?.find((x) => x.code === s)
             const socles = BACKENDS.filter((b) => b.site === s)
             const vcpu = socles.reduce((a, b) => a + b.capacite.vcpu, 0)
             const utilise = Math.round(
@@ -167,39 +189,49 @@ export default function Sites() {
                 <CardHeader
                   titre={
                     <span className="flex flex-wrap items-baseline gap-2">
-                      <span>{SITE_LABEL[s]}</span>
-                      <Badge tone={s === 'ABJ' ? 'violet' : 'accent'} size="sm">
-                        {c.role}
-                      </Badge>
+                      <span>{(api && reel?.nom) || SITE_LABEL[s]}</span>
+                      {!api && (
+                        <Badge tone={s === 'ABJ' ? 'violet' : 'accent'} size="sm">
+                          {c.role}
+                        </Badge>
+                      )}
                     </span>
                   }
-                  sousTitre={`${c.adresse} · mis en service le ${dateCourte(c.inaugure)}`}
+                  sousTitre={
+                    api
+                      ? reel && `${reel.ville} · ${reel.operateur}`
+                      : `${c.adresse} · mis en service le ${dateCourte(c.inaugure)}`
+                  }
                   actions={
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      {c.certifications.map((x) => (
-                        <Badge key={x} tone="neutral" size="sm">
-                          {x}
-                        </Badge>
-                      ))}
-                    </span>
+                    !api && (
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {c.certifications.map((x) => (
+                          <Badge key={x} tone="neutral" size="sm">
+                            {x}
+                          </Badge>
+                        ))}
+                      </span>
+                    )
                   }
                 />
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div className="lg:col-span-2">
-                    <KeyValueList
-                      colonnes={2}
-                      items={[
-                        { cle: 'Surface', valeur: c.surface },
-                        { cle: 'Baies', valeur: c.baies },
-                        { cle: 'Puissance', valeur: c.puissance },
-                        { cle: 'Indicateur d’efficacité', valeur: String(c.pue) },
-                        { cle: 'Alimentation sans coupure', valeur: c.onduleurs },
-                        { cle: 'Groupes électrogènes', valeur: c.groupes },
-                        { cle: 'Refroidissement', valeur: c.refroidissement },
-                        { cle: 'Latence inter-site', valeur: c.latenceInter },
-                      ]}
-                    />
-                    <MicroLabel className="mt-4 mb-2">Socles hébergés</MicroLabel>
+                    {!api && (
+                      <KeyValueList
+                        colonnes={2}
+                        items={[
+                          { cle: 'Surface', valeur: c.surface },
+                          { cle: 'Baies', valeur: c.baies },
+                          { cle: 'Puissance', valeur: c.puissance },
+                          { cle: 'Indicateur d’efficacité', valeur: String(c.pue) },
+                          { cle: 'Alimentation sans coupure', valeur: c.onduleurs },
+                          { cle: 'Groupes électrogènes', valeur: c.groupes },
+                          { cle: 'Refroidissement', valeur: c.refroidissement },
+                          { cle: 'Latence inter-site', valeur: c.latenceInter },
+                        ]}
+                      />
+                    )}
+                    <MicroLabel className={cn('mb-2', !api && 'mt-4')}>Socles hébergés</MicroLabel>
                     <div className="space-y-2">
                       {socles.map((b) => (
                         <div
@@ -211,7 +243,7 @@ export default function Sites() {
                               {b.code}
                             </span>
                             <span className="block text-[11px] text-g-500">
-                              {BACKEND_LABEL[b.type]} · {b.hosts} hôtes
+                              {BACKEND_LABEL[b.type]} · {b.hosts} hôte{b.hosts > 1 ? 's' : ''}
                             </span>
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
@@ -239,43 +271,56 @@ export default function Sites() {
                       seuil={85}
                       formateur={(v) => num(v)}
                     />
-                    <QuotaBar
-                      libelle="Baies occupées"
-                      utilise={s === 'ABJ' ? 68 : 24}
-                      total={s === 'ABJ' ? 96 : 48}
-                      seuil={85}
-                    />
-                    <QuotaBar
-                      libelle="Puissance consommée"
-                      utilise={s === 'ABJ' ? 412 : 118}
-                      total={s === 'ABJ' ? 480 : 180}
-                      unite="kW"
-                      seuil={85}
-                    />
-                    <MicroLabel className="mt-3">Opérateurs raccordés</MicroLabel>
-                    <ul className="space-y-1">
-                      {c.operateurs.map((o) => (
-                        <li key={o} className="flex items-start gap-1.5 text-[12px] text-g-700">
-                          <Cable size={11} className="mt-0.5 shrink-0 text-p-700" />
-                          {o}
-                        </li>
-                      ))}
-                    </ul>
+                    {!api && (
+                      <>
+                        <QuotaBar
+                          libelle="Baies occupées"
+                          utilise={s === 'ABJ' ? 68 : 24}
+                          total={s === 'ABJ' ? 96 : 48}
+                          seuil={85}
+                        />
+                        <QuotaBar
+                          libelle="Puissance consommée"
+                          utilise={s === 'ABJ' ? 412 : 118}
+                          total={s === 'ABJ' ? 480 : 180}
+                          unite="kW"
+                          seuil={85}
+                        />
+                        <MicroLabel className="mt-3">Opérateurs raccordés</MicroLabel>
+                        <ul className="space-y-1">
+                          {c.operateurs.map((o) => (
+                            <li key={o} className="flex items-start gap-1.5 text-[12px] text-g-700">
+                              <Cable size={11} className="mt-0.5 shrink-0 text-p-700" />
+                              {o}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
                   </div>
                 </div>
               </Card>
             )
           })}
 
-          <Callout ton="violet" titre="Deux sites à 42 kilomètres">
-            Plus près, un même sinistre naturel peut toucher les deux. Plus loin, la latence interdit
-            la réplication synchrone. Les deux sites sont sur deux réseaux électriques distincts et
-            deux chemins de fibre séparés.
-          </Callout>
+          {!api && (
+            <Callout ton="violet" titre="Deux sites à 42 kilomètres">
+              Plus près, un même sinistre naturel peut toucher les deux. Plus loin, la latence interdit
+              la réplication synchrone. Les deux sites sont sur deux réseaux électriques distincts et
+              deux chemins de fibre séparés.
+            </Callout>
+          )}
         </div>
       )}
 
-      {onglet === 'environnement' && (
+      {onglet === 'environnement' && api && (
+        <EmptyState
+          titre="Aucune mesure d’énergie ni de refroidissement"
+          phrase="La plateforme ne reçoit pas de relevé de puissance, de température ou d’efficacité du site : rien n’est affiché plutôt qu’un chiffre inventé."
+        />
+      )}
+
+      {onglet === 'environnement' && !api && (
         <div className="space-y-4">
           <GrilleSparkCharts
             seed="sites-environnement"
@@ -422,7 +467,14 @@ export default function Sites() {
         </div>
       )}
 
-      {onglet === 'reseau' && (
+      {onglet === 'reseau' && api && (
+        <EmptyState
+          titre="Aucune donnée de connectivité"
+          phrase="Les liens, opérateurs et latences du site ne sont pas remontés à la plateforme : rien n’est affiché plutôt qu’un chiffre inventé."
+        />
+      )}
+
+      {onglet === 'reseau' && !api && (
         <div className="space-y-4">
           <Card>
             <CardHeader
@@ -541,7 +593,14 @@ export default function Sites() {
         </div>
       )}
 
-      {onglet === 'contraintes' && (
+      {onglet === 'contraintes' && api && (
+        <EmptyState
+          titre="Aucune règle de placement appliquée"
+          phrase="Un seul site est exploité : les règles entre sites (sauvegarde hors site, plan de reprise) ne s’appliquent pas, et la plateforme n’en impose aucune autre pour l’instant."
+        />
+      )}
+
+      {onglet === 'contraintes' && !api && (
         <div className="space-y-4">
           <Card>
             <CardHeader
@@ -612,49 +671,51 @@ export default function Sites() {
             qu’aucune économie de transfert ne compensera cela.
           </Callout>
 
-          <Card>
-            <CardHeader
-              titre="Refus de placement récents"
-              sousTitre="Chaque refus est journalisé, avec la règle invoquée."
-            />
-            <div className="space-y-2">
-              {[
-                {
-                  q: 'il y a 2 jours',
-                  org: 'AMUGA',
-                  d: 'Création d’un plan de sauvegarde avec destination identique à la source',
-                  r: 'Règle 3-2-1 — copie hors site obligatoire',
-                },
-                {
-                  q: 'il y a 6 jours',
-                  org: 'ONECI',
-                  d: 'Création d’un Espace Cloud sur CL-GRA-01',
-                  r: 'Organisation souveraine — socle propriétaire exclu',
-                },
-                {
-                  q: 'il y a 11 jours',
-                  org: 'SOTRA',
-                  d: 'Extension de 32 vCPU sur HV-RBX-01',
-                  r: 'Socle en trajectoire de sortie — proposition de placement sur OS-ABJ-01',
-                },
-              ].map((x) => (
-                <div key={x.q} className="rounded-[6px] border border-g-300 px-3 py-2.5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="min-w-0 text-[12px] font-semibold text-ink">{x.d}</span>
-                    <span className="shrink-0 text-[11px] text-g-500">
-                      {x.org} · {x.q}
-                    </span>
+          {!api && (
+            <Card>
+              <CardHeader
+                titre="Refus de placement récents"
+                sousTitre="Chaque refus est journalisé, avec la règle invoquée."
+              />
+              <div className="space-y-2">
+                {[
+                  {
+                    q: 'il y a 2 jours',
+                    org: 'AMUGA',
+                    d: 'Création d’un plan de sauvegarde avec destination identique à la source',
+                    r: 'Règle 3-2-1 — copie hors site obligatoire',
+                  },
+                  {
+                    q: 'il y a 6 jours',
+                    org: 'ONECI',
+                    d: 'Création d’un Espace Cloud sur CL-GRA-01',
+                    r: 'Organisation souveraine — socle propriétaire exclu',
+                  },
+                  {
+                    q: 'il y a 11 jours',
+                    org: 'SOTRA',
+                    d: 'Extension de 32 vCPU sur HV-RBX-01',
+                    r: 'Socle en trajectoire de sortie — proposition de placement sur OS-ABJ-01',
+                  },
+                ].map((x) => (
+                  <div key={x.q} className="rounded-[6px] border border-g-300 px-3 py-2.5">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="min-w-0 text-[12px] font-semibold text-ink">{x.d}</span>
+                      <span className="shrink-0 text-[11px] text-g-500">
+                        {x.org} · {x.q}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-warn">Règle invoquée : {x.r}</p>
                   </div>
-                  <p className="mt-0.5 text-[11px] text-warn">Règle invoquée : {x.r}</p>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-[12px] leading-relaxed text-g-500">
-              Un refus n’est jamais silencieux : le client voit la règle invoquée, et une alternative
-              lui est proposée dans le même écran. Un refus sans explication, c’est un ticket de
-              support garanti.
-            </p>
-          </Card>
+                ))}
+              </div>
+              <p className="mt-3 text-[12px] leading-relaxed text-g-500">
+                Un refus n’est jamais silencieux : le client voit la règle invoquée, et une alternative
+                lui est proposée dans le même écran. Un refus sans explication, c’est un ticket de
+                support garanti.
+              </p>
+            </Card>
+          )}
         </div>
       )}
     </div>

@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, Plus, Share2, Trash2 } from 'lucide-react'
-import { money, relatif } from '@/lib/format'
+import { goHumain, money, relatif } from '@/lib/format'
 import { DRIVES, USERS, type DriveDomaine } from '@/lib/mock'
 import { configurationDuService } from '@/lib/configurations'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -35,8 +35,40 @@ export function VueDrive({ id }: { id: string }) {
   const [motDePasse, setMotDePasse] = useState(true)
   /** Sièges retirés dans la session : le jeu de données n'a pas de table. */
   const [retires, setRetires] = useState<string[]>([])
+  const [adminNextcloud, setAdminNextcloud] = useState<{
+    utilisateur: string
+    motDePasse: string
+    url: string
+  } | null>(null)
+  const [adminCharge, setAdminCharge] = useState(false)
 
   const d = drives.items.find((x) => x.id === id)
+
+  useEffect(() => {
+    if (!d?.actif || !estActif() || !autorise('service.admin')) {
+      setAdminNextcloud(null)
+      setAdminCharge(false)
+      return
+    }
+    let annule = false
+    setAdminCharge(true)
+    requete<{ utilisateur: string; motDePasse: string; url: string }>(
+      `/web/drive/${encodeURIComponent(d.id)}/identifiants-admin`,
+    )
+      .then((r) => {
+        if (!annule) setAdminNextcloud(r)
+      })
+      .catch(() => {
+        if (!annule) setAdminNextcloud(null)
+      })
+      .finally(() => {
+        if (!annule) setAdminCharge(false)
+      })
+    return () => {
+      annule = true
+    }
+  }, [d?.id, d?.actif])
+
   if (!d) return null
 
   // Contrairement au webmail (Zimbra `DelegateAuthRequest`), il n’y a pas de SSO applicatif
@@ -250,8 +282,8 @@ export function VueDrive({ id }: { id: string }) {
             />
             <StatTile
               libelle="Espace"
-              valeur={`${(d.quota.utiliseGo / 1024).toFixed(2)} To`}
-              detail={`sur ${(d.quota.totalGo / 1024).toFixed(0)} To`}
+              valeur={goHumain(d.quota.utiliseGo)}
+              detail={`sur ${goHumain(d.quota.totalGo)}`}
               ton={d.quota.utiliseGo / d.quota.totalGo > 0.85 ? 'warn' : 'neutral'}
             />
             <StatTile
@@ -268,6 +300,48 @@ export function VueDrive({ id }: { id: string }) {
           </div>
 
           <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
+
+          <GatedAction autorise={autorise('service.admin')} message={refus('service.admin')}>
+            <Card>
+              <CardHeader
+                titre="Administration Nextcloud"
+                sousTitre="Compte admin posé à l’activation du drive sur le VPS. Servez-vous-en pour créer les comptes utilisateurs ; l’ouverture « Ouvrir » mène toujours à l’écran de connexion Nextcloud."
+              />
+              {estActif() ? (
+                adminCharge ? (
+                  <p className="text-[12px] text-g-500">Chargement des identifiants…</p>
+                ) : adminNextcloud ? (
+                  <div className="space-y-3">
+                    <div>
+                      <MicroLabel>URL</MicroLabel>
+                      <CopyField value={adminNextcloud.url} mono className="mt-1" />
+                    </div>
+                    <div>
+                      <MicroLabel>Utilisateur</MicroLabel>
+                      <CopyField value={adminNextcloud.utilisateur} mono className="mt-1" />
+                    </div>
+                    <div>
+                      <MicroLabel>Mot de passe admin</MicroLabel>
+                      <CopyField value={adminNextcloud.motDePasse} masque mono className="mt-1" />
+                    </div>
+                  </div>
+                ) : (
+                  <Callout ton="warn" titre="Identifiants indisponibles">
+                    Le drive est actif mais les identifiants admin n’ont pas pu être lus (activation
+                    incomplète ou droits insuffisants).
+                  </Callout>
+                )
+              ) : (
+                <KeyValueList
+                  items={[
+                    { cle: 'URL', valeur: `https://${d.hote}/` },
+                    { cle: 'Utilisateur', valeur: 'admin' },
+                    { cle: 'Mot de passe', valeur: '•••••••• (maquette)' },
+                  ]}
+                />
+              )}
+            </Card>
+          </GatedAction>
 
           {onglet === 'sieges' && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

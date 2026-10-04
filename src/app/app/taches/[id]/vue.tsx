@@ -95,8 +95,7 @@ export function VueSuiviTache({ id }: { id: string }) {
           {job.statut === 'failed' && (
             <Callout ton="err" titre="Ce job a échoué et a été annulé proprement">
               La capacité réservée a été libérée automatiquement et aucune souscription facturable
-              n’a été créée. Corrigez la cause indiquée ci-dessus puis relancez la souscription :
-              vos choix de configuration sont conservés.
+              n’a été créée. Corrigez la cause indiquée ci-dessus puis relancez l’opération.
             </Callout>
           )}
 
@@ -108,10 +107,8 @@ export function VueSuiviTache({ id }: { id: string }) {
           )}
 
           {job.statut === 'done' && (
-            <Callout ton="ok" titre="Provisioning terminé">
-              Le service est opérationnel. Le bouton{' '}
-              <span className="font-semibold text-m-600">Ouvrir</span> de sa carte vous redirige
-              désormais en SSO vers son interface d’origine.
+            <Callout ton="ok" titre="Tâche terminée">
+              Toutes les étapes ont abouti. La ressource concernée est à jour dans sa section.
             </Callout>
           )}
         </div>

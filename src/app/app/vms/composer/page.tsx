@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Rocket, Server } from 'lucide-react'
-import { SITE_LABEL, type EspaceCloud, type VM } from '@/lib/types'
+import { SITE_COURT, SITE_LABEL, SITES, type EspaceCloud, type VM } from '@/lib/types'
 import { ESPACES, NETWORKS, VMS } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -155,10 +155,7 @@ export default function ComposerServeurs() {
               </Field>
               <Field label="Site physique" hint="Celui de l’Espace Cloud choisi.">
                 <SegmentedControl
-                  options={[
-                    { value: 'ABJ', label: 'Abidjan' },
-                    { value: 'GBM', label: 'Grand-Bassam' },
-                  ]}
+                  options={SITES.map((s) => ({ value: s, label: SITE_COURT[s] }))}
                   value={espace.site}
                   onChange={() => undefined}
                 />

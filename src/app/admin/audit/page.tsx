@@ -4,24 +4,24 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Download, FileCheck2, KeyRound, ShieldAlert } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
-import { MAINTENANT, dateHeure, num, pct, relatif } from '@/lib/format'
+import { dateHeure, num, pct, relatif } from '@/lib/format'
 import { telechargerCsv, telechargerTexte } from '@/lib/export'
 import { EQUIPE_SYNELIA, ORGANISATIONS } from '@/lib/mock'
 import type { MembreEquipe } from '@/lib/mock'
-import { ROLE_LABEL, type Role } from '@/lib/types'
+import { LIEUX_HEBERGEMENT, ROLE_LABEL, type Role } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Input, Select, Switch } from '@/components/ui/field'
 import { Drawer } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
-import { StatTile } from '@/components/composition/metrics'
+import { StatTile, HistoriqueSimule } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
 import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useLectureDegradable } from '@/lib/api/degradable'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
-import { requete } from '@/lib/api/client'
+import { estActif, requete } from '@/lib/api/client'
 import type { AuditEvent } from '@/lib/types'
 
 /** `GET /audit/integrite` : rejoue la chaîne de hachage et confirme qu'elle est intacte, ou
@@ -60,17 +60,21 @@ export default function AuditAdmin() {
     '/admin/audit',
     { parPage: '200' },
   )
-  const AUDIT = journalDistant?.donnees ?? journalLocal
+  const api = estActif()
+  const AUDIT = journalDistant?.donnees ?? (api ? [] : journalLocal)
   const { donnees: integriteDistante } = useLectureDegradable<IntegriteAudit>('/audit/integrite')
-  const integrite = integriteDistante ?? INTEGRITE_DEMO
+  const integrite =
+    integriteDistante ?? (api ? { intacte: true, entreesVerifiees: 0, totalEntrees: 0 } : INTEGRITE_DEMO)
 
   const { autorise, refus, pousser } = useApp()
   const equipe = useCollection<MembreEquipe>('equipe-synelia', EQUIPE_SYNELIA)
   const executer = useOperation()
   const [onglet, setOnglet] = useState('journal')
   const [detail, setDetail] = useState<AuditEvent | null>(null)
-  const [du, setDu] = useState('2026-07-19')
-  const [au, setAu] = useState('2026-08-19')
+  const [du, setDu] = useState(() =>
+    api ? new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10) : '2026-07-19',
+  )
+  const [au, setAu] = useState(() => (api ? new Date().toISOString().slice(0, 10) : '2026-08-19'))
   const [perimetre, setPerimetre] = useState('tout')
   const [format, setFormat] = useState('pdf')
   const [empreinte, setEmpreinte] = useState(true)
@@ -82,7 +86,7 @@ export default function AuditAdmin() {
   const elevationsActives = equipe.items.filter((m) => m.elevation?.active)
 
   const orgNom = (id?: string) =>
-    id ? (ORGANISATIONS.find((o) => o.id === id)?.nom ?? id) : 'Plateforme'
+    id ? (api ? id : (ORGANISATIONS.find((o) => o.id === id)?.nom ?? id)) : 'Plateforme'
 
   /** Les lignes que l'export retiendra, avec les mêmes règles que l'écran. */
   const lignesExport = () =>
@@ -225,13 +229,13 @@ export default function AuditAdmin() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatTile
-          libelle="Événements 30 jours"
-          valeur={num(AUDIT.length * 312)}
+          libelle="Événements au journal"
+          valeur={num(AUDIT.length)}
           detail="Toutes organisations, toutes actions"
         />
         <StatTile
           libelle="Actions de nos équipes"
-          valeur={num(parEquipe.length * 84)}
+          valeur={num(parEquipe.length)}
           detail="Sur les ressources des clients"
         />
         <StatTile
@@ -513,7 +517,16 @@ export default function AuditAdmin() {
                 sousTitre="Trente derniers jours, toutes équipes."
               />
               <div className="space-y-2">
-                {[
+                {(api
+                  ? AUDIT.filter((a) => a.action.includes('elevation')).map((a) => ({
+                      qui: a.actor.nom,
+                      org: a.orgNom ?? orgNom(a.orgId),
+                      q: a.ts,
+                      d: '',
+                      m: a.target ?? a.action,
+                      p: a.action.includes('revoc') ? 'Révocation' : 'Élévation',
+                    }))
+                  : [
                   {
                     qui: 'Jean-Vincent Kassi',
                     org: 'Digital Business Africa',
@@ -546,7 +559,8 @@ export default function AuditAdmin() {
                     m: 'Ticket SYN-8641 — vérification de configuration réseau',
                     p: 'Lecture seule',
                   },
-                ].map((e) => (
+                ]
+                ).map((e) => (
                   <div key={e.q} className="rounded-[6px] border border-g-300 px-3 py-2.5">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <span className="min-w-0 text-[12.5px] font-semibold text-ink">{e.qui}</span>
@@ -689,6 +703,7 @@ export default function AuditAdmin() {
                   titre="Volume de refus sur 30 jours"
                   sousTitre="Un pic signale souvent un changement de rôle mal accompagné."
                 />
+                <HistoriqueSimule>
                 <div className="flex items-end gap-1">
                   {seededSeries('refus-30j', 30, 0, 6).map((v, i) => (
                     <span
@@ -702,6 +717,7 @@ export default function AuditAdmin() {
                   <span>Il y a 30 jours</span>
                   <span>Aujourd’hui</span>
                 </div>
+                </HistoriqueSimule>
               </Card>
 
               <Card>
@@ -771,17 +787,21 @@ export default function AuditAdmin() {
                 { cle: 'Algorithme', valeur: 'SHA-256, chaînage séquentiel' },
                 {
                   cle: 'Dernière vérification complète',
-                  valeur: integriteDistante ? dateHeure(MAINTENANT) : dateHeure('2026-08-19T06:00:00Z'),
+                  valeur: integriteDistante ? dateHeure(new Date().toISOString()) : api ? '—' : dateHeure('2026-08-19T06:00:00Z'),
                 },
                 { cle: 'Entrées vérifiées', valeur: `${num(integrite.entreesVerifiees)} / ${num(integrite.totalEntrees)}` },
                 {
                   cle: 'Ruptures détectées',
                   valeur: integrite.intacte ? '0' : `1 — ${integrite.raison ?? 'voir détail'}`,
                 },
-                { cle: 'Rétention en ligne', valeur: '24 mois' },
-                { cle: 'Archivage froid', valeur: '5 ans supplémentaires' },
-                { cle: 'Suppression possible', valeur: 'Non — y compris par nous' },
-                { cle: 'Réplication', valeur: 'Abidjan et Grand-Bassam, en écriture synchrone' },
+                ...(api
+                  ? []
+                  : [
+                      { cle: 'Rétention en ligne', valeur: '24 mois' },
+                      { cle: 'Archivage froid', valeur: '5 ans supplémentaires' },
+                      { cle: 'Suppression possible', valeur: 'Non — y compris par nous' },
+                      { cle: 'Réplication', valeur: `${LIEUX_HEBERGEMENT}, en écriture synchrone` },
+                    ]),
               ]}
             />
             {integrite.intacte ? (

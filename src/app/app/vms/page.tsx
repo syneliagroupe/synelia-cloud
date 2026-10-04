@@ -17,6 +17,7 @@ import { useApp, useEspace, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { estActif, requete } from '@/lib/api/client'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 import { useEffect, useState } from 'react'
 
 export default function ListeVms() {
@@ -212,7 +213,7 @@ export default function ListeVms() {
           { label: 'Machines virtuelles' },
         ]}
         titre="Machines virtuelles"
-        sousTitre={`Machines de l’espace ${espace.code} (${SITE_COURT[espace.site]}). Changez d’espace depuis le sélecteur de contexte, en haut à droite.`}
+        sousTitre={`Machines de l’espace ${espace.code} (${SITE_COURT[espace.site]}). Changez d’espace depuis le sélecteur d’espace.`}
         actions={
           <GatedAction autorise={autorise('vm.create_delete')} message={refus('vm.create_delete')}>
             <>
@@ -405,9 +406,12 @@ export default function ListeVms() {
         )}
         vide={{
           titre: 'Aucune machine dans cet espace',
-          phrase:
-            'Une machine virtuelle se crée en quelques minutes depuis notre bibliothèque d’images ou depuis vos propres images. Vous pouvez créer une machine unique ou un lot avec un gabarit identique.',
+          phrase: phraseVideEspace(
+            espace.code,
+            'Une machine virtuelle se crée en quelques minutes depuis notre bibliothèque d’images ou depuis vos propres images.',
+          ),
           action: { libelle: 'Créer des machines', href: '/app/vms/new' },
+          actionSecondaire: actionChangerEspace,
         }}
       />
 

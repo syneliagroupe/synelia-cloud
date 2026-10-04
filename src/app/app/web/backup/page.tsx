@@ -4,8 +4,8 @@ import Link from 'next/link'
 import { HardDrive, Lock, RotateCcw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateHeure, relatif } from '@/lib/format'
-import { SITE_LABEL } from '@/lib/types'
-import { SAUVEGARDES_WEB, sauvegardesWebDeLOrg, type SauvegardeWeb } from '@/lib/mock'
+import { SITE_LABEL, type WebHosting } from '@/lib/types'
+import { HEBERGEMENTS, SAUVEGARDES_WEB, sauvegardesWebDeLOrg, type SauvegardeWeb } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
@@ -17,7 +17,12 @@ import { useMaintenant } from '@/components/app/contexte'
 export default function ListeSauvegardes() {
   const maintenant = useMaintenant()
   const collection = useCollection<SauvegardeWeb>('sauvegardes-web', SAUVEGARDES_WEB)
-  const plans = estActif() ? collection.items : sauvegardesWebDeLOrg()
+  const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
+  // Un plan dont l’hébergement a été supprimé n’a plus rien à sauvegarder : on ne l’affiche pas.
+  const miens = new Set(hebergements.items.map((h) => h.id))
+  const plans = estActif()
+    ? collection.items.filter((p) => miens.has(p.hebergementId))
+    : sauvegardesWebDeLOrg()
   const echecs = plans.flatMap((p) => p.executions).filter((e) => e.statut !== 'ok')
 
   return (
@@ -29,13 +34,15 @@ export default function ListeSauvegardes() {
           { label: 'Sauvegardes' },
         ]}
         titre="Sauvegardes"
-        sousTitre="Un plan par hébergement, qui prend les fichiers, les bases, la configuration et la messagerie dans la même exécution. Les copies sont immuables et vivent sur l’autre site."
+        sousTitre={`Un plan par hébergement, qui prend les fichiers, les bases, la configuration et la messagerie dans la même exécution.${estActif() ? ' Les copies sont écrites sur le stockage objet de la plateforme.' : ' Les copies sont immuables et vivent sur l’autre site.'}`}
       />
 
-      <Callout ton="info" titre="Ce que la rétention interdit">
-        Une copie écrite ne peut plus être modifiée ni supprimée avant la fin de sa rétention — ni par
-        vous, ni par nous, ni par un rançongiciel qui aurait pris la main sur le serveur.
-      </Callout>
+      {plans.some((p) => p.immuable) && (
+        <Callout ton="info" titre="Ce que la rétention interdit">
+          Une copie écrite ne peut plus être modifiée ni supprimée avant la fin de sa rétention — ni
+          par vous, ni par nous, ni par un rançongiciel qui aurait pris la main sur le serveur.
+        </Callout>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile libelle="Plans actifs" valeur={plans.filter((p) => p.actif).length} detail={`sur ${plans.length}`} />
@@ -56,6 +63,14 @@ export default function ListeSauvegardes() {
           ton={echecs.length > 0 ? 'warn' : 'ok'}
         />
       </div>
+
+      {plans.length === 0 && (
+        <Card>
+          <p className="text-[13px] text-g-500">
+            Aucun plan de sauvegarde. Un plan est créé avec chaque hébergement web.
+          </p>
+        </Card>
+      )}
 
       {plans.map((p) => (
         <Card key={p.id}>
@@ -117,7 +132,7 @@ export default function ListeSauvegardes() {
             <table className="w-full min-w-max border-collapse">
               <thead>
                 <tr className="border-b border-g-300 bg-g-050">
-                  {['Exécution', 'Taille', 'Durée', 'Contenu', 'Immuable jusqu’au', 'État'].map(
+                  {['Exécution', 'Taille', 'Durée', 'Contenu', ...(p.immuable ? ['Immuable jusqu’au'] : []), 'État'].map(
                     (c) => (
                       <th
                         key={c}
@@ -130,6 +145,13 @@ export default function ListeSauvegardes() {
                 </tr>
               </thead>
               <tbody>
+                {p.executions.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-3 text-[12px] text-g-500">
+                      Aucune exécution pour l’instant. La première aura lieu à {p.heure}.
+                    </td>
+                  </tr>
+                )}
                 {p.executions.slice(0, 3).map((e) => (
                   <tr key={e.id} className="border-b border-g-100 last:border-0">
                     <td className="px-3 py-2.5 text-[12px] text-g-700">{dateHeure(e.ts)}</td>
@@ -138,9 +160,11 @@ export default function ListeSauvegardes() {
                     <td className="px-3 py-2.5 text-[12px] text-g-500">
                       {e.contenu.join(' · ')}
                     </td>
-                    <td className="px-3 py-2.5 text-[12px] text-g-700">
-                      {e.immuableJusqua ?? '—'}
-                    </td>
+                    {p.immuable && (
+                      <td className="px-3 py-2.5 text-[12px] text-g-700">
+                        {e.immuableJusqua ?? '—'}
+                      </td>
+                    )}
                     <td className="px-3 py-2.5">
                       <Badge
                         tone={e.statut === 'ok' ? 'ok' : e.statut === 'partielle' ? 'warn' : 'err'}
@@ -157,37 +181,45 @@ export default function ListeSauvegardes() {
         </Card>
       ))}
 
-      <Card>
-        <CardHeader
-          titre="La règle 3-2-1, appliquée à votre hébergement"
-          sousTitre="Trois copies, sur deux supports, dont une hors site. C’est ce qu’un auditeur vérifie, et c’est ce qui sauve réellement."
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {[
-            {
-              t: 'Trois copies',
-              d: 'La production, la copie immuable du jour, et les copies antérieures encore sous rétention.',
-              i: <HardDrive size={14} />,
-            },
-            {
-              t: 'Deux supports',
-              d: 'Le disque du serveur et le stockage objet, qui ne partagent ni matériel ni logiciel.',
-              i: <ShieldCheck size={14} />,
-            },
-            {
-              t: 'Une hors site',
-              d: `Vos copies partent sur ${SITE_LABEL[plans[0]?.site ?? 'GBM']}, à des dizaines de kilomètres du serveur.`,
-              i: <RotateCcw size={14} />,
-            },
-          ].map((c) => (
-            <div key={c.t} className="rounded-[8px] border border-g-300 bg-g-050 p-3">
-              <p className="flex items-center gap-1.5 text-p-700">{c.i}</p>
-              <p className="mt-1.5 text-[13px] font-bold text-ink">{c.t}</p>
-              <p className="mt-1 text-[12px] leading-relaxed text-g-700">{c.d}</p>
-            </div>
-          ))}
-        </div>
-      </Card>
+      {estActif() ? (
+        <Callout ton="warn" titre="Une seule région pour l’instant">
+          Les copies sont écrites sur le stockage objet du site d’Abidjan, comme les serveurs : elles protègent d’une
+          suppression ou d’une corruption, pas de la perte du site. Exportez régulièrement vos données si vous
+          avez besoin d’une copie ailleurs.
+        </Callout>
+      ) : (
+        <Card>
+          <CardHeader
+            titre="La règle 3-2-1, appliquée à votre hébergement"
+            sousTitre="Trois copies, sur deux supports, dont une hors site. C’est ce qu’un auditeur vérifie, et c’est ce qui sauve réellement."
+          />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {[
+              {
+                t: 'Trois copies',
+                d: 'La production, la copie immuable du jour, et les copies antérieures encore sous rétention.',
+                i: <HardDrive size={14} />,
+              },
+              {
+                t: 'Deux supports',
+                d: 'Le disque du serveur et le stockage objet, qui ne partagent ni matériel ni logiciel.',
+                i: <ShieldCheck size={14} />,
+              },
+              {
+                t: 'Une hors site',
+                d: `Vos copies partent sur ${SITE_LABEL[plans[0]?.site ?? 'ABJ']}, à des dizaines de kilomètres du serveur.`,
+                i: <RotateCcw size={14} />,
+              },
+            ].map((c) => (
+              <div key={c.t} className="rounded-[8px] border border-g-300 bg-g-050 p-3">
+                <p className="flex items-center gap-1.5 text-p-700">{c.i}</p>
+                <p className="mt-1.5 text-[13px] font-bold text-ink">{c.t}</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-g-700">{c.d}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

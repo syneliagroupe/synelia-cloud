@@ -2,6 +2,18 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { ArrowRight, Check } from 'lucide-react'
 import { ButtonLink } from '@/components/ui/button'
+import { pct } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
+import { lirePublicServeur } from '@/lib/api/public-serveur'
+import {
+  CATEGORIES_PAR_FICHE,
+  prixDAppel,
+  prixEntreeCatalogue,
+  type DatacenterPublic,
+  type FicheCataloguePublique,
+  type TarifsPublics,
+} from '@/lib/api/vitrine'
+import { PRIX } from '@/lib/tarifs'
 import {
   Accordeon,
   CarrouselLogos,
@@ -28,8 +40,15 @@ import {
 
 export const metadata: Metadata = {
   title: 'Infrastructure cloud souveraine en Côte d’Ivoire',
-  description:
-    'Espaces Cloud, machines virtuelles, Kubernetes managé, sauvegarde immuable, plan de reprise exercé, et solutions open source opérées par Synelia. Deux sites à Abidjan et Grand-Bassam, équipe et supervision 24/7 sur place.',
+  description: `Espaces Cloud, machines virtuelles, Kubernetes managé, sauvegarde immuable, plan de reprise exercé, et solutions open source opérées par Synelia.${
+    estActif() ? '' : ' Deux sites à Abidjan et Grand-Bassam, équipe et supervision 24/7 sur place.'
+  }`,
+}
+
+interface StatutApi {
+  services: { etats: Record<string, string> }[]
+  incidents: { statut: string; gravite: string }[]
+  disponibiliteGlobale90j: number
 }
 
 /**
@@ -51,35 +70,38 @@ export const metadata: Metadata = {
  */
 
 /** L'état du moment, dérivé des mêmes sondes que `/statut`. */
-function etatPlateforme() {
-  const enPanne = STATUT_SERVICES.filter((s) =>
+function etatPlateforme(
+  services: { etats: Record<string, string> }[] = STATUT_SERVICES,
+  incidents: { statut: string; gravite: string }[] = INCIDENTS,
+) {
+  const enPanne = services.filter((s) =>
     Object.values(s.etats).some((e) => e === 'panne'),
   ).length
-  const degrades = STATUT_SERVICES.filter((s) =>
+  const degrades = services.filter((s) =>
     Object.values(s.etats).some((e) => e === 'degrade'),
   ).length
-  const ouverts = INCIDENTS.filter((i) => i.statut !== 'resolu' && i.gravite !== 'maintenance')
+  const ouverts = incidents.filter((i) => i.statut !== 'resolu' && i.gravite !== 'maintenance')
 
   if (enPanne > 0) {
     return {
       ton: 'err' as const,
-      texte: `${enPanne} service${enPanne > 1 ? 's' : ''} en panne sur ${STATUT_SERVICES.length}`,
+      texte: `${enPanne} service${enPanne > 1 ? 's' : ''} en panne sur ${services.length}`,
     }
   }
   if (degrades > 0) {
     return {
       ton: 'warn' as const,
-      texte: `${degrades} service${degrades > 1 ? 's' : ''} dégradé${degrades > 1 ? 's' : ''} sur ${STATUT_SERVICES.length}`,
+      texte: `${degrades} service${degrades > 1 ? 's' : ''} dégradé${degrades > 1 ? 's' : ''} sur ${services.length}`,
     }
   }
   if (ouverts.length > 0) {
     const n = ouverts.length
     return { ton: 'warn' as const, texte: `${n} incident${n > 1 ? 's' : ''} en cours` }
   }
-  return { ton: 'ok' as const, texte: `${STATUT_SERVICES.length} services opérationnels` }
+  return { ton: 'ok' as const, texte: `${services.length} services opérationnels` }
 }
 
-function donneesStructurees() {
+function donneesStructurees(sites: { nom: string; ville: string }[], faq: { question: string; reponse: string }[]) {
   return {
     '@context': 'https://schema.org',
     '@graph': [
@@ -90,7 +112,7 @@ function donneesStructurees() {
         legalName: 'Synelia Group Afrique',
         url: 'https://cloud.synelia.tech/',
         description:
-          'Infrastructure cloud souveraine opérée depuis deux datacenters ivoiriens : Espaces Cloud, machines virtuelles, Kubernetes managé, sauvegarde immuable, plan de reprise exercé et solutions open source opérées.',
+          `Infrastructure cloud souveraine opérée depuis ${sites.length > 1 ? 'deux datacenters ivoiriens' : 'un datacenter ivoirien'} : Espaces Cloud, machines virtuelles, Kubernetes managé, sauvegarde immuable, plan de reprise exercé et solutions open source opérées.`,
         areaServed: { '@type': 'Country', name: 'Côte d’Ivoire' },
         address: {
           '@type': 'PostalAddress',
@@ -98,7 +120,7 @@ function donneesStructurees() {
           addressRegion: 'Cocody',
           addressCountry: 'CI',
         },
-        location: DATACENTERS.map((d) => ({
+        location: sites.map((d) => ({
           '@type': 'Place',
           name: d.nom,
           address: { '@type': 'PostalAddress', addressLocality: d.ville, addressCountry: 'CI' },
@@ -114,7 +136,7 @@ function donneesStructurees() {
       },
       {
         '@type': 'FAQPage',
-        mainEntity: FAQ_ACCUEIL.map((f) => ({
+        mainEntity: faq.map((f) => ({
           '@type': 'Question',
           name: f.question,
           acceptedAnswer: { '@type': 'Answer', text: f.reponse },
@@ -129,15 +151,83 @@ const TEINTES = ['text-p-600', 'text-m-600', 'text-terre', 'text-ok'] as const
 const FONDS = ['bg-p-600', 'bg-m-600', 'bg-terre', 'bg-ok'] as const
 const PASTILLES = ['bg-p-100', 'bg-m-050', 'bg-ocre/25', 'bg-ok-bg'] as const
 
-export default function Accueil() {
-  const etat = etatPlateforme()
+export default async function Accueil() {
+  const api = estActif()
+  const [statut, distants, tarifs, catalogue, sla] = await Promise.all([
+    api ? lirePublicServeur<StatutApi>('/public/statut') : null,
+    api ? lirePublicServeur<DatacenterPublic[]>('/public/datacenters') : null,
+    lirePublicServeur<TarifsPublics>('/public/tarifs'),
+    lirePublicServeur<{ donnees: FicheCataloguePublique[] }>('/public/catalogue/services'),
+    lirePublicServeur<Array<{ dispo: number; reponseCritique: number }>>('/public/sla'),
+  ])
+  // Réponse en gravité critique : la plus rapide des lignes publiées par `/public/sla`.
+  const reponseCritique = sla && sla.length > 0 ? Math.min(...sla.map((l) => l.reponseCritique)) : undefined
+  const fmt = (n: number) => n.toLocaleString('fr-FR')
+  // Prix d'appel lus sur la grille publiée ; sans elle, ceux de la maquette.
+  const siege = catalogue ? ['drive-pro', 'email-pro', 'coffre'].map((x) => prixEntreeCatalogue(catalogue.donnees, x)?.prix) : []
+  const prixSiegeMin = siege.filter((p): p is number => !!p).sort((a, b) => a - b)[0]
+  const prixEspace = prixDAppel(tarifs, CATEGORIES_PAR_FICHE['espace-cloud'])
+  const portes = PORTES_ENTREE.map((p, n) =>
+    api && n === 0 && prixEspace
+      ? { ...p, prix: `À partir de ${fmt(prixEspace)} FCFA/mois` }
+      : api && n === 1 && prixSiegeMin
+        ? { ...p, prix: `À partir de ${fmt(prixSiegeMin)} FCFA/siège/mois` }
+        : p,
+  )
+  const apiPrix: Record<string, { prix: number | null; unite?: string } | undefined> = !api || !tarifs
+    ? {}
+    : {
+        'espace-cloud': { prix: prixEspace ?? null },
+        'machines-virtuelles': { prix: prixDAppel(tarifs, CATEGORIES_PAR_FICHE['machines-virtuelles']) ?? null },
+        kubernetes: { prix: PRIX.k8sControleMois },
+        // Aucune offre « PRA » dans le catalogue : sur devis, pas un prix inventé.
+        pra: { prix: null },
+        // Pas de tarif de sauvegarde dans la grille de facturation : sur devis.
+        'cloud-backup': { prix: null },
+        'drive-pro': prixEntreeCatalogue(catalogue?.donnees, 'drive-pro'),
+        wordpress: prixEntreeCatalogue(catalogue?.donnees, 'wordpress'),
+      }
+  // Question SLA de la FAQ : les engagements publiés par `/public/sla`, pas ceux de la maquette.
+  const faq = FAQ_ACCUEIL.map((f) =>
+    api && sla && sla.length > 0 && f.question.startsWith('Quel est le niveau')
+      ? {
+          ...f,
+          reponse: `De ${pct(Math.min(...sla.map((l) => l.dispo)), 2)} à ${pct(Math.max(...sla.map((l) => l.dispo)), 2)} selon le composant, avec un délai de première réponse de ${reponseCritique} minutes au mieux en gravité critique. Le détail est dans l’annexe SLA.`,
+        }
+      : f,
+  )
+  const cartes = CARTES_PRODUIT.map((c) => ({ ...c, prix: c.prix as number | null, ...apiPrix[c.slug] }))
+  const sites = api && distants ? distants : DATACENTERS
+  const deuxSites = sites.length > 1
+  const etat = statut ? etatPlateforme(statut.services, statut.incidents) : etatPlateforme()
+  const pastilles = api && distants ? distants.map((d) => d.ville) : ['Abidjan', 'Grand-Bassam', '4–6 ms entre les deux']
+  const noms = sites.map((d) => d.ville).join(' et ')
+  const indicateurs =
+    api && distants
+      ? [
+          ...(statut
+            ? [{ valeur: `${pct(statut.disponibiliteGlobale90j)}`, libelle: 'disponibilité constatée sur 90 jours' }]
+            : []),
+          reponseCritique
+            ? { valeur: `< ${reponseCritique} min`, libelle: INDICATEURS_HERO[1].libelle }
+            : INDICATEURS_HERO[1],
+          { valeur: `${sites.length} site${sites.length > 1 ? 's' : ''}`, libelle: noms },
+        ]
+      : INDICATEURS_HERO
+  const bandeau =
+    api && distants
+      ? [
+          { valeur: String(sites.length), libelle: `site${sites.length > 1 ? 's' : ''} en Côte d’Ivoire` },
+          ...BANDEAU_CONFIANCE.slice(2),
+        ]
+      : BANDEAU_CONFIANCE
 
   return (
     <div className="bg-creme">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(donneesStructurees()).replace(/</g, '\\u003c'),
+          __html: JSON.stringify(donneesStructurees(sites, faq)).replace(/</g, '\\u003c'),
         }}
       />
 
@@ -147,11 +237,11 @@ export default function Accueil() {
           <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                {['Abidjan', 'Grand-Bassam', '4–6 ms entre les deux'].map((t, n) => (
+                {pastilles.map((t, n) => (
                   <span
                     key={t}
                     className={`rounded-full px-3.5 py-1.5 text-[13px] font-bold ${PASTILLES[n]} ${
-                      n === 2 ? 'text-encre-2' : TEINTES[n]
+                      t.startsWith('4–6') ? 'text-encre-2' : TEINTES[n]
                     }`}
                   >
                     {t}
@@ -194,7 +284,7 @@ export default function Accueil() {
               </div>
 
               <dl className="mt-10 flex flex-wrap gap-x-10 gap-y-4">
-                {INDICATEURS_HERO.map((i, n) => (
+                {indicateurs.map((i, n) => (
                   <div key={i.libelle}>
                     <dt
                       className={`tnum text-[27px] font-black leading-none [font-family:var(--font-display)] ${TEINTES[n]}`}
@@ -218,7 +308,7 @@ export default function Accueil() {
             */}
             <img
               src="/photos/hero-pate.webp"
-              alt="Deux baies de serveurs côte à côte sur une plateforme, deux épingles de carte, et un nuage relié par un pointillé au-dessus."
+              alt={deuxSites ? 'Deux baies de serveurs côte à côte sur une plateforme, deux épingles de carte, et un nuage relié par un pointillé au-dessus.' : 'Illustration : des baies de serveurs, des épingles de carte et un nuage.'}
               width={1200}
               height={896}
               className="w-full"
@@ -231,7 +321,7 @@ export default function Accueil() {
       <section className="bg-creme-2">
         <Container className="py-11">
           <dl className="grid grid-cols-2 gap-8 sm:grid-cols-4">
-            {BANDEAU_CONFIANCE.map((c, n) => (
+            {bandeau.map((c, n) => (
               <div key={c.libelle}>
                 <dt
                   className={`tnum text-[32px] font-black leading-none [font-family:var(--font-display)] ${TEINTES[n]}`}
@@ -257,7 +347,7 @@ export default function Accueil() {
             rôles et la même sauvegarde.
           </p>
           <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {PORTES_ENTREE.map((p, n) => {
+            {portes.map((p, n) => {
               const img = n === 0 ? '/photos/pate-serveurs.webp' : '/photos/pate-nuage.webp'
               return (
                 <div
@@ -316,7 +406,7 @@ export default function Accueil() {
             vous savez d’abord à quoi vous avez affaire.
           </p>
           <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {CARTES_PRODUIT.map((c, n) => (
+            {cartes.map((c, n) => (
               <Link
                 key={c.slug}
                 /* Drive Pro est un service du marketplace, pas une fiche d'offre. */
@@ -343,8 +433,8 @@ export default function Accueil() {
                 <p
                   className={`mt-4 flex items-center gap-1.5 text-[15px] font-black [font-family:var(--font-display)] ${TEINTES[n % 4]}`}
                 >
-                  {c.prix.toLocaleString('fr-FR')} F
-                  <span className="text-[12px] font-semibold opacity-70">{c.unite}</span>
+                  {c.prix === null ? 'Sur devis' : `${fmt(c.prix)} F`}
+                  {c.prix !== null && <span className="text-[12px] font-semibold opacity-70">{c.unite}</span>}
                   <ArrowRight
                     size={15}
                     className="ml-auto transition-transform group-hover:translate-x-1"
@@ -385,6 +475,8 @@ export default function Accueil() {
                 <LienFleche href="/offres/pra">Voir la fiche PRA / DRaaS</LienFleche>
               </div>
             </div>
+            {/* Les RPO/RTO « constatés » et la date du dernier exercice sont ceux de la maquette. */}
+            {!api && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {BLOC_PRA.indicateurs.map((i, n) => (
                 <div
@@ -402,6 +494,7 @@ export default function Accueil() {
                   </p>
                 </div>
               ))}
+              {deuxSites && (
               <figure className="sm:col-span-3">
                 <img
                   src="/illustrations/sauvegarde-321.svg"
@@ -412,12 +505,15 @@ export default function Accueil() {
                   className="w-full rounded-[18px]"
                 />
               </figure>
+              )}
             </div>
+            )}
           </div>
         </Container>
       </SiteSection>
 
       {/* ─── 6 · Les deux sites ───────────────────────────────────────── */}
+      {deuxSites && (
       <SiteSection className="!bg-creme-2">
         <Container>
           <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[1fr_1fr]">
@@ -502,6 +598,7 @@ export default function Accueil() {
           </div>
         </Container>
       </SiteSection>
+      )}
 
       {/* ─── 7 · Souveraineté ─────────────────────────────────────────── */}
       <SiteSection className="!bg-creme">
@@ -624,6 +721,8 @@ export default function Accueil() {
       </SiteSection>
 
       {/* ─── 10 · Preuve ──────────────────────────────────────────────── */}
+      {/* Cas client de la maquette : aucun client réel n'est publié en mode API. */}
+      {!api && (
       <SiteSection className="!bg-ocre">
         <Container>
           <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[0.8fr_1.2fr]">
@@ -644,6 +743,7 @@ export default function Accueil() {
           </div>
         </Container>
       </SiteSection>
+      )}
 
       {/* ─── 11 · Questions ──────────────────────────────────────────── */}
       <SiteSection className="!bg-creme">
@@ -652,7 +752,7 @@ export default function Accueil() {
             Les questions qu’on nous pose
           </h2>
           <div className="mt-8 max-w-3xl">
-            <Accordeon items={FAQ_ACCUEIL} />
+            <Accordeon items={faq} />
           </div>
         </Container>
       </SiteSection>

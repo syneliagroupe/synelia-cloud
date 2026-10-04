@@ -36,6 +36,7 @@ import { StackedBar, StatTile } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
 import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { BoutonResilier } from '@/components/business/bouton-resilier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { CostPreview } from '@/components/composition/flow'
 import { BoutonPaiementPaystack } from '@/components/composition/paystack'
@@ -152,7 +153,7 @@ export default function Facturation() {
   const maintenant = useMaintenant()
   const { autorise, refus, perm, organisations, organisationId } = useApp()
   const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
-  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
+  const nomOrg = orgActive?.nom ?? (estActif() ? '' : ORG_COURANTE.nom)
   const executer = useOperation()
   const lesFactures = useCollection<Invoice>('factures', FACTURES)
   const souscriptions = useCollection<Subscription>('souscriptions', SOUSCRIPTIONS)
@@ -160,7 +161,7 @@ export default function Facturation() {
   const moyens = useCollection<MoyenEnregistre>('moyens-paiement', MOYENS)
   // Catalogue réel : un tarif changé côté /admin/catalogue doit se refléter
   // dans les suggestions faites au client, pas seulement dans l'admin.
-  const offresReelles = useCollection<Offer>('offres', OFFRES)
+  const offresReelles = useCollection<Offer>('offres-publiques', OFFRES)
   // Le backend nomme les mêmes champs autrement (`type`, `defaut`) : on
   // normalise une fois pour que l’onglet lise une seule forme.
   const moyensNorm = moyens.items.map((m) => ({
@@ -187,11 +188,11 @@ export default function Facturation() {
     '/facturation/ventilation',
     { axe: 'application' },
   )
-  const joursConso = consommationDistante?.jours ?? CONSOMMATION_JOURS
+  const joursConso = consommationDistante?.jours ?? (estActif() ? [] : CONSOMMATION_JOURS)
   const periodeConso = consommationDistante?.periode ?? '2026-08'
   const ventilation =
     ventilationFamilles?.lignes.map((l) => ({ famille: l.label, montant: l.montant, pct: l.pct })) ??
-    VENTILATION_DEPENSE
+    (estActif() ? [] : VENTILATION_DEPENSE)
   const [envoiMensuel, setEnvoiMensuel] = useState(true)
   const [inclureNonAffecte, setInclureNonAffecte] = useState(true)
 
@@ -283,8 +284,10 @@ export default function Facturation() {
               {nomOrg}
             </Badge>
             <Badge tone="neutral" size="sm">
-              {consommationDistante
-                ? `Période ${periodeConso} · ${joursConso.length} jour${joursConso.length > 1 ? 's' : ''} relevés`
+              {estActif()
+                ? !consommationDistante
+                  ? 'Période en cours'
+                  : `Période ${periodeConso} · ${joursConso.length} jour${joursConso.length > 1 ? 's' : ''} relevés`
                 : 'Période du 1er au 19 août 2026'}
             </Badge>
             {impayees.length > 0 && (
@@ -328,8 +331,10 @@ export default function Facturation() {
           libelle="Consommé ce mois"
           valeur={masque(money(consommeMois))}
           detail={
-            consommationDistante
-              ? `Du ${dateCourte(joursConso[0]?.date ?? periodeConso)} au ${dateCourte(joursConso[joursConso.length - 1]?.date ?? periodeConso)}, au prorata`
+            estActif()
+              ? consommationDistante
+                ? `Du ${dateCourte(joursConso[0]?.date ?? periodeConso)} au ${dateCourte(joursConso[joursConso.length - 1]?.date ?? periodeConso)}, au prorata`
+                : 'Relevé en cours'
               : 'Du 1er au 19 août, au prorata'
           }
           serie={joursConso.map((j) => j.montant)}
@@ -444,15 +449,15 @@ export default function Facturation() {
                 </div>
                 <div>
                   <MicroLabel className="text-g-500">
-                    {consommationDistante ? 'Consommé à date' : 'Prorata au 19 août'}
+                    {estActif() ? 'Consommé à date' : 'Prorata au 19 août'}
                   </MicroLabel>
                   <p className="tnum mt-0.5 text-[15px] font-bold text-ink">
                     {masque(
-                      money(consommationDistante ? consommeMois : prorata(SYNTHESE_CLIENT.depenseMois, 19)),
+                      money(estActif() ? consommeMois : prorata(SYNTHESE_CLIENT.depenseMois, 19)),
                     )}
                   </p>
                   <p className="text-[10.5px] text-g-500">
-                    {consommationDistante
+                    {estActif()
                       ? `Sur ${joursConso.length} jour${joursConso.length > 1 ? 's' : ''} relevés`
                       : 'Sur 31 jours'}
                   </p>
@@ -799,19 +804,13 @@ export default function Facturation() {
                             effetFinal: () => souscriptions.recharger(),
                           })}
                         />
-                        <BoutonAction
-                          libelle="Résilier"
-                          variant="ghost"
-                          confirmation={{
-                            ressource: s.cible.label,
-                            titre: `Résilier ${s.cible.label} ?`,
-                            pertes: [
-                              'La facturation cesse à la fin du mois en cours',
-                              'Les ressources liées sont libérées à l’échéance',
-                              'L’historique de consommation reste consultable',
-                            ],
-                            libelleAction: 'Résilier',
-                          }}
+                        <BoutonResilier
+                          ressource={s.cible.label}
+                          pertes={[
+                            'La facturation cesse à la fin du mois en cours',
+                            'Les ressources liées sont libérées à l’échéance',
+                            'L’historique de consommation reste consultable',
+                          ]}
                           operation={{
                             action: 'payment.update',
                             ton: 'warn',
@@ -1219,7 +1218,12 @@ export default function Facturation() {
                   { cle: 'TVA applicable', valeur: '18 % — Côte d’Ivoire' },
                   { cle: 'Délai de paiement', valeur: '30 jours date de facture' },
                   { cle: 'Émission des factures', valeur: 'Le 1er de chaque mois' },
-                  { cle: 'Prélèvement automatique', valeur: 'Actif sur Orange Money, le 5' },
+                  {
+                    cle: 'Prélèvement automatique',
+                    valeur: moyensNorm.find((x) => x.principal)
+                      ? `Moyen principal : ${MOYEN_LABEL[moyensNorm.find((x) => x.principal)!.moyen]}`
+                      : 'Aucun moyen de paiement principal',
+                  },
                   { cle: 'Pénalités de retard', valeur: 'Aucune avant 15 jours de retard' },
                   { cle: 'Suspension de service', valeur: 'Jamais avant rappel écrit et 15 jours' },
                 ]}

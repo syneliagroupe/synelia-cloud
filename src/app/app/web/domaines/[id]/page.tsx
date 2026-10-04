@@ -12,13 +12,8 @@ export async function generateMetadata({
   return { title: e ? `${e.nom} · Domaine` : 'Domaine introuvable' }
 }
 
-/**
- * Pas de `notFound()` : une ressource créée pendant la session n'existe pas
- * dans le jeu figé, et un 404 du serveur ferait croire à une panne. C'est la
- * vue cliente qui sait ce qu'elle trouve, et qui le dit.
- */
 export default async function PageDomaine({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const nom = decodeURIComponent(id)
-  return <VueDomaine id={nom} />
+  return <VueDomaine id={nom} navigation="domaines" vue="complet" />
 }

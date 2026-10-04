@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation'
 import { Blocks, Plus, Rocket } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dateCourte, MAINTENANT, money, relatif } from '@/lib/format'
-import type { MoteurBase, Projet, ServiceProjet } from '@/lib/types'
+import type { EspaceCloud, MoteurBase, Projet, ServiceProjet } from '@/lib/types'
 import {
   MOTEURS_DISPONIBLES,
   MOTEUR_LABEL,
+  ESPACES,
   PROJETS,
   SERVICES_PROJET,
   TYPE_SERVICE_LABEL,
@@ -34,6 +35,7 @@ import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { useOperation } from '@/components/app/actions'
 import { creerRessource, estActif } from '@/lib/api/client'
+import { prixMachine } from '@/lib/tarifs'
 import { useServicesProjet } from '@/lib/api/services-projet'
 
 /**
@@ -48,6 +50,7 @@ export function VueProjet({ id }: { id: string }) {
   const maintenant = useMaintenant()
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
+  const lesEspaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const { autorise, refus } = useApp()
 
   // Relu dans la collection : un service créé ici doit apparaître sans quitter
@@ -84,10 +87,11 @@ export function VueProjet({ id }: { id: string }) {
             </Badge>
             <Badge tone="violet">{money(synthese.coutMensuel)}/mois</Badge>
             <Badge tone="neutral">
-              Espace <span className="font-mono">{projet.espaceId.toUpperCase()}</span>
+              Espace <span className="font-mono">{lesEspaces.items.find((e) => e.id === projet.espaceId)?.code ?? projet.espaceId}</span>
             </Badge>
             <span className="text-[11.5px] text-g-500">
-              créé le {dateCourte(projet.cree)} · dernière activité {relatif(synthese.derniereMaj, maintenant)}
+              créé le {dateCourte(projet.cree)}
+              {synthese.services > 0 && ` · dernière activité ${relatif(synthese.derniereMaj, maintenant)}`}
             </span>
           </>
         }
@@ -294,6 +298,15 @@ function NouveauService({
   )
 }
 
+const RESSOURCES = {
+  base: { cpu: 2, ramMo: 4096, diskGo: 100 },
+  application: { cpu: 1, ramMo: 2048, diskGo: 10 },
+}
+const coutRessources = (r: { cpu: number; ramMo: number; diskGo: number }) =>
+  prixMachine(r.cpu, r.ramMo / 1024, r.diskGo)
+const libelleRessources = (r: { cpu: number; ramMo: number; diskGo: number }) =>
+  `${r.cpu} vCPU · ${r.ramMo / 1024} Go · ${r.diskGo} Go NVMe`
+
 function TiroirCreation({
   type,
   projet,
@@ -313,20 +326,26 @@ function TiroirCreation({
   const [description, setDescription] = useState('')
   const [moteur, setMoteur] = useState<MoteurBase>('postgresql')
   const [version, setVersion] = useState('')
+  const [image, setImage] = useState('')
+  const [port, setPort] = useState('80')
   const choix = MOTEURS_DISPONIBLES.find((m) => m.moteur === moteur)!
 
   if (!type) return null
 
-  const peutCreer = nom.trim().length > 0
+  const imageTrim = type === 'application' ? image.trim() : ''
+  const portNum = Number(port)
+  const peutCreer =
+    nom.trim().length > 0 &&
+    (!imageTrim || (Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535))
+  const source = imageTrim ? { type: 'image' as const, ref: imageTrim } : undefined
 
   /** Un service naît en construction, puis passe en marche à la fin du job — sauf
    * une application sans source : rien à démarrer tant qu'elle n'est pas
    * configurée, la coquille reste donc arrêtée. */
   const creerService = () => {
     const idService = lesServices.identifiant('svc')
-    const ressources =
-      type === 'base' ? { cpu: 2, ramMo: 4096, diskGo: 100 } : { cpu: 1, ramMo: 2048, diskGo: 10 }
-    const cout = type === 'base' ? 24800 : 9400
+    const ressources = RESSOURCES[type === 'base' ? 'base' : 'application']
+    const cout = coutRessources(ressources)
     // Même dérivation que `utilisateur_base()` côté backend (`modules/projets/service.py`) :
     // jamais préfixé `pg_`, que PostgreSQL refuse pour un rôle. Le mot de passe, lui, est
     // toujours généré côté serveur (`_mot_de_passe()`, `secrets`, pas `random`) — l'API
@@ -343,7 +362,9 @@ function TiroirCreation({
       detail:
         type === 'base'
           ? `${MOTEUR_LABEL[moteur]} ${version || choix.versions[0]}, joint au réseau privé du projet — aucun port ouvert sur Internet. Identifiant et mot de passe générés automatiquement, consultables ensuite depuis l’onglet Connexion.`
-          : `Coquille créée dans ${env}. Branchez un dépôt Git ou une image depuis sa fiche pour la déployer.`,
+          : source
+            ? `Image ${source.ref} déployée dans ${env}, sur le cluster du projet.`
+            : `Coquille créée dans ${env} : sans image, rien n’est démarré.`,
       appel: () =>
         creerRessource(`/projets/${encodeURIComponent(projet.id)}/services`, {
           nom: nom.trim(),
@@ -352,6 +373,7 @@ function TiroirCreation({
           environnement: env,
           ressources,
           ...(type === 'base' ? { moteur, version: version || choix.versions[0] } : {}),
+          ...(source ? { source, portConteneur: portNum } : {}),
         }),
       effet: () =>
         lesServices.creer({
@@ -367,6 +389,7 @@ function TiroirCreation({
           derniereMaj: MAINTENANT,
           coutMensuel: cout,
           ...(type === 'application' ? { appId: nom.trim() } : {}),
+          ...(source ? { source, portConteneur: portNum } : {}),
           ...(type === 'base'
             ? {
                 moteur,
@@ -402,7 +425,9 @@ function TiroirCreation({
         // Sans source, une application n'a rien à exécuter : elle reste
         // arrêtée jusqu'à sa configuration, plutôt que d'afficher un service
         // « en marche » qui ne fait rien.
-        lesServices.modifier(idService, { statut: type === 'base' ? 'running' : 'stopped' })
+        lesServices.modifier(idService, {
+          statut: type === 'base' || source ? 'running' : 'stopped',
+        })
       },
     })
     onClose()
@@ -451,10 +476,27 @@ function TiroirCreation({
         </Field>
 
         {type === 'application' && (
-          <Callout ton="info" titre="Une coquille, pas encore un déploiement">
-            Aucune source n’est demandée ici. Une fois le service créé, branchez un dépôt Git ou
-            une image Docker depuis sa fiche pour le déployer réellement.
-          </Callout>
+          <>
+            <Field
+              label="Image Docker"
+              hint="Ex. nginx:alpine. Laissez vide pour créer une coquille : sans image, rien n’est démarré."
+            >
+              <Input
+                value={image}
+                onChange={(e) => setImage(e.target.value)}
+                placeholder="nginx:alpine"
+              />
+            </Field>
+            {imageTrim && (
+              <Field label="Port du conteneur" hint="Le port HTTP sur lequel l’image écoute.">
+                <Input
+                  value={port}
+                  inputMode="numeric"
+                  onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
+                />
+              </Field>
+            )}
+          </>
         )}
 
         {type === 'base' && (
@@ -501,15 +543,12 @@ function TiroirCreation({
         )}
 
         <CostPreview
-          lignes={
-            type === 'base'
-              ? [
-                  { libelle: `${MOTEUR_LABEL[moteur]} — 2 vCPU · 4 Go`, montant: 14800 },
-                  { libelle: 'Volume 100 Go NVMe', montant: 70000 / 10 },
-                  { libelle: 'Plan de sauvegarde quotidien', montant: 2800 },
-                ]
-              : [{ libelle: '1 vCPU · 2 Go, extensible à chaud', montant: 9400 }]
-          }
+          lignes={[
+            {
+              libelle: `${type === 'base' ? `${MOTEUR_LABEL[moteur]} — ` : ''}${libelleRessources(RESSOURCES[type === 'base' ? 'base' : 'application'])}`,
+              montant: coutRessources(RESSOURCES[type === 'base' ? 'base' : 'application']),
+            },
+          ]}
         />
       </div>
     </Drawer>

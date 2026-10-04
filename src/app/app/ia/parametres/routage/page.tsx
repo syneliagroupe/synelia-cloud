@@ -12,6 +12,7 @@ import { GatedAction, Tabs } from '@/components/ui/display'
 import { Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
+import { AvisDemoApi } from '../../avis-demo'
 import { useApp } from '@/components/app/contexte'
 
 const LIBELLE_ACTION = {
@@ -50,6 +51,10 @@ export default function ReglesRoutage() {
         titre="Règles de routage"
         sousTitre="Vos applications demandent une capacité, pas un modèle précis. Ces règles décident lequel répond, et vers quoi basculer quand il ne répond plus."
       />
+
+      <AvisDemoApi>
+        Les règles de routage ci-dessous sont un jeu d’exemple : la passerelle ne les applique pas encore, et les compteurs des 24 dernières heures n’existent pas côté API.
+      </AvisDemoApi>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile libelle="Requêtes routées 24 h" valeur={num(requetes24h)} />

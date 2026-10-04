@@ -21,6 +21,7 @@ import { ApiError } from '@/lib/api/client'
 import { useLectureDegradable } from '@/lib/api/degradable'
 import type {
   AuditEvent,
+  BackupPlan,
   Domaine,
   EspaceCloud,
   EvenementSupervision,
@@ -32,8 +33,10 @@ import type {
   VM,
   WebHosting,
 } from '@/lib/types'
+import { LIEUX_HEBERGEMENT } from '@/lib/types'
 import type { DriveDomaine, MessagerieDomaine } from '@/lib/mock'
 import {
+  BACKUP_PLANS,
   CATALOGUE,
   DOMAINES,
   DRIVES,
@@ -57,6 +60,7 @@ const LIBELLES_ACTION: Record<string, string> = {
   'project.scale': 'a redimensionné',
   'capacity.rebalance': 'a rééquilibré la capacité',
   'auth.login': 's’est connecté à',
+  'auth.connexion': 's’est connecté à',
   'lb.rule.create': 'a créé une règle sur',
   'app.deploy': 'a déployé',
   'vm.delete': 'a tenté de supprimer',
@@ -109,7 +113,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
   // dessous — deux vérités différentes sur le même tableau de bord.
   const { api, organisations, organisationId } = useApp()
   const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
-  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
+  const nomOrg = orgActive?.nom ?? (api ? 'votre organisation' : ORG_COURANTE.nom)
   // Espaces Cloud, machines, clusters, projets, factures et tickets ont un
   // vrai backend (`/espaces`, `/vms`, `/kubernetes`, `/projets`,
   // `/facturation/factures`, `/support/tickets`) : `useCollection` en sert les
@@ -132,6 +136,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
   // ne compte que les adhésions de portée `org`, la tuile fait de même.
   const memberships = useCollection<Membership>('memberships', MEMBERSHIPS)
   const domaines = useCollection<Domaine>('domaines', DOMAINES)
+  const plansSauvegarde = useCollection<BackupPlan>('plans-sauvegarde', BACKUP_PLANS)
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
   const messageries = useCollection<MessagerieDomaine>('messageries', MESSAGERIES)
   const drives = useCollection<DriveDomaine>('drives', DRIVES)
@@ -186,7 +191,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
   const usage = {
     vcpu: espaces.items.reduce((a, e) => a + e.usage.vcpu, 0),
     ramGo: espaces.items.reduce((a, e) => a + e.usage.ramGo, 0),
-    stockageTo: Math.round(espaces.items.reduce((a, e) => a + e.usage.stockageTo, 0) * 10) / 10,
+    stockageTo: Math.round(espaces.items.reduce((a, e) => a + e.usage.stockageTo, 0) * 1000) / 1000,
   }
   const margeVcpu = quota.vcpu - usage.vcpu
   const stockagePct = quota.stockageTo > 0 ? Math.round((usage.stockageTo / quota.stockageTo) * 100) : 0
@@ -218,9 +223,11 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
   const periodePrecedente = `${moisCourant === 1 ? anneeCourante - 1 : anneeCourante}-${String(
     moisCourant === 1 ? 12 : moisCourant - 1,
   ).padStart(2, '0')}`
-  const depenseMoisReelle = factures.items
-    .filter((f) => f.periode === periodeCourante)
-    .reduce((a, f) => a + f.total, 0)
+  // Le mois en cours n'est pas encore facturé : la dépense est la consommation
+  // au prorata du backend (même chiffre que « Consommé ce mois » en facturation).
+  const depenseMoisReelle =
+    synthese?.depenseMois ??
+    factures.items.filter((f) => f.periode === periodeCourante).reduce((a, f) => a + f.total, 0)
   const depenseMoisPrecedenteReelle = factures.items
     .filter((f) => f.periode === periodePrecedente)
     .reduce((a, f) => a + f.total, 0)
@@ -231,8 +238,8 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
         titre={`Bonjour, voici l’état de ${nomOrg}`}
         sousTitre={
           api
-            ? 'Données hébergées à Abidjan et Grand-Bassam.'
-            : `Organisation ${ORG_COURANTE.tenantPlan} · ${ORG_COURANTE.pays} · TVA ${ORG_COURANTE.tva} · données hébergées à Abidjan et Grand-Bassam.`
+            ? `Données hébergées à ${LIEUX_HEBERGEMENT}.`
+            : `Organisation ${ORG_COURANTE.tenantPlan} · ${ORG_COURANTE.pays} · TVA ${ORG_COURANTE.tva} · données hébergées à ${LIEUX_HEBERGEMENT}.`
         }
         actions={
           <>
@@ -246,7 +253,14 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
         }
       />
 
-      <PanneauOnboarding />
+      <PanneauOnboarding
+        faits={{
+          premier: espacesN > 0 || projets.items.length > 0,
+          equipe: memberships.items.length > 1,
+          domaine: domaines.items.length > 0,
+          sauvegardes: plansSauvegarde.items.length > 0,
+        }}
+      />
 
       {/* ─── Mes ressources — inventaire personnel (PLAN-UI §3.1) ───── */}
       <Card>
@@ -265,12 +279,12 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{vmsN}</div>
             <div className="mt-1 text-[11px] text-g-500">{clustersN} cluster(s) K8s</div>
           </Link>
-          <Link href="/app/web/domaines" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+          <Link href="/app/web/sites" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Domaines</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{domaines.items.length}</div>
             <div className="mt-1 text-[11px] text-g-500">portefeuille</div>
           </Link>
-          <Link href="/app/web/hebergements" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
+          <Link href="/app/web/sites" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Hébergements</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{hebergements.items.length}</div>
             <div className="mt-1 text-[11px] text-g-500">serveurs web</div>
@@ -298,7 +312,9 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                 ? `${facturesImpayees.length} impayée(s)`
                 : factures.items.length === 0
                   ? 'Aucune facture'
-                  : 'À jour'}
+                  : factures.items.some((f) => f.statut === 'emise')
+                    ? 'à régler'
+                    : 'À jour'}
             </div>
           </Link>
           <Link href="/app/support" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
@@ -320,10 +336,10 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
           sousTitre="Commander en un clic — créations les plus fréquentes."
         />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <ButtonLink href="/app/web/domaines" variant="secondary" className="justify-center">Nouveau domaine</ButtonLink>
-          <ButtonLink href="/app/web/hebergements" variant="secondary" className="justify-center">Nouvel hébergement</ButtonLink>
+          <ButtonLink href="/app/web/sites" variant="secondary" className="justify-center">Nouveau domaine</ButtonLink>
+          <ButtonLink href="/app/web/sites" variant="secondary" className="justify-center">Nouvel hébergement</ButtonLink>
           <ButtonLink href="/app/vms/composer" variant="secondary" className="justify-center">Nouvelle VM</ButtonLink>
-          <ButtonLink href="/app/kubernetes" variant="secondary" className="justify-center">Nouveau cluster</ButtonLink>
+          <ButtonLink href="/app/kubernetes/new" variant="secondary" className="justify-center">Nouveau cluster</ButtonLink>
         </div>
       </Card>
 
@@ -331,7 +347,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
       <Card className="border-dashed border-g-300 bg-g-050">
         <CardHeader
           titre="Ressources développeur"
-          sousTitre="API REST, CLI et Terraform — pour l’intégration technique, pas le pilotage quotidien."
+          sousTitre="API REST — pour l’intégration technique, pas le pilotage quotidien."
         />
         <div className="flex flex-wrap gap-2">
           <ButtonLink href="/app/docs" variant="secondary" size="sm">
@@ -343,24 +359,8 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
         </div>
       </Card>
 
-      {/* ─── Bande 1 : chiffres clés ─────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatTile
-          libelle="Espaces Cloud"
-          valeur={espacesN}
-          detail={
-            espacesN > 0
-              ? `${sitesN} site(s) · ${offresN} offre(s) souscrite(s)`
-              : 'Aucun Espace Cloud pour le moment'
-          }
-          serie={trendSeries('espaces', 24, Math.max(0, espacesN - 1), espacesN, 0)}
-        />
-        <StatTile
-          libelle="Machines virtuelles"
-          valeur={vmsN}
-          detail={`${clustersN} clusters Kubernetes`}
-          serie={trendSeries('vms', 24, Math.max(0, vmsN - 3), vmsN + 1, 1)}
-        />
+      {/* ─── Bande 1 : services et équipe (Espaces, VMs, projets sont déjà dans « Mes ressources ») ── */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <StatTile
           libelle="Services managés"
           valeur={servicesManagesN}
@@ -373,12 +373,6 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
           }
           ton="violet"
           serie={trendSeries('svc', 24, Math.max(0, servicesManagesN - 2), servicesManagesN, 0)}
-        />
-        <StatTile
-          libelle="Applications déployées"
-          valeur={applicationsN}
-          detail={`${environnementsN} environnements`}
-          serie={trendSeries('apps', 24, Math.max(0, applicationsN - 1), applicationsN, 0)}
         />
         <StatTile
           libelle={api ? 'Membres de l’organisation' : 'Sièges utilisés'}
@@ -461,6 +455,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                 </p>
               </div>
 
+              {!api && (
               <div className="mt-4 border-t border-g-100 pt-3.5">
                 <div className="mb-2 flex items-baseline justify-between">
                   <MicroLabel>Consommation vCPU sur 30 jours</MicroLabel>
@@ -483,6 +478,7 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                   <span>aujourd’hui</span>
                 </div>
               </div>
+              )}
             </>
           )}
         </Card>
@@ -614,15 +610,27 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
         <Card>
           <CardHeader
             titre="Santé de l’infrastructure"
-            sousTitre="Six derniers événements de supervision"
+            sousTitre={
+              api
+                ? 'Derniers travaux de provisioning de votre organisation'
+                : 'Six derniers événements de supervision'
+            }
           />
           {api ? (
             (synthese?.evenements?.length ?? 0) > 0 ? (
-              <EventList evenements={synthese?.evenements ?? []} max={6} />
+              <>
+                <EventList evenements={synthese?.evenements ?? []} max={6} lienSortie="" />
+                <Link
+                  href="/app/taches"
+                  className="mt-3 inline-flex items-center gap-1 border-t border-g-100 pt-3 text-[12px] font-semibold text-p-700 hover:text-m-600"
+                >
+                  Voir le centre de tâches →
+                </Link>
+              </>
             ) : (
               <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-4 text-center text-[12.5px] text-g-500">
                 {synthese
-                  ? 'Aucun événement : aucune tâche récente en échec sur votre organisation.'
+                  ? 'Aucun travail récent sur votre organisation.'
                   : 'Lecture en cours…'}
               </p>
             )
@@ -636,9 +644,9 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
             <CardHeader titre="Facturation" />
             <dl className="space-y-2.5">
               <div className="flex items-baseline justify-between gap-2">
-                <dt className="text-[12.5px] text-g-500">Dépense du mois en cours ({periodeCourante})</dt>
+                <dt className="text-[12.5px] text-g-500">Consommé ce mois ({periodeCourante})</dt>
                 <dd className="tnum text-[16px] font-bold [font-family:var(--font-display)] text-ink">
-                  {api && depenseMoisReelle === 0 && factures.items.filter((f) => f.periode === periodeCourante).length === 0
+                  {api && depenseMoisReelle === 0
                     ? 'Aucune dépense ce mois'
                     : money(api ? depenseMoisReelle : s.depenseMois)}
                 </dd>
@@ -705,14 +713,14 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                           tone={f.statut === 'impayee' ? 'err' : f.statut === 'brouillon' ? 'warn' : f.statut === 'payee' ? 'ok' : 'neutral'}
                           size="sm"
                         >
-                          {f.statut === 'impayee' ? 'Impayée' : f.statut === 'brouillon' ? 'Brouillon' : f.statut === 'payee' ? 'Payée' : f.statut}
+                          {f.statut === 'impayee' ? 'Impayée' : f.statut === 'brouillon' ? 'Brouillon' : f.statut === 'payee' ? 'Payée' : f.statut === 'emise' ? 'Émise' : f.statut}
                         </Badge>
                       </span>
                     </li>
                   ))}
               </ul>
             )}
-            <Link href="/app/facturation/ventilation" className="mt-2 block text-[11px] font-semibold text-p-700 hover:text-m-600">Voir ventilation →</Link>
+            <Link href="/app/facturation" className="mt-2 block text-[11px] font-semibold text-p-700 hover:text-m-600">Voir ventilation →</Link>
             {factures.items.length === 0 && (
               <p className="mt-3 text-center text-[12px] text-g-500">Aucune facture enregistrée pour cette organisation</p>
             )}
@@ -852,7 +860,8 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
                   )}
                 </>
               ),
-              detail: e.detail,
+              // Le backend met parfois du JSON brut en détail : illisible, on le tait.
+              detail: e.detail?.trim().startsWith('{') ? undefined : e.detail,
               horodatage: relatif(e.ts, maintenant),
             }))}
         />

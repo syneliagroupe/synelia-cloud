@@ -70,7 +70,7 @@ export default function BackupTousProjets() {
         />
         <StatTile
           libelle="Dernière exécution"
-          valeur={relatif(dernier, maintenant)}
+          valeur={proteges.length > 0 ? relatif(dernier, maintenant) : '—'}
           detail="tous projets confondus"
           ton="ok"
         />

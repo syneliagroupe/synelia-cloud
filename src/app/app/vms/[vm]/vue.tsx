@@ -17,11 +17,15 @@ import {
 import { cn, seededSeries } from '@/lib/utils'
 import { MAINTENANT, dateCourte, dateHeure, goHumain, num, pct, relatif } from '@/lib/format'
 import {
+  LIEUX_HEBERGEMENT,
   SITE_LABEL,
+  UN_SEUL_SITE,
   type BackupPlan,
   type EspaceCloud,
+  type EvenementSupervision,
   type PublicIP,
   type RestorePoint,
+  type SecurityGroup,
   type VM,
   type Volume,
 } from '@/lib/types'
@@ -47,7 +51,15 @@ import { EmptyState } from '@/components/composition/states'
 import { EventList, GrilleSparkCharts } from '@/components/business/observabilite'
 import { useApp } from '@/components/app/contexte'
 import { useCollection, useEntite } from '@/components/app/atelier'
-import { ApiError, creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
+import {
+  ApiError,
+  creerRessource,
+  estActif,
+  requete,
+  supprimerRessource,
+  type PageDistante,
+} from '@/lib/api/client'
+import { useLectureDegradable } from '@/lib/api/degradable'
 import {
   BoutonAction,
   BoutonFormulaire,
@@ -117,7 +129,7 @@ export function VueVm({ id }: { id: string }) {
   // Lecture unitaire quand la liste ne contient pas (encore) la machine :
   // lien direct vers une ressource créée pendant la session ou ailleurs.
   const { entite: isolee } = useEntite<VM>('vms', VMS, id)
-  const snapshots = useCollection<Snapshot>(`snapshots-${id}`, SNAPSHOTS_GRAINE)
+  const snapshots = useCollection<Snapshot>(`snapshots-${id}`, estActif() ? [] : SNAPSHOTS_GRAINE)
   const [onglet, setOnglet] = useState('apercu')
   const [console_, setConsole] = useState(false)
   const [suppression, setSuppression] = useState(false)
@@ -154,6 +166,7 @@ export function VueVm({ id }: { id: string }) {
 
   const espaces = useCollection<EspaceCloud>('espaces', ESPACES)
   const lesIps = useCollection<PublicIP>('ips', PUBLIC_IPS)
+  const lesGroupes = useCollection<SecurityGroup>('groupes-securite', SECURITY_GROUPS)
   // Même collections que la section transverse `/app/sauvegarde` (`OngletPoints`,
   // `OngletPlans`) : avant ce correctif, l'onglet Sauvegardes de la fiche lisait
   // `RESTORE_POINTS`/`BACKUP_PLANS` (les graines) sans jamais passer par l'atelier,
@@ -208,6 +221,10 @@ export function VueVm({ id }: { id: string }) {
       .then((r) => setMetriquesVm(r.series ?? []))
       .catch(() => setMetriquesVm([]))
   }, [id])
+  // Événements réels (`/observabilite/evenements`, travaux de provisioning) qui nomment cette
+  // machine — jamais les événements de démonstration d'autres ressources.
+  const { donnees: evenementsDistants } =
+    useLectureDegradable<PageDistante<EvenementSupervision>>('/observabilite/evenements')
   const lectureVm = (metrique: string) =>
     metriquesVm?.find((s) => s.metrique === metrique)?.points.at(-1)?.valeur
   const uniteVm = (metrique: string) => metriquesVm?.find((s) => s.metrique === metrique)?.unite
@@ -258,6 +275,9 @@ export function VueVm({ id }: { id: string }) {
     .sort((a, b) => a.vcpu - b.vcpu || a.ramGo - b.ramGo || a.diskGo - b.diskGo)
 
   const espace = espaces.items.find((e) => e.id === vm.espaceId)
+  const evenementsVm = (evenementsDistants?.donnees ?? []).filter(
+    (e) => e.ressource.includes(vm.nom) || e.ressource.includes(vm.id),
+  )
   const osAffiche = catalogueImages[vm.os] ?? vm.os
   const flavorAffiche = vm.flavor ? (catalogueGabarits[vm.flavor] ?? vm.flavor) : undefined
   const ipPrivee = vm.ips.find((i) => i.type === 'privee')?.adresse
@@ -267,6 +287,11 @@ export function VueVm({ id }: { id: string }) {
   const ipReelleAttachee = lesIps.items.find((i) => i.attachedTo === vm.id)
   const ipPublique = vm.ips.find((i) => i.type === 'publique')?.adresse ?? ipReelleAttachee?.adresse
   const volumes = disques.items.filter((v) => v.attachedTo === vm.id)
+  // Le backend ne relie pas une machine à ses groupes : en mode API on montre ceux de l'Espace
+  // (Neutron), jamais les groupes de démonstration.
+  const groupes = api
+    ? lesGroupes.items.filter((g) => g.espaceId === vm.espaceId)
+    : SECURITY_GROUPS.slice(0, 2)
   const ipsDisponibles = lesIps.items.filter((i) => i.espaceId === vm.espaceId && !i.attachedTo)
   // Interfaces à afficher dans l'onglet Réseau : celles connues de `vm.ips` (posées à la
   // création) plus toute IP réellement attachée depuis (`lesIps`, dédupliquée par adresse).
@@ -518,9 +543,8 @@ export function VueVm({ id }: { id: string }) {
 
       {vm.statut === 'error' && (
         <Callout ton="err" titre="Cette machine est en erreur">
-          Le service applicatif ne démarre plus depuis le dernier déploiement. Le journal
-          d’initialisation signale un échec de résolution de dépendances Python. Consultez le
-          diagnostic de build dans la console applicative de {vm.applicationNom}.
+          L’hyperviseur signale la machine en erreur. Essayez de la redémarrer ; si l’erreur
+          persiste, ouvrez un ticket en citant l’identifiant <span className="font-mono">{vm.id}</span>.
         </Callout>
       )}
       {vm.statut === 'migrating' && (
@@ -598,7 +622,7 @@ export function VueVm({ id }: { id: string }) {
               unite={api ? undefined : '%'}
               detail={
                 api
-                  ? 'Démonstration — les diagnostics de l’hyperviseur donnent des E/S disque, pas l’occupation'
+                  ? 'Non disponible — les diagnostics de l’hyperviseur donnent des E/S disque, pas l’occupation'
                   : `${goHumain(Math.round(vm.diskGo * 0.57))} sur ${goHumain(vm.diskGo)}`
               }
               serie={api ? undefined : seededSeries(`${id}-disk`, 24, 55, 58)}
@@ -664,7 +688,7 @@ export function VueVm({ id }: { id: string }) {
                 {ipPublique && <CopyField label="IP publique" value={ipPublique} />}
                 <CopyField
                   label="Connexion SSH"
-                  value={`ssh ops@${ipPublique ?? ipPrivee} -p 22`}
+                  value={`ssh ${api ? '<utilisateur>' : 'ops'}@${ipPublique ?? ipPrivee} -p 22`}
                 />
               </div>
               <p className="mt-3 border-t border-g-100 pt-3 text-[11.5px] leading-relaxed text-g-500">
@@ -679,7 +703,7 @@ export function VueVm({ id }: { id: string }) {
             <Card>
               <CardHeader titre="Historique des métriques" />
               <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-4 text-center text-[12.5px] text-g-500">
-                Démonstration — le CPU, la mémoire et le réseau des tuiles ci-dessus sont une
+                Le CPU, la mémoire et le réseau des tuiles ci-dessus sont une
                 lecture réelle de l’hyperviseur (diagnostics Nova/libvirt), mais instantanée :
                 rien ne persiste de série dans le temps côté backend, donc pas de courbe 24 h à
                 afficher ici. L’occupation disque reste indisponible : les diagnostics donnent
@@ -701,10 +725,20 @@ export function VueVm({ id }: { id: string }) {
 
           <Card>
             <CardHeader titre="Cinq derniers événements" />
-            <EventList
-              evenements={EVENEMENTS_SUPERVISION.filter((e) => e.site === vm.site).slice(0, 5)}
-              max={5}
-            />
+            {api && evenementsVm.length === 0 ? (
+              <p className="py-3 text-center text-[12.5px] text-g-500">
+                Aucun événement enregistré pour cette machine.
+              </p>
+            ) : (
+              <EventList
+                evenements={
+                  api
+                    ? evenementsVm
+                    : EVENEMENTS_SUPERVISION.filter((e) => e.site === vm.site).slice(0, 5)
+                }
+                max={5}
+              />
+            )}
           </Card>
         </div>
       )}
@@ -836,7 +870,7 @@ export function VueVm({ id }: { id: string }) {
                           {ip.ptr ?? '—'}
                         </td>
                         <td className="px-3 py-2.5 text-[12.5px] text-g-700">
-                          {ip.type === 'privee' ? 'prod-front · 10.0.1.0/24' : 'Internet'}
+                          {ip.type === 'privee' ? (api ? 'Réseau privé de l’Espace' : 'prod-front · 10.0.1.0/24') : 'Internet'}
                         </td>
                       </tr>
                     ))
@@ -848,8 +882,21 @@ export function VueVm({ id }: { id: string }) {
 
           <Card>
             <CardHeader
-              titre="Groupes de sécurité appliqués"
+              titre={api ? 'Groupes de sécurité de l’Espace' : 'Groupes de sécurité appliqués'}
+              sousTitre={
+                api
+                  ? 'L’association machine ↔ groupe n’est pas encore lisible depuis l’API : voici les groupes disponibles dans l’Espace Cloud.'
+                  : undefined
+              }
               actions={
+                api ? (
+                  <Link
+                    href="/app/reseau"
+                    className="text-[12.5px] font-semibold text-p-700 hover:text-m-600"
+                  >
+                    Gérer dans Réseau & VPN →
+                  </Link>
+                ) : (
                 <BoutonFormulaire
                   libelle="Modifier les groupes"
                   action="network.manage"
@@ -874,9 +921,15 @@ export function VueVm({ id }: { id: string }) {
                     },
                   })}
                 />
+                )
               }
             />
-            {SECURITY_GROUPS.slice(0, 2).map((sg) => (
+            {groupes.length === 0 && (
+              <p className="py-3 text-center text-[12.5px] text-g-500">
+                Aucun groupe de sécurité dans cet Espace Cloud.
+              </p>
+            )}
+            {groupes.map((sg) => (
               <div key={sg.id} className="mb-3.5 last:mb-0">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="text-[13px] font-semibold text-ink">{sg.nom}</span>
@@ -1001,15 +1054,17 @@ export function VueVm({ id }: { id: string }) {
                 </span>
                 <span className="block font-mono text-[11.5px] text-g-500">/ · inclus au gabarit</span>
               </span>
-              <span className="w-40">
-                <QuotaBar
-                  utilise={Math.round(vm.diskGo * 0.57)}
-                  total={vm.diskGo}
-                  compact
-                  seuil={85}
-                  formateur={(v) => goHumain(v)}
-                />
-              </span>
+              {!api && (
+                <span className="w-40">
+                  <QuotaBar
+                    utilise={Math.round(vm.diskGo * 0.57)}
+                    total={vm.diskGo}
+                    compact
+                    seuil={85}
+                    formateur={(v) => goHumain(v)}
+                  />
+                </span>
+              )}
             </div>
           </div>
           {volumes.length === 0 ? (
@@ -1154,6 +1209,14 @@ export function VueVm({ id }: { id: string }) {
                 </tr>
               </thead>
               <tbody>
+                {snapshots.items.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-6 text-center text-[12.5px] text-g-500">
+                      Aucun snapshot — prenez-en un avant une mise à jour pour pouvoir revenir en
+                      arrière.
+                    </td>
+                  </tr>
+                )}
                 {snapshots.items.map((s) => (
                   <tr key={s.id} className="border-b border-g-100 last:border-0">
                     <td className="px-3 py-2.5 font-mono text-[12.5px] text-ink">{s.nom}</td>
@@ -1339,7 +1402,7 @@ export function VueVm({ id }: { id: string }) {
                   variant="primary"
                   action="backup.restore"
                   titre={`Restaurer ${vm.nom}`}
-                  description="La granularité descend jusqu’au fichier. La destination peut être la machine d’origine, une nouvelle machine, ou l’autre site. Restaure le point le plus récent."
+                  description={`La granularité descend jusqu’au fichier. La destination peut être la machine d’origine ou une nouvelle machine${UN_SEUL_SITE ? '' : ', ou l’autre site'}. Restaure le point le plus récent.`}
                   champs={[
                     {
                       id: 'granularite',
@@ -1360,7 +1423,7 @@ export function VueVm({ id }: { id: string }) {
                       options: [
                         { value: 'origine', label: 'La machine d’origine (écrasement)' },
                         { value: 'nouvelle', label: 'Une nouvelle machine' },
-                        { value: 'autre-site', label: 'L’autre site' },
+                        ...(UN_SEUL_SITE ? [] : [{ value: 'autre-site', label: 'L’autre site' }]),
                       ],
                     },
                   ]}
@@ -1457,9 +1520,9 @@ export function VueVm({ id }: { id: string }) {
               </div>
             )}
             <p className="mt-3 border-t border-g-100 pt-3 text-[11.5px] leading-relaxed text-g-500">
-              Granularité disponible pour une machine : machine entière, volume, système de fichiers
-              parcourable, fichier unique. La destination peut être le même emplacement, un autre
-              Espace Cloud, l’autre site, ou un téléchargement local.
+              Granularité disponible pour une machine : machine entière, ou fichiers et dossiers.
+              La destination peut être la machine d’origine ou une nouvelle machine
+              {UN_SEUL_SITE ? '' : ', ou l’autre site'}.
             </p>
           </Card>
         </div>
@@ -1475,7 +1538,9 @@ export function VueVm({ id }: { id: string }) {
         footer={
           <>
             <span className="mr-auto text-[11.5px] text-g-500">
-              Session console chiffrée · déconnexion automatique après 15 minutes d’inactivité
+              {estActif()
+                ? 'Lien de console à usage unique, valable environ 2 h'
+                : 'Session console chiffrée · déconnexion automatique après 15 minutes d’inactivité'}
             </span>
             {/*
               Envoyer Ctrl+Alt+Suppr a été retiré plutôt que simulé : `vnc_lite.html`
@@ -1599,7 +1664,7 @@ ops@${vm.nom}:~$ _`}
         titre={`Redimensionner ${vm.nom}`}
         description={
           gabaritsCibles.length > 0
-            ? 'L’ajout de vCPU et de mémoire s’applique à chaud sur cette image ; un retrait exige un redémarrage. Seuls les gabarits réels du catalogue sont proposés : Nova ne sait redimensionner que vers un gabarit existant, jamais vers un vCPU/Go choisi librement.'
+            ? `${estActif() ? 'Nova redémarre la machine pour appliquer le nouveau gabarit.' : 'L’ajout de vCPU et de mémoire s’applique à chaud sur cette image ; un retrait exige un redémarrage.'} Seuls les gabarits réels du catalogue sont proposés : Nova ne sait redimensionner que vers un gabarit existant, jamais vers un vCPU/Go choisi librement.`
             : 'Aucun gabarit du catalogue n’offre plus de vCPU, de mémoire et de disque que le gabarit actuel : cette machine est déjà sur le plus grand gabarit disponible.'
         }
         champs={
@@ -1787,16 +1852,27 @@ function OngletMateriel({ vm }: { vm: VM }) {
             sousTitre="Chaque modification indique si elle exige un redémarrage de la machine."
             actions={
               <GatedAction
-                autorise={autorise('vm.hardware.update')}
-                message={refus('vm.hardware.update')}
+                autorise={autorise('vm.hardware.update') && !estActif()}
+                message={
+                  estActif()
+                    ? 'Indisponible : le matériel se change par « Redimensionner » (gabarits du catalogue), pas champ par champ.'
+                    : refus('vm.hardware.update')
+                }
               >
-                <Button size="sm" disabled={!materielModifie} onClick={appliquerMateriel}>
+                <Button size="sm" disabled={!materielModifie || estActif()} onClick={appliquerMateriel}>
                   Appliquer les modifications
                 </Button>
               </GatedAction>
             }
           />
-          <div className="space-y-4">
+          {estActif() && (
+            <Callout ton="info" className="mb-4" titre="Lecture seule">
+              Ces valeurs ne se modifient pas ici : Nova ne redimensionne que vers un gabarit du
+              catalogue. Utilisez <strong>Autres actions → Redimensionner</strong>. Cartes
+              réseau, USB, Secure Boot et vTPM ne sont pas pilotables par l’API.
+            </Callout>
+          )}
+          <fieldset disabled={estActif()} className="space-y-4">
             <Ligne
               libelle="vCPU"
               redemarrage={false}
@@ -1872,11 +1948,12 @@ function OngletMateriel({ vm }: { vm: VM }) {
                 <Switch checked={vtpm} onChange={setVtpm} label="vTPM 2.0" />
               </div>
             </Ligne>
-          </div>
+          </fieldset>
         </Card>
       )}
 
-      {sousOnglet === 'options' && (
+      {sousOnglet === 'options' && estActif() && <NonExposeApi quoi="Démarrage automatique, ordre de démarrage, synchronisation horaire et quiescing" />}
+      {sousOnglet === 'options' && !estActif() && (
         <Card>
           <CardHeader
             titre="Options de la VM"
@@ -1941,6 +2018,9 @@ function OngletMateriel({ vm }: { vm: VM }) {
 
       {sousOnglet === 'avance' && (
         <div className="space-y-4">
+          {estActif() ? (
+            <NonExposeApi quoi="Réservation et limite CPU, réservation mémoire et groupes d’anti-affinité" />
+          ) : (
           <Card>
             <CardHeader
               titre="Paramètres avancés"
@@ -2021,15 +2101,25 @@ function OngletMateriel({ vm }: { vm: VM }) {
               </Ligne>
             </div>
           </Card>
+          )}
           <Callout ton="violet" titre="Ce que vous ne voyez pas ici, volontairement">
             L’hôte physique et l’hyperviseur sur lequel tourne cette machine ne sont pas exposés :
             c’est une décision de placement côté fournisseur, qui nous permet de rééquilibrer la
-            charge sans vous impliquer. L’emplacement que nous exposons est le site — Abidjan ou
-            Grand-Bassam — parce que c’est celui qui vous engage contractuellement.
+            charge sans vous impliquer. L’emplacement que nous exposons est le site —{' '}
+            {LIEUX_HEBERGEMENT} — parce que c’est celui qui vous engage contractuellement.
           </Callout>
         </div>
       )}
     </div>
+  )
+}
+
+function NonExposeApi({ quoi }: { quoi: string }) {
+  return (
+    <Callout ton="info" titre="Pas encore exposé par l’API">
+      {quoi} ne sont pas pilotables depuis le portail pour l’instant : la machine garde les valeurs
+      par défaut du fournisseur.
+    </Callout>
   )
 }
 

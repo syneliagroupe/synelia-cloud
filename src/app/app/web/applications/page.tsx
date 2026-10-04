@@ -10,7 +10,7 @@ import {
   HEBERGEMENTS,
   ORG_COURANTE,
   SITES_WEB,
-  TYPE_SITE_LABEL,
+  TYPE_SITE_LABEL, typeSiteAvecVersion,
   hebergementById,
   nomServi,
 } from '@/lib/mock'
@@ -41,7 +41,11 @@ const TEINTE: Record<string, string> = {
 const CATALOGUE = [
   { nom: 'WordPress', type: 'wordpress', phrase: 'Site vitrine, blog, portail éditorial.', php: '8.3' },
   { nom: 'PrestaShop', type: 'prestashop', phrase: 'Boutique en ligne, paiements mobile money.', php: '8.2' },
-  { nom: 'Ghost', type: 'php', phrase: 'Blog et newsletter, édition sobre.', php: '8.3' },
+  { nom: 'OpenCart', type: 'php', phrase: 'Boutique légère, catalogue et commandes.', php: '8.2' },
+  { nom: 'Matomo', type: 'php', phrase: 'Statistiques web auto-hébergées (alternative à GA).', php: '8.4' },
+  { nom: 'Moodle', type: 'php', phrase: 'LMS — cours, examens, campus numérique.', php: '8.3' },
+  { nom: 'BookStack', type: 'php', phrase: 'Wiki et documentation d’équipe.', php: '8.3' },
+  { nom: 'Grav', type: 'php', phrase: 'CMS flat-file, sites rapides sans base lourde.', php: '8.4' },
   { nom: 'Dolibarr', type: 'php', phrase: 'Gestion commerciale et facturation.', php: '8.2' },
   { nom: 'Site statique', type: 'statique', phrase: 'HTML généré, déployé par Git.', php: '—' },
 ]
@@ -187,7 +191,7 @@ export default function ListeApplications() {
         <StatTile libelle="Applications" valeur={sites.length} detail={`${sites.filter((s) => s.statut === 'en_ligne').length} en ligne`} />
         <StatTile
           libelle="Visites du mois"
-          valeur={num(sites.reduce((a, s) => a + s.visitesMois, 0))}
+          valeur={estActif() ? '—' : num(sites.reduce((a, s) => a + s.visitesMois, 0))}
           detail="toutes applications"
         />
         <StatTile
@@ -204,7 +208,9 @@ export default function ListeApplications() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {sites.map((s) => {
-          const h = hebergementById(s.hebergementId)
+          const h = estActif()
+            ? parcHebergements.items.find((x) => x.id === s.hebergementId)
+            : hebergementById(s.hebergementId)
           const surface = surfaceMarque(TEINTE[s.type] ?? '#4B2882')
           return (
             <Card key={s.id}>
@@ -225,8 +231,7 @@ export default function ListeApplications() {
                         {s.hote}
                       </Link>
                       <span className="block text-[11px] text-g-500">
-                        {TYPE_SITE_LABEL[s.type]}
-                        {s.version ? ` ${s.version}` : ''} · PHP {s.phpVersion}
+                        {typeSiteAvecVersion(s)} · PHP {s.phpVersion}
                       </span>
                     </span>
                   </span>
@@ -247,7 +252,7 @@ export default function ListeApplications() {
               <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[12px]">
                 <div>
                   <dt className="type-micro text-g-500">Visites du mois</dt>
-                  <dd className="tnum mt-0.5 font-semibold text-ink">{num(s.visitesMois)}</dd>
+                  <dd className="tnum mt-0.5 font-semibold text-ink">{estActif() ? '—' : num(s.visitesMois)}</dd>
                 </div>
                 <div>
                   <dt className="type-micro text-g-500">Espace</dt>
@@ -312,7 +317,7 @@ export default function ListeApplications() {
           titre="Installer une application"
           sousTitre="Nous provisionnons la base, le sous-domaine, le certificat et le plan de sauvegarde. L’installation prend deux à quatre minutes."
         />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {CATALOGUE.map((c) => {
             const surface = surfaceMarque(TEINTE[c.type] ?? '#4B2882')
             const logiciel = c.nom.toLowerCase().replace(/[^a-z]/g, '')

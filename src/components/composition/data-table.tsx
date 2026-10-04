@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, Download } from 'lucide-react'
 import { telechargerCsv } from '@/lib/export'
 import { cn } from '@/lib/utils'
@@ -61,7 +62,12 @@ export function DataTable<T extends { id: string }>({
   actionsGroupees?: (ids: string[]) => ReactNode
   parPage?: number
   chargement?: boolean
-  vide?: { titre: string; phrase: string; action?: { libelle: string; href?: string; onClick?: () => void } }
+  vide?: {
+    titre: string
+    phrase: string
+    action?: { libelle: string; href?: string; onClick?: () => void }
+    actionSecondaire?: { libelle: string; href: string }
+  }
   /**
    * Lien de la ligne. La première colonne visible est alors enveloppée dans un
    * `<a>` : son `rendu` ne doit pas contenir de lien à son tour, deux ancres
@@ -77,7 +83,7 @@ export function DataTable<T extends { id: string }>({
   const [q, setQ] = useState('')
   const [tri, setTri] = useState<{ id: string; sens: 'asc' | 'desc' } | null>(null)
   const [page, setPage] = useState(1)
-  const [coches, setCoches] = useState<string[]>([])
+  const [cochesBrutes, setCoches] = useState<string[]>([])
   const [densite, setDensite] = useState(densiteInitiale)
   const [filtresActifs, setFiltresActifs] = useState<Record<string, string>>({})
   const [masquees, setMasquees] = useState<string[]>(
@@ -119,6 +125,12 @@ export function DataTable<T extends { id: string }>({
   }, [lignes, colonnes, q, tri, filtresActifs, selection])
 
   const pagees = filtrees.slice((page - 1) * parPage, page * parPage)
+  // La sélection ne compte que les lignes encore visibles sous les filtres : une action groupée ne doit jamais toucher une ligne masquée.
+  const coches = useMemo(() => {
+    const visibles = new Set(filtrees.map((l) => l.id))
+    return cochesBrutes.filter((id) => visibles.has(id))
+  }, [cochesBrutes, filtrees])
+  const cochesPage = pagees.filter((l) => coches.includes(l.id)).length
   const cell = densite === 'compacte' ? 'px-3 py-1.5' : 'px-3 py-2.5'
 
   /**
@@ -258,6 +270,7 @@ export function DataTable<T extends { id: string }>({
             'Aucune ligne ne correspond à votre recherche ou à vos filtres. Élargissez les critères pour retrouver vos ressources.'
           }
           action={vide?.action}
+          actionSecondaire={vide?.actionSecondaire}
         />
       ) : (
         <div className="overflow-x-auto rounded-[10px] border border-g-300 bg-white shadow-[0_1px_2px_rgba(43,27,77,.06)]">
@@ -269,10 +282,18 @@ export function DataTable<T extends { id: string }>({
                     <input
                       type="checkbox"
                       aria-label="Tout sélectionner"
-                      checked={pagees.length > 0 && pagees.every((l) => coches.includes(l.id))}
-                      onChange={(e) =>
-                        setCoches(e.target.checked ? pagees.map((l) => l.id) : [])
-                      }
+                      ref={(el) => {
+                        if (el) el.indeterminate = cochesPage > 0 && cochesPage < pagees.length
+                      }}
+                      checked={pagees.length > 0 && cochesPage === pagees.length}
+                      onChange={(e) => {
+                        const ids = new Set(pagees.map((l) => l.id))
+                        setCoches((p) =>
+                          e.target.checked
+                            ? [...new Set([...p, ...ids])]
+                            : p.filter((x) => !ids.has(x)),
+                        )
+                      }}
                       className="h-3.5 w-3.5 accent-[#4B2882]"
                     />
                   </th>
@@ -340,7 +361,7 @@ export function DataTable<T extends { id: string }>({
                     <td className="px-3 py-2">
                       <input
                         type="checkbox"
-                        aria-label="Sélectionner la ligne"
+                        aria-label={`Sélectionner ${String(colonnes[0]?.cle?.(l) ?? 'la ligne')}`}
                         checked={coches.includes(l.id)}
                         onChange={() =>
                           setCoches((p) =>
@@ -365,9 +386,9 @@ export function DataTable<T extends { id: string }>({
                       )}
                     >
                       {href && c.id === visibles[0].id ? (
-                        <a href={href(l)} className="block hover:text-p-700">
+                        <Link href={href(l)} className="block hover:text-p-700">
                           {c.rendu(l)}
-                        </a>
+                        </Link>
                       ) : (
                         c.rendu(l)
                       )}

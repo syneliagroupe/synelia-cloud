@@ -39,6 +39,18 @@ export function money(montantXof: number, devise: Devise = 'XOF'): string {
   return `${groupe(converti, decimales)}${NBSP}${SYMBOLE[devise]}`
 }
 
+/** Code ISO d'un pays (« CI ») → nom affiché ; un code inconnu reste tel quel. */
+const NOMS_PAYS: Record<string, string> = {
+  CI: 'Côte d’Ivoire',
+  SN: 'Sénégal',
+  BJ: 'Bénin',
+  TG: 'Togo',
+  BF: 'Burkina Faso',
+  ML: 'Mali',
+  FR: 'France',
+}
+export const nomPays = (code: string) => NOMS_PAYS[code] ?? code
+
 /** « 85 000 FCFA/mois » */
 export function moneyPerMonth(montantXof: number, devise: Devise = 'XOF'): string {
   return `${money(montantXof, devise)}/mois`
@@ -82,6 +94,7 @@ export function jetons(valeur: number): string {
 
 /** « 7,1 To » */
 export function toHumain(to: number): string {
+  if (to < 1) return goHumain(to * 1024)
   return `${groupe(to, 1)}${NBSP}To`
 }
 
@@ -162,6 +175,11 @@ export function duree(secondes: number): string {
   const h = Math.floor(secondes / 3600)
   const m = Math.floor((secondes % 3600) / 60)
   return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`
+}
+
+/** Engagement de disponibilité : le backend stocke « 99.9 », le jeu local « 99,9 % » → « 99,9 % ». */
+export function slaLibelle(sla: string): string {
+  return sla.includes('%') ? sla : `${sla.replace('.', ',')} %`
 }
 
 /** Durée en minutes → « 4 h » · « 3 h 12 » · « 15 min » */

@@ -483,8 +483,9 @@ export function useAtelier(): CtxAtelier {
  * `graine` est le tableau du jeu de données fictif qui sert d’état initial.
  *
  * Quand l’API est active et que `nom` figure au registre (`src/lib/api/`),
- * les items viennent de `GET {endpoint}?parPage=200` — la graine reste
- * affichée en attendant la réponse, pour ne pas faire diverger l’hydratation.
+ * les items viennent de `GET {endpoint}?parPage=200` — la liste reste vide
+ * (`chargement` vrai) en attendant la réponse : la graine fictive n’apparaît
+ * jamais en mode API.
  * Les mutations appellent alors l’API (`POST`, `PATCH {id}`, `DELETE
  * {id}?confirmation=<nom>`) puis rechargent ; sinon tout reste local.
  */
@@ -494,8 +495,7 @@ export function useAtelier(): CtxAtelier {
 // Un seul chargement par clé, même quand plusieurs écrans montent la même
 // collection ensemble (le sélecteur d’espace et trois tableaux appelaient
 // `/espaces` en même temps : une seule requête part désormais). Le cache sert
-// immédiatement, puis se réactualise en fond — la graine ne s’affiche qu’avant
-// le tout premier retour.
+// immédiatement, puis se réactualise en fond.
 
 interface EntreeDistante {
   donnees: Entite[] | null
@@ -577,6 +577,10 @@ export function useCollection<T extends Entite>(nom: string, graine: readonly T[
   const a = useAtelier()
   const endpoint = endpointDe(nom)
   const distantActif = estActif() && !!endpoint
+  // Lecture seule : les écritures de `services-projet` passent par les routes nichées.
+  const lecture = estActif()
+    ? (endpoint ?? (nom === 'services-projet' ? '/projets/services' : undefined))
+    : undefined
   const entree = useSyncExternalStore(
     useCallback((cb: () => void) => abonnerDistant(nom, cb), [nom]),
     () => entreeDistante(nom),
@@ -587,25 +591,29 @@ export function useCollection<T extends Entite>(nom: string, graine: readonly T[
   const erreur = entree.erreur
 
   useEffect(() => {
-    if (!distantActif || !endpoint) return
-    chargerDistant(nom, endpoint)
+    if (!lecture) return
+    chargerDistant(nom, lecture)
     // Les travaux avancent côté backend : le centre de tâches les suit sans
     // rechargement manuel. Les autres collections se relisent à la navigation.
     const rafraichissement =
       nom === 'jobs' || nom === 'jobs-plateforme'
-        ? setInterval(() => chargerDistant(nom, endpoint), 10000)
+        ? setInterval(() => chargerDistant(nom, lecture), 10000)
         : undefined
     return () => {
       if (rafraichissement) clearInterval(rafraichissement)
     }
-  }, [distantActif, endpoint, nom])
+  }, [lecture, nom])
 
   const recharger = useCallback(() => {
-    if (endpoint && estActif()) chargerDistant(nom, endpoint)
-  }, [endpoint, nom])
+    if (lecture && estActif()) chargerDistant(nom, lecture)
+  }, [lecture, nom])
 
   return useMemo(() => {
-    const items = itemsDistants ?? a.lire<T>(nom, graine)
+    // API active : jamais la graine fictive, ni pendant le chargement ni après
+    // un échec — sinon de fausses données s’affichent comme si elles étaient réelles.
+    // `services-projet` se lit via `/projets/services` : avant la réponse, pas de graine non plus.
+    const sansGraine = distantActif || (estActif() && nom === 'services-projet')
+    const items = itemsDistants ?? (sansGraine ? ([] as T[]) : a.lire<T>(nom, graine))
 
     /**
      * Nom exact exigé par l’API pour confirmer une suppression — le champ
@@ -622,7 +630,7 @@ export function useCollection<T extends Entite>(nom: string, graine: readonly T[
 
     return {
       items,
-      /** Vrai pendant le premier chargement distant — la graine reste affichée. */
+      /** Vrai pendant le premier chargement distant — la liste est alors vide. */
       chargement,
       /** Échec du dernier chargement ou rechargement distant, le cas échéant. */
       erreur,

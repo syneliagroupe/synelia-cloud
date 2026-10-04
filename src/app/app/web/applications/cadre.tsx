@@ -4,7 +4,7 @@ import {
   HEBERGEMENTS,
   ORG_COURANTE,
   SITES_WEB,
-  TYPE_SITE_LABEL,
+  TYPE_SITE_LABEL, typeSiteAvecVersion,
 } from '@/lib/mock'
 import type { SiteWeb, WebHosting } from '@/lib/types'
 import type { Tone } from '@/components/ui/badge'
@@ -24,7 +24,7 @@ export function CadreApplications({ children }: { children: React.ReactNode }) {
   const entrees = sites.filter((s) => miens.has(s.hebergementId)).map((s) => ({
     id: s.id,
     nom: s.hote,
-    sousTitre: `${TYPE_SITE_LABEL[s.type]}${s.version ? ` ${s.version}` : ''} · PHP ${s.phpVersion}`,
+    sousTitre: `${typeSiteAvecVersion(s)} · PHP ${s.phpVersion}`,
     etat: s.majEnAttente ? `${s.majEnAttente} MAJ` : s.statut === 'en_ligne' ? 'En ligne' : 'Arrêté',
     ton: (s.majEnAttente ? 'warn' : s.statut === 'en_ligne' ? 'ok' : 'neutral') as Tone,
     href: `/app/web/applications/${s.id}`,

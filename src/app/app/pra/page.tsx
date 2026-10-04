@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { ArrowRight, FileDown, Plus } from 'lucide-react'
 import { dateCourte, dureeMin, pct } from '@/lib/format'
-import { SITE_COURT, SITE_LABEL } from '@/lib/types'
+import { SITES, SITE_COURT, SITE_LABEL, UN_SEUL_SITE, trajetSites } from '@/lib/types'
 import { DR_PLANS } from '@/lib/mock'
 import type { DRPlan } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -11,7 +11,9 @@ import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/
 import { StatTile } from '@/components/composition/metrics'
 import { DrPlanSummary } from '@/components/business/infra'
 import { useCollection } from '@/components/app/atelier'
+import { EmptyState } from '@/components/composition/states'
 import { BoutonFormulaire } from '@/components/app/actions'
+import { estActif } from '@/lib/api/client'
 
 export default function ListePra() {
   const plans = useCollection<DRPlan>('plans-pra', DR_PLANS)
@@ -27,7 +29,11 @@ export default function ListePra() {
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Plan de reprise (PRA)' }]}
         titre="Plan de reprise"
-        sousTitre="Un plan de reprise qui n’a jamais été exercé n’est pas un plan, c’est une intention. Nous affichons systématiquement la cible et le constaté côte à côte, et nous exerçons vos plans trimestriellement en réseau isolé."
+        sousTitre={
+          UN_SEUL_SITE
+            ? `Un plan de reprise qui n’a jamais été exercé n’est pas un plan, c’est une intention. La cible et le constaté s’affichent côte à côte. La plateforme n’a qu’un site (${SITE_COURT[SITES[0]]}) : le plan fixe l’ordre de redémarrage sur place, il ne bascule vers aucun second site.`
+            : 'Un plan de reprise qui n’a jamais été exercé n’est pas un plan, c’est une intention. Nous affichons systématiquement la cible et le constaté côte à côte, et nous exerçons vos plans trimestriellement en réseau isolé.'
+        }
         actions={
           <BoutonFormulaire
             libelle="Nouveau plan de reprise"
@@ -35,27 +41,30 @@ export default function ListePra() {
             variant="primary"
             action="dr.failover.test"
             titre="Créer un plan de reprise"
-            description="Le site source et le site de repli, les cibles de RPO et de RTO. L’ordre de démarrage et les ressources répliquées se composent ensuite depuis la fiche du plan."
+            description={
+              UN_SEUL_SITE
+                ? 'Les cibles de RPO et de RTO. L’ordre de démarrage et les ressources se composent ensuite depuis la fiche du plan.'
+                : 'Le site source et le site de repli, les cibles de RPO et de RTO. L’ordre de démarrage et les ressources répliquées se composent ensuite depuis la fiche du plan.'
+            }
             champs={[
-              { id: 'nom', label: 'Nom du plan', placeholder: 'ERP · reprise Grand-Bassam', obligatoire: true },
+              { id: 'nom', label: 'Nom du plan', placeholder: UN_SEUL_SITE ? 'ERP · reprise' : 'ERP · reprise Grand-Bassam', obligatoire: true },
               {
                 id: 'siteSource',
                 label: 'Site source',
                 type: 'select',
-                options: [
-                  { value: 'ABJ', label: SITE_LABEL.ABJ },
-                  { value: 'GBM', label: SITE_LABEL.GBM },
-                ],
+                options: SITES.map((c) => ({ value: c, label: SITE_LABEL[c] })),
               },
-              {
-                id: 'siteRepli',
-                label: 'Site de repli',
-                type: 'select',
-                options: [
-                  { value: 'GBM', label: SITE_LABEL.GBM },
-                  { value: 'ABJ', label: SITE_LABEL.ABJ },
-                ],
-              },
+              // Un seul site : la reprise se fait sur place, pas de site de repli à choisir.
+              ...(UN_SEUL_SITE
+                ? []
+                : [
+                    {
+                      id: 'siteRepli',
+                      label: 'Site de repli',
+                      type: 'select' as const,
+                      options: [...SITES].reverse().map((c) => ({ value: c, label: SITE_LABEL[c] })),
+                    },
+                  ]),
               { id: 'rpoCibleMin', label: 'RPO cible (minutes)', type: 'nombre', min: 1, demi: true },
               { id: 'rtoCibleMin', label: 'RTO cible (minutes)', type: 'nombre', min: 1, demi: true },
             ]}
@@ -70,7 +79,7 @@ export default function ListePra() {
                   orgId: 'org-dba',
                   nom: String(v.nom),
                   siteSource: v.siteSource as DRPlan['siteSource'],
-                  siteRepli: v.siteRepli as DRPlan['siteRepli'],
+                  siteRepli: (v.siteRepli ?? v.siteSource) as DRPlan['siteRepli'],
                   rpoCibleMin: Number(v.rpoCibleMin),
                   rpoConstateMin: 0,
                   rtoCibleMin: Number(v.rtoCibleMin),
@@ -104,6 +113,13 @@ export default function ListePra() {
         />
       </div>
 
+      {DR_PLANS_ITEMS.length === 0 && (
+        <EmptyState
+          titre="Aucun plan de reprise"
+          phrase="Créez un plan pour fixer l’ordre de redémarrage de vos ressources et vos cibles de RPO et de RTO ; il se valide ensuite par une bascule de test."
+        />
+      )}
+
       <div className="space-y-4">
         {DR_PLANS_ITEMS.map((plan) => (
           <div key={plan.id} className="space-y-2">
@@ -111,7 +127,7 @@ export default function ListePra() {
             <div className="flex flex-wrap items-center justify-between gap-3 px-1">
               <span className="flex flex-wrap items-center gap-2 text-[12px] text-g-500">
                 <Badge tone="neutral" size="sm">
-                  {SITE_COURT[plan.siteSource]} → {SITE_COURT[plan.siteRepli]}
+                  {trajetSites(plan.siteSource, plan.siteRepli)}
                 </Badge>
                 <span>
                   {plan.groupes.length} groupes de démarrage ·{' '}
@@ -133,7 +149,11 @@ export default function ListePra() {
       <Card>
         <CardHeader
           titre="Historique des exercices"
-          sousTitre="Chaque exercice produit un rapport daté, téléchargeable, opposable à un auditeur."
+          sousTitre={
+            estActif()
+              ? 'Chaque exercice est daté avec sa durée et son RTO constaté.'
+              : 'Chaque exercice produit un rapport daté, téléchargeable, opposable à un auditeur.'
+          }
         />
         <div className="overflow-x-auto">
           <table className="w-full min-w-max border-collapse">
@@ -181,18 +201,28 @@ export default function ListePra() {
                       </Badge>
                     </td>
                     <td className="px-3 py-2.5">
-                      <a
-                        href={e.rapportUrl}
-                        className="inline-flex items-center gap-1 text-[12px] font-semibold text-p-700 hover:text-m-600"
-                      >
-                        <FileDown size={12} />
-                        Télécharger
-                      </a>
+                      {estActif() ? (
+                        // L'API renvoie une adresse de rapport qui ne mène à aucun fichier.
+                        <span className="text-[12px] text-g-500">Pas de rapport</span>
+                      ) : (
+                        <a
+                          href={e.rapportUrl}
+                          className="inline-flex items-center gap-1 text-[12px] font-semibold text-p-700 hover:text-m-600"
+                        >
+                          <FileDown size={12} />
+                          Télécharger
+                        </a>
+                      )}
                     </td>
                   </tr>
                 ))}
             </tbody>
           </table>
+          {testes.length === 0 && (
+            <p className="px-3 py-6 text-center text-[12.5px] text-g-500">
+              Aucun exercice pour l’instant — il apparaît ici après la première bascule de test.
+            </p>
+          )}
         </div>
       </Card>
 

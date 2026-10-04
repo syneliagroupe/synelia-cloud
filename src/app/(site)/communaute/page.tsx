@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { estActif } from '@/lib/api/client'
+import { RubriqueNonPubliee } from '@/components/site/rubrique-non-publiee'
 import { ACTIONS_COMMUNAUTE, CONTRIBUTIONS_OSS } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
@@ -16,7 +18,9 @@ import {
 export const metadata: Metadata = {
   title: 'Dans l’écosystème ivoirien',
   description:
-    'Bac à sable gratuit pour les écoles, rencontre mensuelle Cloud & Souveraineté à Cocody, alternance sur l’exploitation, et correctifs renvoyés aux projets open source que nous opérons.',
+    estActif()
+      ? 'Rubrique non publiée.'
+      : 'Bac à sable gratuit pour les écoles, rencontre mensuelle Cloud & Souveraineté à Cocody, alternance sur l’exploitation, et correctifs renvoyés aux projets open source que nous opérons.',
 }
 
 const ETATS_OSS: Record<string, 'ok' | 'info' | 'neutral'> = {
@@ -27,6 +31,7 @@ const ETATS_OSS: Record<string, 'ok' | 'info' | 'neutral'> = {
 }
 
 export default function Communaute() {
+  if (estActif()) return <RubriqueNonPubliee surtitre="Écosystème" titre="Dans l’écosystème ivoirien" />
   return (
     <>
       <HeroCourt

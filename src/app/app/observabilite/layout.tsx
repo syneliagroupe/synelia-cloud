@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
  * n'existe que pour nommer l'onglet du navigateur — il n'ajoute aucun rendu.
  */
 export const metadata: Metadata = {
-  title: 'Observabilité',
+  title: 'Supervision',
   description: 'Règles d’alerte, sondes posées et accès à Centreon, Grafana et VictoriaLogs.',
 }
 

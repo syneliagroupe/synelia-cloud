@@ -152,9 +152,9 @@ export function CatalogCard({
   className?: string
 }) {
   const prixEntree = service.paliers.reduce<{ valeur: number; unite: string } | null>((acc, p) => {
-    const v = p.prixSiege ?? p.prixMois
+    const v = p.prixSiege || p.prixMois
     if (v === undefined) return acc
-    const unite = p.prixSiege !== undefined ? '/siège/mois' : '/mois'
+    const unite = p.prixSiege ? '/siège/mois' : '/mois'
     if (!acc || v < acc.valeur) return { valeur: v, unite }
     return acc
   }, null)

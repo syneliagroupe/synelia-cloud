@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { ArrowRightLeft, Plus } from 'lucide-react'
 import { cn, seededSeries, trendSeries } from '@/lib/utils'
-import { dateCourte, money, num, pct } from '@/lib/format'
+import { dateCourte, money, num, pct, toHumain } from '@/lib/format'
 import {
   BACKENDS,
   ESPACES,
@@ -12,14 +12,14 @@ import {
   SYNTHESE_PLATEFORME,
   VMS,
 } from '@/lib/mock'
-import { BACKEND_LABEL, SITE_COURT, type Backend, type Placement } from '@/lib/types'
+import { BACKEND_LABEL, SITES, SITE_COURT, type Backend, type Placement } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Input, Select, Switch } from '@/components/ui/field'
 import { ConfirmDialog } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
-import { QuotaBar, StatTile } from '@/components/composition/metrics'
+import { QuotaBar, StatTile, HistoriqueSimule } from '@/components/composition/metrics'
 import { BackendGauge, PlacementSlider, AvertissementMigration } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
@@ -46,6 +46,8 @@ export default function Capacite() {
   // En mode API, les espaces viennent du backend : le sélecteur local
   // filtrerait sur des identifiants inconnus de l’API.
   const espacesDistants = useCollection('espaces', ESPACES)
+  const vmsDistantes = useCollection<{ id: string; espaceId: string; site: string }>('vms', VMS)
+  const VMS_LUES = estActif() ? vmsDistantes.items : VMS
   const ESPACES_LUS = estActif() ? espacesDistants.items : ESPACES
   // `GET /admin/capacite` ne sert que son `424` : les chiffres restent
   // locaux, mais une projection indisponible se dit au lieu de se taire.
@@ -75,9 +77,20 @@ export default function Capacite() {
   const satures = socles.items.filter((b) => (b.saturation?.j30 ?? 0) > 85)
   const enSortie = socles.items.filter((b) => b.enSortie?.actif)
 
-  const vcpuPct = Math.round(
-    (SYNTHESE_PLATEFORME.vcpuUtilise / SYNTHESE_PLATEFORME.vcpuTotal) * 100,
-  )
+  // API : les totaux viennent des socles réels, pas des agrégats de la maquette.
+  const synthese = estActif()
+    ? {
+        vcpuTotal: BACKENDS_LUS.reduce((a, b) => a + b.capacite.vcpu, 0),
+        vcpuUtilise: Math.round(
+          BACKENDS_LUS.reduce((a, b) => a + (b.capacite.vcpu * b.usage.vcpuPct) / 100, 0),
+        ),
+        ramTotalGo: BACKENDS_LUS.reduce((a, b) => a + b.capacite.ramGo, 0),
+        stockageTotalTo: BACKENDS_LUS.reduce((a, b) => a + b.capacite.stockageTo, 0),
+      }
+    : SYNTHESE_PLATEFORME
+  const vcpuPct =
+    synthese.vcpuTotal > 0 ? Math.round((synthese.vcpuUtilise / synthese.vcpuTotal) * 100) : 0
+  const onglets = estActif() ? ONGLETS.filter((o) => o.id !== 'marge') : ONGLETS
   const margeMoyenne =
     Math.round(
       (MARGE_BACKENDS.reduce((a, m) => a + m.marge, 0) / MARGE_BACKENDS.length) * 10,
@@ -119,7 +132,7 @@ export default function Capacite() {
                 demi: true,
                 options: [
                   { value: 'ABJ', label: 'Abidjan' },
-                  { value: 'GBM', label: 'Grand-Bassam' },
+                  ...SITES.filter((s) => s === 'GBM').map((s) => ({ value: s, label: 'Grand-Bassam' })),
                 ],
               },
               { id: 'vcpu', label: 'vCPU', type: 'nombre', demi: true, min: 8 },
@@ -128,6 +141,7 @@ export default function Capacite() {
             ]}
             valeursDepart={{ type: 'openstack', site: 'ABJ', vcpu: 256, ram: 1024, stockage: 100 }}
             libelleValider="Déclarer"
+            sansApi="Indisponible : le raccordement d’un socle se fait côté exploitation (configuration du fournisseur), pas depuis cette console."
             operation={(v) => {
               const idSocle = socles.identifiant('bk')
               return {
@@ -167,14 +181,16 @@ export default function Capacite() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {BACKENDS_LUS.length} socles
+              {BACKENDS_LUS.length} socle{BACKENDS_LUS.length > 1 ? 's' : ''}
             </Badge>
             <Badge tone="neutral" size="sm">
-              {num(SYNTHESE_PLATEFORME.vcpuTotal)} vCPU installés
+              {num(synthese.vcpuTotal)} vCPU installés
             </Badge>
-            <Badge tone={margeMoyenne > 40 ? 'ok' : 'warn'} size="sm">
-              Marge moyenne {pct(margeMoyenne, 1)}
-            </Badge>
+            {!estActif() && (
+              <Badge tone={margeMoyenne > 40 ? 'ok' : 'warn'} size="sm">
+                Marge moyenne {pct(margeMoyenne, 1)}
+              </Badge>
+            )}
           </>
         }
       />
@@ -207,17 +223,21 @@ export default function Capacite() {
           libelle="Processeur alloué"
           valeur={pct(vcpuPct)}
           ton={vcpuPct > 80 ? 'warn' : 'violet'}
-          detail={`${num(SYNTHESE_PLATEFORME.vcpuUtilise)} / ${num(SYNTHESE_PLATEFORME.vcpuTotal)} vCPU`}
+          detail={`${num(synthese.vcpuUtilise)} / ${num(synthese.vcpuTotal)} vCPU`}
           serie={trendSeries('cap-vcpu', 30, vcpuPct - 11, vcpuPct)}
         />
         <StatTile
           libelle="Mémoire installée"
-          valeur={`${num(Math.round(SYNTHESE_PLATEFORME.ramTotalGo / 1024))} Tio`}
-          detail={`${num(SYNTHESE_PLATEFORME.ramTotalGo)} Go`}
+          valeur={
+            synthese.ramTotalGo >= 1024
+              ? `${num(Math.round(synthese.ramTotalGo / 1024))} Tio`
+              : `${num(synthese.ramTotalGo)} Go`
+          }
+          detail={synthese.ramTotalGo >= 1024 ? `${num(synthese.ramTotalGo)} Go` : undefined}
         />
         <StatTile
           libelle="Stockage installé"
-          valeur={`${num(SYNTHESE_PLATEFORME.stockageTotalTo)} To`}
+          valeur={toHumain(synthese.stockageTotalTo)}
         />
         <StatTile
           libelle="Socles en tension"
@@ -232,7 +252,7 @@ export default function Capacite() {
         />
       </div>
 
-      <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
+      <Tabs tabs={onglets} active={onglet} onChange={setOnglet} />
 
       {onglet === 'socles' && (
         <div className="space-y-4">
@@ -301,10 +321,11 @@ export default function Capacite() {
                       </td>
                       <td className="w-40 px-3 py-2.5">
                         <QuotaBar
-                          utilise={Math.round((b.capacite.stockageTo * b.usage.stockagePct) / 100)}
+                          utilise={(b.capacite.stockageTo * b.usage.stockagePct) / 100}
                           total={b.capacite.stockageTo}
                           compact
                           seuil={85}
+                          formateur={toHumain}
                         />
                       </td>
                       <td className="px-3 py-2.5">
@@ -339,12 +360,25 @@ export default function Capacite() {
                             operation={{
                               ton: 'info',
                               titre: `${b.code} · ${BACKEND_LABEL[b.type]}`,
-                              detail: `${b.hosts} hôtes · ${b.capacite.vcpu} vCPU · ${num(b.capacite.ramGo)} Go · saturation projetée à 30 jours ${b.saturation?.j30 ?? 0} %`,
+                              detail: `${b.hosts} hôte${b.hosts > 1 ? 's' : ''} · ${b.capacite.vcpu} vCPU · ${num(b.capacite.ramGo)} Go · saturation projetée à 30 jours ${b.saturation?.j30 ?? 0} %`,
                             }}
                           />
                           <BoutonAction
                             libelle={b.statut === 'maintenance' ? 'Remettre en ligne' : 'Drainer'}
                             variant="ghost"
+                            confirmation={
+                              b.statut === 'maintenance'
+                                ? undefined
+                                : {
+                                    ressource: b.code,
+                                    titre: `Drainer le socle ${b.code} ?`,
+                                    pertes: [
+                                      'Le socle est fermé aux nouveaux placements',
+                                      'Ses machines sont migrées vers les autres socles du site : sans autre socle, elles restent sur place',
+                                    ],
+                                    libelleAction: 'Drainer le socle',
+                                  }
+                            }
                             operation={{
                               action: 'capacity.manage',
                               ton: b.statut === 'maintenance' ? 'ok' : 'warn',
@@ -405,7 +439,10 @@ export default function Capacite() {
               />
               <AvertissementMigration
                 lots={enSortie.length}
-                machines={VMS.filter((v) => enSortie.some((b) => b.code.startsWith(v.site))).length + 42}
+                machines={
+                  VMS_LUES.filter((v) => enSortie.some((b) => b.code.startsWith(v.site))).length +
+                  (estActif() ? 0 : 42)
+                }
               />
               <div className="mt-4 space-y-2">
                 {enSortie.map((b) => (
@@ -468,7 +505,7 @@ export default function Capacite() {
                   />
                   <StatTile
                     libelle="Machines"
-                    valeur={VMS.filter((v) => v.espaceId === espace.id).length}
+                    valeur={VMS_LUES.filter((v) => v.espaceId === espace.id).length}
                   />
                   <StatTile libelle="Site" valeur={SITE_COURT[espace.site]} detail={espace.cidr} />
                 </div>
@@ -568,7 +605,7 @@ export default function Capacite() {
                           )}
                         </td>
                         <td className="tnum px-3 py-2.5 text-[12px] text-g-700">
-                          {VMS.filter((v) => v.espaceId === e.id).length}
+                          {VMS_LUES.filter((v) => v.espaceId === e.id).length}
                         </td>
                         <td className="px-3 py-2.5">
                           <Badge tone={e.statut === 'active' ? 'ok' : 'warn'} dot size="sm">
@@ -650,12 +687,14 @@ export default function Capacite() {
             </div>
           </Card>
 
+          {!estActif() && (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader
                 titre="Croissance observée"
                 sousTitre="Processeur alloué sur la plateforme, 90 derniers jours."
               />
+              <HistoriqueSimule>
               <div className="flex items-end gap-1">
                 {trendSeries('cap-croissance', 90, vcpuPct - 22, vcpuPct).map((v, i) => (
                   <span
@@ -673,6 +712,7 @@ export default function Capacite() {
                 <span>Il y a 90 jours</span>
                 <span>Aujourd’hui</span>
               </div>
+              </HistoriqueSimule>
               <KeyValueList
                 className="mt-4 border-t border-g-100 pt-4"
                 colonnes={1}
@@ -744,6 +784,7 @@ export default function Capacite() {
               </Callout>
             </Card>
           </div>
+          )}
         </div>
       )}
 

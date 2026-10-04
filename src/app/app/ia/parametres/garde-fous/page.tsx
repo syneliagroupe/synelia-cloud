@@ -11,6 +11,7 @@ import { GatedAction, Tabs } from '@/components/ui/display'
 import { Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
+import { AvisDemoApi } from '../../avis-demo'
 import { useApp } from '@/components/app/contexte'
 
 const LIBELLE_ACTION = {
@@ -49,6 +50,10 @@ export default function GardeFousReglages() {
         titre="Garde-fous"
         sousTitre="Ce qui filtre les requêtes avant et après l’appel au modèle, sur toutes les clés de l’organisation. La consigne oriente ; ces filtres empêchent."
       />
+
+      <AvisDemoApi>
+        Les garde-fous ci-dessous sont un jeu d’exemple : aucun filtre d’entrée ou de sortie n’est encore branché sur la passerelle, et les compteurs des 24 dernières heures n’existent pas côté API.
+      </AvisDemoApi>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile libelle="Requêtes routées 24 h" valeur={num(requetes24h)} />

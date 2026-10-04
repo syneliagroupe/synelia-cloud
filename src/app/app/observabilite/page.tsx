@@ -24,7 +24,7 @@ import type {
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink, IconButton } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
-import { Field, Input, SegmentedControl, Select, Switch } from '@/components/ui/field'
+import { SegmentedControl } from '@/components/ui/field'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { HealthBadge, StatTile } from '@/components/composition/metrics'
 import { EventList, GrilleSparkCharts, LiensSortie, LogPeek } from '@/components/business/observabilite'
@@ -34,6 +34,7 @@ import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import {
   creerRessource,
+  estActif,
   modifierRessource,
   requete,
   supprimerRessource,
@@ -107,17 +108,11 @@ export default function Observabilite() {
   const { autorise, refus, pousser } = useApp()
   const alertes = useCollection<AlerteRegle>('regles-alertes', REGLES_ALERTES)
   const executer = useOperation()
-  const [canalCourriel, setCanalCourriel] = useState(true)
-  const [canalWebhook, setCanalWebhook] = useState(false)
-  const [canalTicket, setCanalTicket] = useState(false)
   const [onglet, setOnglet] = useState('vue')
   const [perimetre, setPerimetre] = useState('espace')
-  // Formulaire rapide de la carte « Nouvelle règle » : mêmes champs que la
-  // modale, en version resserrée (pas de canal webhook ici, le courriel suffit).
-  const [regleMetrique, setRegleMetrique] = useState('Charge processeur')
-  const [regleSeuil, setRegleSeuil] = useState(85)
-  const [regleDuree, setRegleDuree] = useState(10)
-  const [reglePortee, setReglePortee] = useState('espace')
+  // En mode API, aucune source de métriques n'est raccordée à ce lab (le backend
+  // renvoie des zéros) : les courbes et jauges seraient des graines inventées.
+  const reel = estActif()
 
   // Les machines ont un vrai backend (`/vms`) : `useCollection` en sert les
   // données réelles quand l'API est active, et retombe sur la graine sinon —
@@ -173,8 +168,8 @@ export default function Observabilite() {
   return (
     <div className="space-y-5">
       <PageHeader
-        fil={[{ label: 'Espace client', href: '/app' }, { label: 'Observabilité' }]}
-        titre="Observabilité"
+        fil={[{ label: 'Espace client', href: '/app' }, { label: 'Supervision' }]}
+        titre="Supervision"
         sousTitre="Une vue de synthèse, volontairement resserrée : l’état de santé, quelques courbes, les derniers événements, un aperçu des journaux. Pour l’analyse fine, nous vous ouvrons Centreon, Grafana et le moteur de recherche de journaux — ce sont des outils spécialisés, nous ne cherchons pas à les remplacer."
         actions={
           <BoutonFormulaire
@@ -222,7 +217,7 @@ export default function Observabilite() {
               {espace.code}
             </Badge>
             <Badge tone="neutral" size="sm">
-              Données à {dateHeure('2026-08-19T15:20:00Z')}
+              Données à {dateHeure(maintenant)}
             </Badge>
           </>
         }
@@ -230,15 +225,20 @@ export default function Observabilite() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
-          libelle="Ressources supervisées"
+          libelle={reel ? 'Ressources de l’Espace' : 'Ressources supervisées'}
           valeur={vms.length + services.length}
           detail={`${vms.length} machines · ${services.length} services applicatifs`}
         />
         <StatTile
           libelle="Charge processeur moyenne"
-          valeur={pct(chargeMoy)}
-          ton={chargeMoy > 75 ? 'warn' : 'ok'}
-          serie={seededSeries(`obs-cpu-${espace.id}`, 24, Math.max(5, chargeMoy - 18), chargeMoy + 14)}
+          valeur={reel ? '—' : pct(chargeMoy)}
+          ton={!reel && chargeMoy > 75 ? 'warn' : 'ok'}
+          detail={reel ? 'Aucune métrique remontée' : undefined}
+          serie={
+            reel
+              ? undefined
+              : seededSeries(`obs-cpu-${espace.id}`, 24, Math.max(5, chargeMoy - 18), chargeMoy + 14)
+          }
         />
         <StatTile
           libelle="Événements ouverts"
@@ -263,10 +263,25 @@ export default function Observabilite() {
       {onglet === 'vue' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <SegmentedControl options={PERIMETRES} value={perimetre} onChange={setPerimetre} />
+            {!reel && (
+              <SegmentedControl options={PERIMETRES} value={perimetre} onChange={setPerimetre} />
+            )}
             <LiensSortie centreon grafana logs hrefGrafana={hrefGrafana} />
           </div>
 
+          {reel ? (
+            <Card>
+              <CardHeader
+                titre="Métriques"
+                sousTitre="Lecture seule — l’analyse détaillée reste dans Grafana."
+              />
+              <p className="rounded-[8px] border border-dashed border-g-300 bg-g-050 px-3.5 py-6 text-center text-[12.5px] text-g-500">
+                Aucune métrique n’est remontée pour l’instant : la collecte (VictoriaMetrics) n’est pas
+                encore raccordée à vos machines. Les courbes apparaîtront ici dès qu’elle le sera ;
+                les événements ci-dessous, eux, sont réels.
+              </p>
+            </Card>
+          ) : (
           <GrilleSparkCharts
             seed={`obs-${perimetre}-${espace.id}`}
             degrade={!!degradeMetriques}
@@ -293,12 +308,17 @@ export default function Observabilite() {
                     ]
             }
           />
+          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
             <CardHeader
               titre="Derniers événements"
-              sousTitre="Les huit derniers événements de supervision, toutes ressources confondues."
+              sousTitre={
+                reel
+                  ? 'Les huit derniers travaux de provisioning de votre organisation : créations, suppressions, bascules.'
+                  : 'Les huit derniers événements de supervision, toutes ressources confondues.'
+              }
             />
             {degradeEvenements ? (
               <DegradedState
@@ -311,7 +331,7 @@ export default function Observabilite() {
                 evenements={evenements}
                 max={8}
                 lienSortie="Ouvrir la console Centreon"
-                hrefSortie="https://centreon.synelia.cloud/monitoring/resources"
+                hrefSortie="https://centreon.synelia.tech"
               />
             )}
           </Card>
@@ -331,7 +351,7 @@ export default function Observabilite() {
               <LogPeek
                 lignes={lignesJournal}
                 max={20}
-                titre="facturation-api · Production"
+                titre={reel ? 'Journaux de l’organisation' : 'facturation-api · Production'}
                 hrefSortie={
                   journauxDistants?.lienVictoriaLogs ?? 'https://logs.synelia.cloud/select/vmui'
                 }
@@ -494,7 +514,11 @@ export default function Observabilite() {
           <Card>
             <CardHeader
               titre="Journal des événements"
-              sousTitre="Un événement reste ouvert jusqu’à sa résolution ou son acquittement. L’acquittement est nominatif."
+              sousTitre={
+                reel
+                  ? 'Les travaux de provisioning récents. Un échec reste « majeur » jusqu’à reprise depuis le centre de tâches.'
+                  : 'Un événement reste ouvert jusqu’à sa résolution ou son acquittement. L’acquittement est nominatif.'
+              }
             />
             {degradeEvenements ? (
               <DegradedState
@@ -539,8 +563,12 @@ export default function Observabilite() {
                     </Badge>
                     {e.gravite === 'info' ? (
                       <Badge tone="neutral" size="sm">
-                        Acquitté
+                        {reel ? 'Terminé' : 'Acquitté'}
                       </Badge>
+                    ) : reel ? (
+                      <ButtonLink size="sm" variant="ghost" href={`/app/taches/${e.id}`}>
+                        Voir la tâche
+                      </ButtonLink>
                     ) : (
                       <Button
                         size="sm"
@@ -627,6 +655,14 @@ export default function Observabilite() {
                   </tr>
                 </thead>
                 <tbody>
+                  {alertes.items.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-6 text-center text-[12.5px] text-g-500">
+                        Aucune règle d’alerte. Ajoutez-en une pour être prévenu quand une machine
+                        dépasse un seuil.
+                      </td>
+                    </tr>
+                  )}
                   {alertes.items.map((r) => (
                     <tr key={r.id} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2.5 text-[12.5px] font-semibold text-ink">
@@ -743,106 +779,7 @@ export default function Observabilite() {
             </div>
           </Card>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader
-                titre="Nouvelle règle"
-                sousTitre="Trois champs suffisent dans la plupart des cas."
-              />
-              <div className="space-y-4">
-                <Field label="Métrique">
-                  <Select value={regleMetrique} onChange={(e) => setRegleMetrique(e.target.value)}>
-                    <option value="Charge processeur">Charge processeur</option>
-                    <option value="Mémoire utilisée">Mémoire utilisée</option>
-                    <option value="Espace disque restant">Espace disque restant</option>
-                    <option value="Latence 95e centile">Latence 95e centile</option>
-                    <option value="Taux d’erreur HTTP">Taux d’erreur HTTP</option>
-                    <option value="Sauvegarde en échec">Sauvegarde en échec</option>
-                  </Select>
-                </Field>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Seuil" hint="en pourcentage">
-                    <Input
-                      type="number"
-                      value={regleSeuil}
-                      onChange={(e) => setRegleSeuil(Number(e.target.value))}
-                    />
-                  </Field>
-                  <Field
-                    label="Dépassement continu"
-                    hint="minutes — évite les alertes sur un pic isolé"
-                  >
-                    <Input
-                      type="number"
-                      value={regleDuree}
-                      onChange={(e) => setRegleDuree(Number(e.target.value))}
-                    />
-                  </Field>
-                </div>
-                <Field label="Portée">
-                  <Select value={reglePortee} onChange={(e) => setReglePortee(e.target.value)}>
-                    <option value="espace">Tout l’espace {espace.code}</option>
-                    <option value="vm">Une machine précise</option>
-                    <option value="app">Une application</option>
-                  </Select>
-                </Field>
-                <div className="space-y-3">
-                  {/* Réglages du brouillon de règle, pas encore une ressource : un
-                  changement ici n'a rien à annoncer avant que « Créer » ne poste la
-                  règle, contrairement aux autres opérations de cet écran qui agissent
-                  sur une règle déjà existante. */}
-                  <Switch
-                    checked={canalCourriel}
-                    onChange={setCanalCourriel}
-                    label="Courriel aux administrateurs de l’organisation"
-                  />
-                  <Switch
-                    checked={canalWebhook}
-                    onChange={setCanalWebhook}
-                    label="Webhook vers un canal d’équipe"
-                    description="Nous envoyons une charge JSON signée ; le format est décrit dans la documentation."
-                  />
-                  <Switch
-                    checked={canalTicket}
-                    onChange={setCanalTicket}
-                    label="Ouvrir automatiquement un ticket de support"
-                    description="Uniquement pour les alertes critiques. Le ticket est rattaché à la ressource concernée."
-                  />
-                </div>
-              </div>
-              <GatedAction autorise={autorise('network.manage')} message={refus('network.manage')}>
-                <Button
-                  className="mt-4"
-                  onClick={() => {
-                    const idAlerte = alertes.identifiant('alerte')
-                    const corps = {
-                      cible:
-                        reglePortee === 'espace'
-                          ? `Tout l’espace ${espace.code}`
-                          : reglePortee === 'vm'
-                            ? 'Une machine précise'
-                            : 'Une application',
-                      metrique: regleMetrique,
-                      seuil: `> ${regleSeuil} %`,
-                      canaux: ['email'] as AlerteRegle['canaux'],
-                      plage: `${regleDuree} min`,
-                      actif: true,
-                    }
-                    executer({
-                      action: 'network.manage',
-                      titre: 'Règle d’alerte créée',
-                      detail: 'Elle prendra effet au prochain cycle de collecte, dans moins d’une minute.',
-                      appel: () => creerRessource('/observabilite/alertes', corps),
-                      effet: () => alertes.creer({ id: idAlerte, ...corps }),
-                      effetFinal: () => alertes.recharger(),
-                    })
-                  }}
-                >
-                  Créer la règle
-                </Button>
-              </GatedAction>
-            </Card>
-
+          <div className="grid grid-cols-1 gap-4">
             <Card>
               <CardHeader
                 titre="Événements récents"
@@ -872,6 +809,7 @@ export default function Observabilite() {
 }
 
 function Jauge({ valeur, seuil }: { valeur: number; seuil: number }) {
+  if (estActif()) return <span className="text-[11.5px] text-g-500">—</span>
   return (
     <span className="flex items-center gap-2">
       <span className="relative block h-1.5 w-16 overflow-hidden rounded-full bg-g-100">

@@ -13,16 +13,22 @@ import { estActif, requete } from './client'
  */
 export function usePublic<T>(chemin: string, query?: Record<string, string>) {
   const [donnees, setDonnees] = useState<T | undefined>(undefined)
+  // Vrai quand la lecture a abouti ou échoué (ou quand il n'y a pas d'API) : permet d'éviter d'afficher le repli local en attendant.
+  const [termine, setTermine] = useState(!estActif())
 
   useEffect(() => {
     if (!estActif()) return
     let annule = false
     requete<T>(chemin, { query }).then(
       (v) => {
-        if (!annule) setDonnees(v)
+        if (!annule) {
+          setDonnees(v)
+          setTermine(true)
+        }
       },
       () => {
         // Repli maquette : l’écran garde ses données locales.
+        if (!annule) setTermine(true)
       },
     )
     return () => {
@@ -30,5 +36,5 @@ export function usePublic<T>(chemin: string, query?: Record<string, string>) {
     }
   }, [chemin, JSON.stringify(query ?? {})])
 
-  return { donnees }
+  return { donnees, termine }
 }

@@ -291,67 +291,6 @@ export function ChiffreCle({
   )
 }
 
-/** Représentation abstraite d'un rack — jamais une photo générique (§2.2). */
-export function VisuelRack({ className }: { className?: string }) {
-  const unites = [
-    { h: 3, teinte: 'bg-p-400/70', label: 'Load balancer · WAF' },
-    { h: 5, teinte: 'bg-white/85', label: 'Calcul · 4 hôtes' },
-    { h: 5, teinte: 'bg-white/70', label: 'Calcul · 4 hôtes' },
-    { h: 4, teinte: 'bg-m-600/70', label: 'Stockage NVMe' },
-    { h: 4, teinte: 'bg-white/55', label: 'Stockage objet' },
-    { h: 3, teinte: 'bg-p-300/70', label: 'Réseau · 2 chemins' },
-  ]
-  return (
-    <div className={cn('relative', className)}>
-      <div className="rounded-[14px] border border-p-400/50 bg-p-800/60 p-3 backdrop-blur-sm">
-        <div className="mb-2.5 flex items-center justify-between px-1">
-          <span className="type-micro text-p-300">Site ABJ · Synertech Vallon</span>
-          <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white">
-            <span className="h-1.5 w-1.5 rounded-full bg-ok animate-pulse-dot" />
-            En ligne
-          </span>
-        </div>
-        <div className="space-y-1.5">
-          {unites.map((u, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-2 rounded-[6px] border border-white/10 bg-white/5 px-2.5"
-              style={{ height: u.h * 14 }}
-            >
-              <span className={cn('h-2 w-2 shrink-0 rounded-sm', u.teinte)} />
-              <span className="flex-1 truncate text-[11px] font-medium text-white/85">
-                {u.label}
-              </span>
-              <span className="flex shrink-0 gap-0.5">
-                {Array.from({ length: u.h }).map((_, j) => (
-                  <span key={j} className="h-1.5 w-1.5 rounded-full bg-p-300/45" />
-                ))}
-              </span>
-            </div>
-          ))}
-        </div>
-        <div className="mt-2.5 grid grid-cols-3 gap-2 border-t border-white/10 pt-2.5">
-          {[
-            { l: 'vCPU', v: '62 %' },
-            { l: 'Mémoire', v: '68 %' },
-            { l: 'Stockage', v: '57 %' },
-          ].map((s) => (
-            <div key={s.l}>
-              <p className="text-[11px] text-p-300">{s.l}</p>
-              <p className="tnum text-[13px] font-bold text-white">{s.v}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="absolute -bottom-4 -right-4 hidden rounded-[10px] border border-p-400/50 bg-p-900 px-3 py-2 shadow-[0_8px_28px_rgba(0,0,0,.3)] sm:block">
-        <p className="type-micro text-p-300">Latence inter-site</p>
-        <p className="tnum text-[15px] font-bold text-white">4–6 ms</p>
-        <p className="text-[11px] text-p-300">ABJ ↔ GBM</p>
-      </div>
-    </div>
-  )
-}
-
 /**
  * Portrait en monogramme. La charte proscrit les photographies génériques, et
  * un visage de banque d'images réchauffe moins qu'un nom : on affiche les

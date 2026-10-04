@@ -205,7 +205,10 @@ export function LiensSortie({
   const liens = [
     centreon && { libelle: 'Ouvrir dans Centreon', href: 'https://centreon.synelia.tech' },
     grafana && { libelle: 'Ouvrir dans Grafana', href: hrefGrafana || GRAFANA_URL_DEFAUT },
-    logs && { libelle: 'Ouvrir dans VictoriaLogs', href: 'https://vlogs.synelia.cloud' },
+    logs && process.env.NEXT_PUBLIC_VLOGS_URL && {
+      libelle: 'Ouvrir dans VictoriaLogs',
+      href: process.env.NEXT_PUBLIC_VLOGS_URL,
+    },
   ].filter(Boolean) as Array<{ libelle: string; href: string }>
 
   return (
@@ -265,8 +268,9 @@ export function EventList({
             <div className="min-w-0 flex-1">
               <p className="text-[13px] leading-snug text-ink">{e.message}</p>
               <p className="mt-0.5 text-[12px] text-g-500">
-                {e.ressource}
-                {e.site && ` · ${e.site}`} · {relatif(e.ts, maintenant)}
+                {e.ressource !== e.message && `${e.ressource} · `}
+                {e.site && `${e.site} · `}
+                {relatif(e.ts, maintenant)}
               </p>
             </div>
           </li>

@@ -1,12 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { BookOpen, ExternalLink, FileCode2, Search } from 'lucide-react'
+import { BookOpen, ExternalLink, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ARTICLES_KB, SECTIONS_DOCS } from '@/lib/mock'
+import { SITES, SITE_LABEL } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
-import { Button, ButtonLink } from '@/components/ui/button'
-import { CodeBlock, CopyField, Tabs } from '@/components/ui/display'
+import { ButtonLink } from '@/components/ui/button'
+import { CodeBlock, Tabs } from '@/components/ui/display'
 import { SearchInput, Select } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { NavCard } from '@/components/composition/card'
@@ -14,8 +15,6 @@ import { NavCard } from '@/components/composition/card'
 const ONGLETS = [
   { id: 'guides', label: 'Guides' },
   { id: 'api', label: 'API REST' },
-  { id: 'cli', label: 'Ligne de commande' },
-  { id: 'terraform', label: 'Infrastructure déclarative' },
   { id: 'reference', label: 'Références' },
 ]
 
@@ -24,28 +23,28 @@ const RESSOURCES_API = [
     groupe: 'Espaces Cloud',
     routes: [
       { m: 'GET', r: '/v1/espaces', d: 'Lister les espaces de l’organisation' },
-      { m: 'POST', r: '/v1/espaces', d: 'Créer un espace — renvoie l’aperçu de coût si dry_run=true' },
-      { m: 'GET', r: '/v1/espaces/{id}', d: 'Détail d’un espace, quota et usage' },
-      { m: 'PATCH', r: '/v1/espaces/{id}/quota', d: 'Modifier le quota — rôle infra_admin requis' },
+      { m: 'POST', r: '/v1/espaces', d: 'Créer un espace — opération asynchrone, suivie par un travail' },
+      { m: 'GET', r: '/v1/espaces/{espaceId}', d: 'Détail d’un espace, quota et usage' },
+      { m: 'PUT', r: '/v1/espaces/{espaceId}/quota', d: 'Modifier le quota — rôle infra_admin requis' },
     ],
   },
   {
     groupe: 'Machines virtuelles',
     routes: [
-      { m: 'GET', r: '/v1/vms', d: 'Lister les machines — filtrable par espaceId' },
-      { m: 'POST', r: '/v1/vms', d: 'Créer une machine — espaceId dans le corps' },
-      { m: 'POST', r: '/v1/vms/{id}/power', d: 'Démarrer, arrêter, redémarrer' },
-      { m: 'PATCH', r: '/v1/vms/{id}/hardware', d: 'Modifier processeur, mémoire, disque' },
-      { m: 'DELETE', r: '/v1/vms/{id}', d: 'Supprimer — exige le paramètre confirm=<nom exact>' },
+      { m: 'GET', r: '/v1/vms', d: 'Lister les machines de l’organisation' },
+      { m: 'POST', r: '/v1/vms', d: 'Créer une machine — espaceId dans le corps, opération asynchrone' },
+      { m: 'POST', r: '/v1/vms/{vmId}/demarrage', d: 'Démarrer — de même /arret et /redemarrage' },
+      { m: 'PUT', r: '/v1/vms/{vmId}/materiel', d: 'Modifier processeur, mémoire, disque' },
+      { m: 'DELETE', r: '/v1/vms/{vmId}', d: 'Supprimer — exige le paramètre confirmation=<nom exact>' },
     ],
   },
   {
     groupe: 'Applications',
     routes: [
-      { m: 'GET', r: '/v1/applications', d: 'Lister les applications' },
-      { m: 'POST', r: '/v1/deploiements', d: 'Déclencher un déploiement — envId dans le corps' },
-      { m: 'POST', r: '/v1/deploiements/{id}/rollback', d: 'Retour arrière vers l’artefact précédent' },
-      { m: 'GET', r: '/v1/deploiements/{id}/journaux', d: 'Journaux de build et d’exécution' },
+      { m: 'GET', r: '/v1/projets', d: 'Lister les projets applicatifs' },
+      { m: 'POST', r: '/v1/deploiements', d: 'Déclencher un déploiement' },
+      { m: 'POST', r: '/v1/deploiements/{deploiementId}/rollback', d: 'Retour arrière vers l’artefact précédent' },
+      { m: 'GET', r: '/v1/deploiements/{deploiementId}/journaux', d: 'Journaux de build et d’exécution' },
     ],
   },
   {
@@ -61,7 +60,7 @@ const RESSOURCES_API = [
     groupe: 'Facturation',
     routes: [
       { m: 'GET', r: '/v1/facturation/factures', d: 'Lister les factures' },
-      { m: 'GET', r: '/v1/facturation/factures/{id}', d: 'Détail d’une facture, lignes incluses' },
+      { m: 'GET', r: '/v1/facturation/factures/{factureId}', d: 'Détail d’une facture, lignes incluses' },
       { m: 'GET', r: '/v1/facturation/consommation', d: 'Consommation par jour, ventilée par étiquette' },
       { m: 'GET', r: '/v1/facturation/souscriptions', d: 'Souscriptions actives' },
     ],
@@ -69,33 +68,22 @@ const RESSOURCES_API = [
   {
     groupe: 'Audit & conformité',
     routes: [
-      { m: 'GET', r: '/v1/audit', d: 'Journal d’audit — rôle org_admin ou read_only requis' },
+      { m: 'GET', r: '/v1/audit', d: 'Journal d’audit de l’organisation' },
       { m: 'POST', r: '/v1/audit/export', d: 'Générer un export signé' },
       { m: 'GET', r: '/v1/audit/integrite', d: 'Vérifier la chaîne d’empreintes du journal' },
     ],
   },
 ]
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'https://api.cloud.dev01.ovh.smile.ci/v1'
+
 const TON_METHODE: Record<string, string> = {
   GET: 'bg-info-bg text-info',
   POST: 'bg-ok-bg text-ok',
   PATCH: 'bg-warn-bg text-warn',
+  PUT: 'bg-warn-bg text-warn',
   DELETE: 'bg-err-bg text-err',
 }
-
-const COMMANDES = [
-  { c: 'synelia auth login', d: 'Ouvre le navigateur pour une authentification via votre annuaire' },
-  { c: 'synelia org list', d: 'Liste les organisations auxquelles vous appartenez' },
-  { c: 'synelia espace list', d: 'Espaces Cloud de l’organisation active' },
-  { c: 'synelia vm create --espace EC-DBA-01 --gabarit c2.medium --dry-run', d: 'Aperçu de coût sans créer' },
-  { c: 'synelia vm power start vm-042', d: 'Démarre une machine' },
-  { c: 'synelia app deploy app-metier --env production', d: 'Déclenche un déploiement' },
-  { c: 'synelia app rollback app-metier --env production', d: 'Repromeut l’artefact précédent' },
-  { c: 'synelia backup restore --point rp-8814 --cible nouvelle', d: 'Restaure dans une nouvelle ressource' },
-  { c: 'synelia dns export dba.africa', d: 'Exporte la zone au format BIND' },
-  { c: 'synelia facture list --periode 2026-08', d: 'Factures d’une période' },
-  { c: 'synelia audit export --du 2026-07-01 --au 2026-07-31 --format pdf', d: 'Export d’audit signé' },
-]
 
 export default function Docs() {
   const [onglet, setOnglet] = useState('guides')
@@ -124,7 +112,7 @@ export default function Docs() {
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Documentation' }]}
         titre="Documentation"
-        sousTitre="Guides pratiques, référence de l’API, interface en ligne de commande et fournisseur d’infrastructure déclarative. Ce que la plateforme ne fait pas y est documenté aussi."
+        sousTitre="Guides pratiques et référence de l’API REST. Ce que la plateforme ne fait pas y est documenté aussi."
         actions={
           <ButtonLink variant="secondary" href="/docs" external iconAfter={<ExternalLink size={13} />}>
             Documentation publique
@@ -251,61 +239,40 @@ export default function Docs() {
               <KeyValueList
                 colonnes={1}
                 items={[
-                  { cle: 'Adresse', valeur: 'https://api.synelia.cloud/v1' },
+                  { cle: 'Adresse', valeur: API_BASE },
                   { cle: 'Authentification', valeur: 'En-tête Authorization: Bearer <jeton>' },
                   { cle: 'Format', valeur: 'JSON en entrée comme en sortie, UTF-8' },
                   { cle: 'Horodatages', valeur: 'ISO 8601, en temps universel' },
                   { cle: 'Montants', valeur: 'Entiers, en plus petite unité de la devise' },
-                  { cle: 'Pagination', valeur: 'Par curseur — paramètres limit et after' },
-                  { cle: 'Idempotence', valeur: 'En-tête Idempotency-Key sur les POST' },
-                  { cle: 'Versionnement', valeur: 'Dans le chemin — v1 maintenue 24 mois après v2' },
+                  { cle: 'Pagination', valeur: 'Paramètres page et parPage — réponse { donnees, pagination }' },
+                  { cle: 'Versionnement', valeur: 'Dans le chemin (/v1)' },
                 ]}
               />
             </Card>
 
             <Card className="lg:col-span-2">
               <CardHeader
-                titre="Un aperçu de coût avant chaque création"
-                sousTitre="Le paramètre dry_run renvoie exactement ce que la ressource coûtera, sans la créer."
+                titre="Lister des ressources"
+                sousTitre="Chaque liste renvoie ses éléments dans donnees et le total dans pagination."
               />
               <CodeBlock
                 langue="bash"
-                code={`curl -sS -X POST https://api.synelia.cloud/v1/espaces/ec-dba-01/vms \\
+                code={`curl -sS "${API_BASE}/vms?page=1&parPage=50" \\
   -H "Authorization: Bearer $SYNELIA_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "nom": "prod-api-04",
-    "gabarit": "c2.medium",
-    "os": "Debian 12",
-    "diskGo": 100,
-    "site": "ABJ",
-    "etiquettes": { "centre-de-cout": "DSI", "environnement": "production" },
-    "dry_run": true
-  }'`}
+  -H "X-Organisation-Id: <identifiant de l’organisation>"`}
               />
               <MicroLabel className="mt-3 mb-1.5">Réponse</MicroLabel>
               <CodeBlock
                 langue="json"
                 code={`{
-  "dry_run": true,
-  "cout": {
-    "mensuel_ht": 34000,
-    "tva_pct": 18,
-    "mensuel_ttc": 40120,
-    "prorata_mois_en_cours": 15530,
-    "devise": "XOF",
-    "detail": [
-      { "libelle": "4 vCPU / 8 Go", "montant": 28000 },
-      { "libelle": "Disque 100 Go SSD", "montant": 6000 }
-    ]
-  },
-  "placement_prevu": { "backend": "OS-ABJ-01", "site": "ABJ" },
-  "quota_apres": { "vcpu": "57/64", "ramGo": "226/256" }
+  "donnees": [ { "id": "…", "nom": "prod-api-01", "statut": "running" } ],
+  "pagination": { "page": 1, "parPage": 50, "total": 1, "totalPages": 1 }
 }`}
               />
-              <Callout ton="info" className="mt-3.5" titre="À quoi sert dry_run">
-                L’appel renvoie le coût de la création sans rien créer : votre pipeline peut refuser
-                une ressource qui dépasse un seuil et le signaler dans la revue de code.
+              <Callout ton="info" className="mt-3.5" titre="Les créations sont asynchrones">
+                Une création renvoie 202 et un travail : suivez-le sur{' '}
+                <span className="font-mono text-[12px]">/v1/travaux/{'{id}'}</span> ou dans le centre
+                de tâches du portail.
               </Callout>
             </Card>
           </div>
@@ -372,248 +339,11 @@ export default function Docs() {
   "erreur": {
     "code": "quota_depasse",
     "message": "La création demanderait 68 vCPU sur un quota de 64.",
-    "champ": "gabarit",
-    "correlation_id": "syn-8f2a91c4-04",
-    "remede": "Réduisez le gabarit, ou demandez une augmentation de quota."
+    "correlationId": "01a0fe23-269f-75c1-8a9d-fe37fd8299a8"
   }
 }`}
             />
           </Card>
-        </div>
-      )}
-
-      {onglet === 'cli' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader
-                titre="Installation"
-                sousTitre="Un seul binaire, sans dépendance. Le code source est publié."
-              />
-              <MicroLabel className="mb-1.5">Linux et macOS</MicroLabel>
-              <CodeBlock
-                langue="bash"
-                code={`curl -fsSL https://get.synelia.cloud/cli | sh
-synelia auth login`}
-              />
-              <MicroLabel className="mt-3 mb-1.5">Windows</MicroLabel>
-              <CodeBlock langue="powershell" code={`winget install Synelia.Cli\nsynelia auth login`} />
-              <div className="mt-3 space-y-3">
-                <CopyField label="Somme de contrôle du binaire" value="sha256:8f2a91c4d7b0e5443a17c96e2f0d8b4144ba1e9f029e3c8d1a751b74e0aa93c0" />
-              </div>
-              <Callout ton="info" className="mt-4" titre="L’authentification passe par votre annuaire">
-                <span className="inline-flex items-center gap-1.5">
-                  <FileCode2 size={13} />
-                  <span>
-                    <span className="font-mono text-[12px]">synelia auth login</span> ouvre votre
-                    navigateur et vous authentifie via la fédération de votre organisation. Aucun mot
-                    de passe n’est saisi dans le terminal, et le jeton obtenu expire au bout de huit
-                    heures.
-                  </span>
-                </span>
-              </Callout>
-            </Card>
-
-            <Card>
-              <CardHeader
-                titre="Commandes courantes"
-                sousTitre="Chaque commande destructive exige --confirm avec le nom exact de la ressource."
-              />
-              <div className="space-y-1.5">
-                {COMMANDES.map((c) => (
-                  <div key={c.c} className="rounded-[6px] bg-g-050 px-2.5 py-2">
-                    <p className="break-all font-mono text-[11px] text-ink">{c.c}</p>
-                    <p className="mt-0.5 text-[11px] text-g-500">{c.d}</p>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader
-              titre="Utilisation dans une intégration continue"
-              sousTitre="Le jeton vient d’un secret, jamais d’un fichier du dépôt."
-            />
-            <CodeBlock
-              langue="yaml"
-              code={`# .gitlab-ci.yml — déploiement en production après validation
-deploiement:
-  stage: deploy
-  image: registry.abj.synelia.cloud/synelia/cli:1
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-  script:
-    # Le jeton est un secret masqué du projet, porté par un rôle app_admin
-    - synelia auth token "$SYNELIA_TOKEN"
-    # Aperçu de coût : le job échoue si le déploiement dépasse le seuil
-    - synelia app deploy app-metier --env production --dry-run --seuil-mensuel 50000
-    - synelia app deploy app-metier --env production --attendre
-    # Vérification post-déploiement, sinon retour arrière automatique
-    - synelia app sante app-metier --env production --seuil-erreurs 1 --fenetre 5m
-      || synelia app rollback app-metier --env production`}
-            />
-            <Callout ton="violet" className="mt-4" titre="Le retour arrière dans le pipeline">
-              Faire échouer un job et laisser une version dégradée en production, c’est reporter le
-              problème sur la personne d’astreinte. La dernière ligne vérifie la santé après
-              déploiement et repromeut l’artefact précédent si le taux d’erreur dépasse le seuil — en
-              quelques secondes, sans rebuild.
-            </Callout>
-          </Card>
-        </div>
-      )}
-
-      {onglet === 'terraform' && (
-        <div className="space-y-4">
-          <Card>
-            <CardHeader
-              titre="Fournisseur d’infrastructure déclarative"
-              sousTitre="Publié sur le registre public, compatible Terraform et OpenTofu."
-              actions={
-                <ButtonLink
-                  size="sm"
-                  variant="secondary"
-                  external
-                  href="https://registry.terraform.io"
-                  iconAfter={<ExternalLink size={12} />}
-                >
-                  Registre
-                </ButtonLink>
-              }
-            />
-            <CodeBlock
-              langue="hcl"
-              code={`terraform {
-  required_providers {
-    synelia = {
-      source  = "synelia/synelia"
-      version = "~> 1.4"
-    }
-  }
-}
-
-provider "synelia" {
-  # Jamais de jeton en clair dans le dépôt
-  token = var.synelia_token
-  org   = "org-dba"
-}
-
-resource "synelia_espace" "production" {
-  code   = "EC-DBA-01"
-  offre  = "off-pro"
-  site   = "ABJ"
-  cidr   = "10.0.0.0/20"
-
-  quota {
-    vcpu        = 64
-    ram_go      = 256
-    stockage_to = 8
-  }
-}
-
-resource "synelia_vm" "api" {
-  count   = 3
-  espace  = synelia_espace.production.id
-  nom     = "prod-api-\${count.index + 1}"
-  gabarit = "c2.medium"
-  os      = "Debian 12"
-  disk_go = 100
-  site    = "ABJ"
-
-  etiquettes = {
-    centre-de-cout = "DSI"
-    environnement  = "production"
-    projet         = "refonte-2026"
-  }
-
-  # Le plan de sauvegarde est rattaché à la création, pas plus tard
-  backup_plan = synelia_backup_plan.quotidien.id
-}
-
-resource "synelia_backup_plan" "quotidien" {
-  nom              = "Production quotidienne"
-  espace           = synelia_espace.production.id
-  cron             = "0 2 * * *"
-  retention_jours  = 30
-  copie_hors_site  = "GBM"   # règle 3-2-1 respectée
-  verifier_restauration = true
-}`}
-            />
-          </Card>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader
-                titre="Le coût apparaît dans le plan"
-                sousTitre="terraform plan affiche le coût mensuel de ce qui va être créé."
-              />
-              <CodeBlock
-                langue="bash"
-                code={`$ terraform plan
-
-Terraform will perform the following actions:
-
-  # synelia_vm.api[0] will be created
-  + resource "synelia_vm" "api" {
-      + nom      = "prod-api-1"
-      + gabarit  = "c2.medium"
-      + cout_mensuel_ht = 34000
-    }
-
-Plan: 4 to add, 0 to change, 0 to destroy.
-
-Changements de coût :
-  + 3 machines c2.medium         102 000 FCFA/mois HT
-  + 1 plan de sauvegarde           8 400 FCFA/mois HT
-  ────────────────────────────────────────────────────
-  Total ajouté                   110 400 FCFA/mois HT
-                                 130 272 FCFA/mois TTC
-  Prorata du mois en cours        50 424 FCFA TTC`}
-              />
-            </Card>
-
-            <Card>
-              <CardHeader titre="Ressources disponibles" sousTitre="Couverture du fournisseur, version 1.4." />
-              <div className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
-                {[
-                  'synelia_espace',
-                  'synelia_vm',
-                  'synelia_k8s_cluster',
-                  'synelia_reseau',
-                  'synelia_ip_publique',
-                  'synelia_groupe_securite',
-                  'synelia_load_balancer',
-                  'synelia_vpn_tunnel',
-                  'synelia_volume',
-                  'synelia_bucket',
-                  'synelia_base_manageee',
-                  'synelia_backup_plan',
-                  'synelia_dr_plan',
-                  'synelia_application',
-                  'synelia_environnement',
-                  'synelia_domaine',
-                  'synelia_dns_zone',
-                  'synelia_dns_record',
-                  'synelia_service_manage',
-                  'synelia_membre',
-                  'synelia_jeton_api',
-                  'synelia_regle_alerte',
-                ].map((r) => (
-                  <span key={r} className="font-mono text-[11px] text-ink">
-                    {r}
-                  </span>
-                ))}
-              </div>
-              <Callout ton="warn" className="mt-4" titre="Les suppressions exigent une confirmation">
-                Un <span className="font-mono text-[12px]">terraform destroy</span> sur une ressource
-                portant des données demande la variable{' '}
-                <span className="font-mono text-[12px]">confirm_destruction</span> avec le nom exact
-                de la ressource. C’est délibérément pénible : une suppression déclenchée par erreur
-                depuis un pipeline est irréversible.
-              </Callout>
-            </Card>
-          </div>
         </div>
       )}
 
@@ -640,7 +370,6 @@ Changements de coût :
                       { g: 'c2.large', v: 8, r: '16 Go', u: 'Application à charge soutenue' },
                       { g: 'm2.medium', v: 4, r: '32 Go', u: 'Base de données, cache' },
                       { g: 'm2.large', v: 8, r: '64 Go', u: 'Base volumineuse, analytique' },
-                      { g: 'g2.medium', v: 8, r: '32 Go', u: 'Traitement d’images, encodage' },
                     ].map((x) => (
                       <tr key={x.g} className="border-b border-g-100 last:border-0">
                         <td className="px-3 py-2 font-mono text-[12px] font-semibold text-ink">
@@ -678,77 +407,26 @@ Changements de coût :
 
           <Card>
             <CardHeader
-              titre="Codes des sites physiques"
+              titre="Site physique"
               sousTitre="Le site apparaît sur chaque ressource du portail et dans chaque réponse de l’API."
             />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {[
-                {
-                  code: 'ABJ',
-                  nom: 'Abidjan · ABJ-1',
-                  d: 'Site principal. Plateau, Abidjan, Côte d’Ivoire. Alimentation redondée, deux arrivées opérateurs distinctes.',
-                },
-                {
-                  code: 'GBM',
-                  nom: 'Grand-Bassam · GBM-1',
-                  d: 'Site de reprise, à 42 km. Destination par défaut des copies hors site et des bascules de plan de reprise.',
-                },
-              ].map((s) => (
-                <div key={s.code} className="rounded-[8px] border border-g-300 p-3.5">
+              {SITES.map((code) => (
+                <div key={code} className="rounded-[8px] border border-g-300 p-3.5">
                   <div className="flex items-center gap-2">
                     <Badge tone="violet" size="sm">
-                      {s.code}
+                      {code}
                     </Badge>
-                    <span className="text-[13px] font-bold text-ink">{s.nom}</span>
+                    <span className="text-[13px] font-bold text-ink">{SITE_LABEL[code]}</span>
                   </div>
-                  <p className="mt-1.5 text-[12px] leading-relaxed text-g-700">{s.d}</p>
                 </div>
               ))}
             </div>
-            <Callout ton="info" className="mt-4" titre="Aucune donnée hors de ces deux sites">
-              Sauf demande explicite de votre part, aucune donnée de votre organisation ne quitte ces
-              deux sites — ni pour une sauvegarde, ni pour un traitement, ni pour de la supervision.
-              Les journaux techniques de la plateforme y restent également.
+            <Callout ton="info" className="mt-4" titre="Une seule région pour l’instant">
+              Les ressources, leurs sauvegardes et les journaux de la plateforme restent sur le site
+              d’Abidjan. Une copie ailleurs est de votre ressort : exportez vos données si vous en avez
+              besoin.
             </Callout>
-          </Card>
-
-          <Card>
-            <CardHeader
-              titre="Journal des changements de l’API"
-              sousTitre="Aucune rupture sans préavis de six mois et version parallèle."
-            />
-            <div className="space-y-2">
-              {[
-                {
-                  v: 'v1.14',
-                  d: '12 août 2026',
-                  c: 'Ajout de /v1/conformite et du champ placement_prevu dans les réponses dry_run.',
-                },
-                {
-                  v: 'v1.13',
-                  d: '28 juillet 2026',
-                  c: 'Le champ emplacement des composants expose désormais les pods, et non plus seulement le namespace.',
-                },
-                {
-                  v: 'v1.12',
-                  d: '3 juillet 2026',
-                  c: 'Idempotency-Key accepté sur tous les POST. Les créations en double sont désormais détectées.',
-                },
-                {
-                  v: 'v1.11',
-                  d: '19 juin 2026',
-                  c: 'Déprécié : /v1/vms sans espace en préfixe. Retiré au 19 décembre 2026.',
-                },
-              ].map((x) => (
-                <div key={x.v} className="flex flex-wrap gap-3 border-b border-g-100 pb-2 last:border-0">
-                  <span className="w-16 shrink-0 font-mono text-[12px] font-bold text-p-700">
-                    {x.v}
-                  </span>
-                  <span className="w-28 shrink-0 text-[11px] text-g-500">{x.d}</span>
-                  <span className="min-w-0 flex-1 text-[12px] text-ink">{x.c}</span>
-                </div>
-              ))}
-            </div>
           </Card>
         </div>
       )}

@@ -17,13 +17,13 @@ import {
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CodeBlock, GatedAction, Tabs } from '@/components/ui/display'
-import { Field, Select, Slider, Switch } from '@/components/ui/field'
+import { Field, Select, Slider, Switch, Input, Textarea } from '@/components/ui/field'
 import { Tooltip } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState, ErrorState } from '@/components/composition/states'
 import { PASSERELLE_IA } from '@/lib/mock/ia'
-import { estActif, supprimerRessource } from '@/lib/api/client'
+import { creerRessource, estActif, supprimerRessource } from '@/lib/api/client'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction } from '@/components/app/actions'
@@ -96,7 +96,7 @@ export function VueBase({ baseId }: { baseId: string }) {
           { label: base.nom },
         ]}
         titre={base.nom}
-        sousTitre={`${base.source.libelle} · ${num(base.documents)} documents, ${num(base.fragments)} fragments. Nous lisons la source là où elle vit et n’en gardons que les vecteurs.`}
+        sousTitre={`${base.source.libelle} · ${num(base.documents)} documents, ${num(base.fragments)} fragments.`}
         actions={
           <>
             <BoutonAction
@@ -146,7 +146,7 @@ export function VueBase({ baseId }: { baseId: string }) {
                     <Card>
                       <CardHeader
                         titre="Source"
-                        sousTitre="Les documents restent chez vous. Nous les lisons, les découpons et n’en conservons que des vecteurs."
+                        sousTitre={estActif() ? 'Où la base a été alimentée, et comment elle est indexée.' : 'Les documents restent chez vous. Nous les lisons, les découpons et n’en conservons que des vecteurs.'}
                       />
                       <KeyValueList
                         colonnes={1}
@@ -238,6 +238,7 @@ export function VueBase({ baseId }: { baseId: string }) {
                             )
                           }
                         />
+                        {!estActif() && (
                         <div className="space-y-3.5">
                           <Field label="Fréquence" hint="Une source qui bouge peu n’a pas besoin d’être relue toutes les heures">
                             <Select defaultValue={base.frequence}>
@@ -257,6 +258,8 @@ export function VueBase({ baseId }: { baseId: string }) {
                             description="Sinon, un document retiré de la source continue d’alimenter les réponses. Désactivé par défaut : une suppression accidentelle à la source ne doit pas vider l’index."
                           />
                         </div>
+                        )}
+                        {estActif() && <AjoutDocument baseId={base.id} nom={base.nom} peutEcrire={peutEcrire} recharger={basesCol.recharger} />}
                       </Card>
 
                       <Card>
@@ -271,6 +274,7 @@ export function VueBase({ baseId }: { baseId: string }) {
                         </div>
                       </Card>
 
+                      {!estActif() && (
                       <Card>
                         <CardHeader
                           titre="Découpage"
@@ -310,6 +314,7 @@ export function VueBase({ baseId }: { baseId: string }) {
                           phrase coupée en deux perde son sens des deux côtés.
                         </Callout>
                       </Card>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -488,6 +493,42 @@ curl ${PASSERELLE_IA.base}/chat/completions \\
                   </Card>
                 </div>
               )}
+    </div>
+  )
+}
+
+/** Ingestion d'un document collé en texte : le seul geste d'alimentation que l'API réelle expose depuis le portail. */
+function AjoutDocument({ baseId, nom, peutEcrire, recharger }: { baseId: string; nom: string; peutEcrire: boolean; recharger: () => void }) {
+  const [titre, setTitre] = useState('')
+  const [texte, setTexte] = useState('')
+  const pret = titre.trim() !== '' && texte.trim() !== ''
+  return (
+    <div className="space-y-3">
+      <p className="text-[12.5px] text-g-500">
+        Collez un document en texte ou en Markdown : il est découpé, vectorisé et ajouté à l’index de cette base.
+      </p>
+      <Field label="Nom du document" hint="Il apparaît dans les citations">
+        <Input value={titre} onChange={(e) => setTitre(e.target.value)} disabled={!peutEcrire} />
+      </Field>
+      <Field label="Contenu">
+        <Textarea rows={5} value={texte} onChange={(e) => setTexte(e.target.value)} disabled={!peutEcrire} />
+      </Field>
+      <BoutonAction
+        libelle="Ajouter à l’index"
+        variant="primary"
+        desactive={!pret}
+        operation={{
+          action: 'ia.knowledge.write',
+          ton: 'info',
+          titre: `Document « ${titre.trim()} » ajouté à ${nom}`,
+          appel: () => creerRessource(`/ia/connaissances/${baseId}/documents`, { nom: titre.trim(), texte }),
+          effetFinal: () => {
+            setTitre('')
+            setTexte('')
+            recharger()
+          },
+        }}
+      />
     </div>
   )
 }

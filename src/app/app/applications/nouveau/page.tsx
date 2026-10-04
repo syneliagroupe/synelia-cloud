@@ -1,26 +1,49 @@
-'use client'
+"use client";
 
-import { useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { X } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { MAINTENANT, TVA_PCT } from '@/lib/format'
-import { ESPACES, K8S_CLUSTERS, PROJETS, ZONE_APPLICATIVE } from '@/lib/mock'
-import { SITE_LABEL, type EspaceCloud, type K8sCluster, type Projet } from '@/lib/types'
-import { MicroLabel } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field'
-import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
-import { CostPreview, WizardShell } from '@/components/composition/flow'
-import { useApp, useEspace } from '@/components/app/contexte'
-import { useAtelier, useCollection } from '@/components/app/atelier'
-import { creerRessource, estActif, estTravail, suivreTravail } from '@/lib/api/client'
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { MAINTENANT, TVA_PCT } from "@/lib/format";
+import { ESPACES, K8S_CLUSTERS, PROJETS, ZONE_APPLICATIVE } from "@/lib/mock";
+import {
+  SITE_LABEL,
+  type EspaceCloud,
+  type K8sCluster,
+  type Projet,
+} from "@/lib/types";
+import { MicroLabel } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Checkbox,
+  Field,
+  Input,
+  Select,
+  Textarea,
+} from "@/components/ui/field";
+import {
+  Card,
+  CardHeader,
+  Callout,
+  KeyValueList,
+} from "@/components/composition/card";
+import { CostPreview, WizardShell } from "@/components/composition/flow";
+import { useApp, useEspace } from "@/components/app/contexte";
+import { useAtelier, useCollection } from "@/components/app/atelier";
+import {
+  creerRessource,
+  estActif,
+  estTravail,
+  suivreTravail,
+} from "@/lib/api/client";
+import { PRIX, prixControlPlane, prixMachine } from "@/lib/tarifs";
 
 const ETAPES = [
-  { numero: 1, titre: 'Projet' },
-  { numero: 2, titre: 'Infrastructure' },
-  { numero: 3, titre: 'Récapitulatif' },
-]
+  { numero: 1, titre: "Projet" },
+  { numero: 2, titre: "Infrastructure" },
+  { numero: 3, titre: "Récapitulatif" },
+];
 
 /**
  * Tailles prédéfinies du cluster dédié — le pendant simplifié des pools de
@@ -30,79 +53,96 @@ const ETAPES = [
  */
 const TAILLES_CLUSTER = [
   {
-    id: 'petit',
-    nom: 'Petit',
-    modeCp: 'single' as const,
+    id: "petit",
+    nom: "Petit",
+    modeCp: "single" as const,
     noeuds: 1,
-    flavor: '4 vCPU · 8 Go',
+    flavor: "4 vCPU · 8 Go",
     vcpu: 4,
     ramGo: 8,
     diskGo: 60,
-    prixNoeud: 7800,
+    prixNoeud: prixMachine(4, 8, 60),
   },
   {
-    id: 'moyen',
-    nom: 'Moyen',
-    modeCp: 'ha' as const,
+    id: "moyen",
+    nom: "Moyen",
+    modeCp: "ha" as const,
     noeuds: 3,
-    flavor: '8 vCPU · 16 Go',
+    flavor: "8 vCPU · 16 Go",
     vcpu: 8,
     ramGo: 16,
     diskGo: 100,
-    prixNoeud: 15600,
+    prixNoeud: prixMachine(8, 16, 100),
   },
   {
-    id: 'grand',
-    nom: 'Grand',
-    modeCp: 'ha' as const,
+    id: "grand",
+    nom: "Grand",
+    modeCp: "ha" as const,
     noeuds: 5,
-    flavor: '16 vCPU · 32 Go',
+    flavor: "16 vCPU · 32 Go",
     vcpu: 16,
     ramGo: 32,
     diskGo: 150,
-    prixNoeud: 27000,
+    prixNoeud: prixMachine(16, 32, 150),
   },
-]
+];
 
-const COUT_LB = 18000
+const COUT_LB = PRIX.lbMois;
 
 export default function NouveauProjet() {
-  const router = useRouter()
-  const { pousser } = useApp()
-  const espaceCourant = useEspace()
-  const projets = useCollection<Projet>('projets', PROJETS)
-  const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
-  const espacesCol = useCollection<EspaceCloud>('espaces', ESPACES)
-  const { lancerJob, integrerTravail } = useAtelier()
+  const router = useRouter();
+  const { pousser } = useApp();
+  const espaceCourant = useEspace();
+  const projets = useCollection<Projet>("projets", PROJETS);
+  const grappes = useCollection<K8sCluster>("clusters", K8S_CLUSTERS);
+  const espacesCol = useCollection<EspaceCloud>("espaces", ESPACES);
+  const { lancerJob, integrerTravail } = useAtelier();
 
-  const [etape, setEtape] = useState(1)
-  const [nom, setNom] = useState('')
-  const [description, setDescription] = useState('')
-  const [etiquettes, setEtiquettes] = useState<string[]>([])
+  const [etape, setEtape] = useState(1);
+  const [nom, setNom] = useState("");
+  const [description, setDescription] = useState("");
+  const [etiquettes, setEtiquettes] = useState<string[]>([]);
 
-  const [espaceId, setEspaceId] = useState(espaceCourant.id)
-  const [clusterMode, setClusterMode] = useState<'nouveau' | 'existant'>('nouveau')
-  const [tailleClusterId, setTailleClusterId] = useState('moyen')
-  const clustersDisponiblesInitial = grappes.items.filter((c) => c.espaceId === espaceCourant.id)
-  const [clusterExistantId, setClusterExistantId] = useState(clustersDisponiblesInitial[0]?.id ?? '')
+  const [espaceId, setEspaceId] = useState(espaceCourant.id);
+  const [clusterMode, setClusterMode] = useState<"nouveau" | "existant">(
+    "nouveau",
+  );
+  const [tailleClusterId, setTailleClusterId] = useState("moyen");
+  const clustersDisponiblesInitial = grappes.items.filter(
+    (c) => c.espaceId === espaceCourant.id,
+  );
+  const [clusterExistantId, setClusterExistantId] = useState(
+    clustersDisponiblesInitial[0]?.id ?? "",
+  );
 
-  const [conditions, setConditions] = useState(false)
+  const [conditions, setConditions] = useState(false);
 
-  const espace = espacesCol.items.find((e) => e.id === espaceId) ?? espaceCourant
-  const clustersDisponibles = grappes.items.filter((c) => c.espaceId === espaceId)
-  const clusterExistantChoisi = clustersDisponibles.find((c) => c.id === clusterExistantId)
-  const tailleChoisie = TAILLES_CLUSTER.find((t) => t.id === tailleClusterId)!
+  const espace =
+    espacesCol.items.find((e) => e.id === espaceId) ?? espaceCourant;
+  const clustersDisponibles = grappes.items.filter(
+    (c) => c.espaceId === espaceId,
+  );
+  const clusterExistantChoisi = clustersDisponibles.find(
+    (c) => c.id === clusterExistantId,
+  );
+  const tailleChoisie = TAILLES_CLUSTER.find((t) => t.id === tailleClusterId)!;
+  // Backend réel : le projet est un namespace isolé du cluster applicatif de la
+  // plateforme — ni cluster dédié ni load balancer à créer, donc rien à facturer ici.
+  const mutualise = estActif();
+
+  const sansEspace =
+    mutualise && !espacesCol.chargement && espacesCol.items.length === 0;
 
   const lignesCout =
-    clusterMode === 'nouveau'
+    clusterMode === "nouveau"
       ? [
           {
-            libelle: `Control plane ${tailleChoisie.modeCp === 'ha' ? 'haute disponibilité' : 'mono-master'}`,
+            libelle: `Control plane ${tailleChoisie.modeCp === "ha" ? "haute disponibilité" : "mono-master"}`,
             detail:
-              tailleChoisie.modeCp === 'ha'
-                ? '3 masters répartis · SLA 99,95 %'
-                : '1 master · SLA 99,5 %',
-            montant: tailleChoisie.modeCp === 'ha' ? 42000 : 14000,
+              tailleChoisie.modeCp === "ha"
+                ? "3 masters répartis · SLA 99,95 %"
+                : "1 master · SLA 99,5 %",
+            montant: prixControlPlane(tailleChoisie.modeCp === "ha"),
           },
           {
             libelle: `Nœuds workers · ${tailleChoisie.noeuds} nœuds`,
@@ -110,117 +150,140 @@ export default function NouveauProjet() {
             montant: tailleChoisie.noeuds * tailleChoisie.prixNoeud,
           },
           {
-            libelle: 'Load balancer L7 dédié',
-            detail: 'Provisionné automatiquement — porte d’entrée du projet',
+            libelle: "Load balancer L7 dédié",
+            detail: "Provisionné automatiquement — porte d’entrée du projet",
             montant: COUT_LB,
           },
         ]
       : [
           {
-            libelle: 'Load balancer L7 dédié',
-            detail: `Provisionné automatiquement sur ${clusterExistantChoisi?.nom ?? 'le cluster partagé'} — porte d’entrée du projet`,
+            libelle: "Load balancer L7 dédié",
+            detail: `Provisionné automatiquement sur ${clusterExistantChoisi?.nom ?? "le cluster partagé"} — porte d’entrée du projet`,
             montant: COUT_LB,
           },
-        ]
+        ];
 
   const peutContinuer =
     etape === 1
       ? nom.trim().length > 0
       : etape === 2
-        ? clusterMode === 'nouveau' || Boolean(clusterExistantChoisi)
-        : conditions
+        ? !sansEspace && (mutualise ||
+          clusterMode === "nouveau" ||
+          Boolean(clusterExistantChoisi))
+        : conditions;
 
   const creerLeProjet = () => {
-    const idProjetMock = projets.identifiant('prj')
-    const nomCluster = `k8s-${nom.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`
+    const idProjetMock = projets.identifiant("prj");
+    const nomCluster = `k8s-${nom
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")}`;
 
     if (estActif()) {
       // Le cluster part en premier quand il est nouveau : la création du
       // projet le référence, que son provisioning soit déjà terminé ou
       // encore suivi à part (`202`).
-      const rattacherProjet = (clusterId: string) => {
-        creerRessource('/projets', {
+      const rattacherProjet = (clusterId: string) =>
+        creerRessource("/projets", {
           nom,
           description,
           etiquettes,
           espaceId: espace.id,
           clusterId,
-          environnements: ['Production'],
+          environnements: ["Production"],
         }).then((r) => {
           if (estTravail(r)) {
-            const suivi = integrerTravail(r)
-            suivreTravail(suivi, (t) => integrerTravail(t))
+            const suivi = integrerTravail(r);
+            suivreTravail(suivi, (t) => integrerTravail(t));
           }
-          projets.recharger()
-        })
-      }
+          projets.recharger();
+        });
 
-      if (clusterMode === 'nouveau') {
-        creerRessource('/kubernetes', {
-          espaceId: espace.id,
-          nom: nomCluster,
-          version: '1.31.2',
-          site: espace.site,
-          controlPlane: {
-            mode: tailleChoisie.modeCp,
-            nodes: tailleChoisie.modeCp === 'ha' ? 3 : 1,
-          },
-          pools: [
-            {
-              nom: 'pool-standard',
-              nodes: tailleChoisie.noeuds,
-              flavor: tailleChoisie.flavor,
-              diskGo: tailleChoisie.diskGo,
-            },
-          ],
-        }).then((c) => {
-          grappes.recharger()
-          rattacherProjet((c as { id: string }).id)
-        })
-      } else {
-        rattacherProjet(clusterExistantChoisi!.id)
-      }
+      const lancement = mutualise
+        ? rattacherProjet("")
+        : clusterMode === "nouveau"
+          ? creerRessource("/kubernetes", {
+              espaceId: espace.id,
+              nom: nomCluster,
+              version: "1.31.2",
+              site: espace.site,
+              controlPlane: {
+                mode: tailleChoisie.modeCp,
+                nodes: tailleChoisie.modeCp === "ha" ? 3 : 1,
+              },
+              pools: [
+                {
+                  nom: "pool-standard",
+                  nodes: tailleChoisie.noeuds,
+                  flavor: tailleChoisie.flavor,
+                  diskGo: tailleChoisie.diskGo,
+                  type: "standard",
+                },
+              ],
+            }).then((c) => {
+              grappes.recharger();
+              return rattacherProjet((c as { id: string }).id);
+            })
+          : rattacherProjet(clusterExistantChoisi!.id);
 
-      pousser({
-        ton: 'info',
-        titre: `Création de ${nom} lancée`,
-        detail:
-          clusterMode === 'nouveau'
-            ? 'Le cluster est provisionné, puis le load balancer et la zone applicative. Suivi dans le centre de tâches.'
-            : 'Le load balancer et la zone applicative sont en cours de provisionnement. Suivi dans le centre de tâches.',
-      })
-      router.push('/app/applications/projets')
-      return
+      lancement.then(
+        () => {
+          pousser({
+            ton: "info",
+            titre: `Création de ${nom} lancée`,
+            detail: mutualise
+              ? "L’espace isolé du projet est créé sur le cluster applicatif. Suivi dans le centre de tâches."
+              : clusterMode === "nouveau"
+                ? "Le cluster est provisionné, puis le load balancer et la zone applicative. Suivi dans le centre de tâches."
+                : "Le load balancer et la zone applicative sont en cours de provisionnement. Suivi dans le centre de tâches.",
+          });
+          router.push("/app/applications/projets");
+        },
+        (e: unknown) =>
+          pousser({
+            ton: "err",
+            titre: `Création de ${nom} impossible`,
+            detail:
+              e instanceof Error
+                ? e.message
+                : "Le backend a refusé la demande.",
+          }),
+      );
+      return;
     }
 
-    let clusterId = clusterExistantChoisi?.id ?? ''
-    if (clusterMode === 'nouveau') {
-      const idCluster = grappes.identifiant('k8s')
+    let clusterId = clusterExistantChoisi?.id ?? "";
+    if (clusterMode === "nouveau") {
+      const idCluster = grappes.identifiant("k8s");
       grappes.creer({
         id: idCluster,
         espaceId: espace.id,
         nom: nomCluster,
-        version: '1.31.2',
-        controlPlane: { mode: tailleChoisie.modeCp, nodes: tailleChoisie.modeCp === 'ha' ? 3 : 1 },
+        version: "1.31.2",
+        controlPlane: {
+          mode: tailleChoisie.modeCp,
+          nodes: tailleChoisie.modeCp === "ha" ? 3 : 1,
+        },
         pools: [
           {
-            nom: 'pool-standard',
+            nom: "pool-standard",
             nodes: tailleChoisie.noeuds,
             flavor: tailleChoisie.flavor,
             diskGo: tailleChoisie.diskGo,
-            type: 'standard',
+            type: "standard",
           },
         ],
-        modules: ['ingress-nginx 1.11.2', 'cert-manager 1.15.3'],
-        statut: 'provisioning',
+        modules: ["ingress-nginx 1.11.2", "cert-manager 1.15.3"],
+        statut: "provisioning",
         site: espace.site,
-      })
+      });
       lancerJob({
-        workflow: 'k8s.create',
+        workflow: "k8s.create",
         cible: `${nomCluster} · ${SITE_LABEL[espace.site]}`,
-        alFin: () => grappes.modifier(idCluster, { statut: 'running' }),
-      })
-      clusterId = idCluster
+        alFin: () => grappes.modifier(idCluster, { statut: "running" }),
+      });
+      clusterId = idCluster;
     }
 
     projets.creer({
@@ -231,30 +294,30 @@ export default function NouveauProjet() {
       cree: MAINTENANT.slice(0, 10),
       etiquettes,
       clusterId,
-      environnements: ['Production'],
+      environnements: ["Production"],
       variables: [],
-    })
+    });
     pousser({
-      ton: 'info',
+      ton: "info",
       titre: `Création de ${nom} lancée`,
       detail:
-        clusterMode === 'nouveau'
-          ? 'Le cluster est provisionné, puis le load balancer et la zone applicative.'
-          : 'Le load balancer et la zone applicative sont en cours de provisionnement.',
-    })
+        clusterMode === "nouveau"
+          ? "Le cluster est provisionné, puis le load balancer et la zone applicative."
+          : "Le load balancer et la zone applicative sont en cours de provisionnement.",
+    });
     lancerJob({
-      workflow: 'projet.create',
+      workflow: "projet.create",
       cible: nom,
       alFin: () => {
         pousser({
-          ton: 'ok',
+          ton: "ok",
           titre: `${nom} est prêt`,
-          detail: 'Vous pouvez déployer votre premier service.',
-        })
+          detail: "Vous pouvez déployer votre premier service.",
+        });
       },
-    })
-    router.push(`/app/applications/projets/${idProjetMock}`)
-  }
+    });
+    router.push(`/app/applications/projets/${idProjetMock}`);
+  };
 
   return (
     <WizardShell
@@ -267,20 +330,24 @@ export default function NouveauProjet() {
           <Card>
             <MicroLabel>Projet</MicroLabel>
             <dl className="mt-2.5 space-y-1.5">
-              <Petit cle="Nom" valeur={nom || '—'} mono />
+              <Petit cle="Nom" valeur={nom || "—"} mono />
               <Petit cle="Étiquettes" valeur={String(etiquettes.length)} />
-              <Petit cle="Espace Cloud" valeur={espace.code} mono />
+              <Petit cle="Espace Cloud" valeur={sansEspace ? "—" : espace.code} mono />
               <Petit
                 cle="Cluster"
                 valeur={
-                  clusterMode === 'nouveau' ? `Nouveau · ${tailleChoisie.nom}` : 'Existant'
+                  mutualise
+                    ? "Applicatif partagé"
+                    : clusterMode === "nouveau"
+                      ? `Nouveau · ${tailleChoisie.nom}`
+                      : "Existant"
                 }
               />
-              <Petit cle="Load balancer" valeur="Automatique" />
+              {!mutualise && <Petit cle="Load balancer" valeur="Automatique" />}
               <Petit cle="Environnement" valeur="Production" />
             </dl>
           </Card>
-          <CostPreview lignes={lignesCout} />
+          {!mutualise && <CostPreview lignes={lignesCout} />}
         </>
       }
       actions={
@@ -288,13 +355,18 @@ export default function NouveauProjet() {
           <Button
             variant="ghost"
             onClick={() =>
-              etape === 1 ? router.push('/app/applications/projets') : setEtape(etape - 1)
+              etape === 1
+                ? router.push("/app/applications/projets")
+                : setEtape(etape - 1)
             }
           >
-            {etape === 1 ? 'Annuler' : 'Précédent'}
+            {etape === 1 ? "Annuler" : "Précédent"}
           </Button>
           {etape < 3 ? (
-            <Button disabled={!peutContinuer} onClick={() => setEtape(etape + 1)}>
+            <Button
+              disabled={!peutContinuer}
+              onClick={() => setEtape(etape + 1)}
+            >
               Continuer
             </Button>
           ) : (
@@ -309,10 +381,12 @@ export default function NouveauProjet() {
       {etape === 1 && (
         <div className="space-y-4">
           <Callout ton="violet" titre="Un projet ne consomme rien par lui-même">
-            Créer un projet ne facture rien pour ses services : c’est un contenant. La
-            facturation des services commence au premier déploiement, au prorata journalier. Le
-            cluster et le load balancer dédiés, eux, sont provisionnés — et facturés — dès la
-            création.
+            Créer un projet ne facture rien pour ses services : c’est un
+            contenant. La facturation des services commence au premier
+            déploiement, au prorata journalier.
+            {mutualise
+              ? " Il est isolé dans son propre espace du cluster applicatif de la plateforme."
+              : " Le cluster et le load balancer dédiés, eux, sont provisionnés — et facturés — dès la création."}
           </Callout>
 
           <Field
@@ -351,101 +425,136 @@ export default function NouveauProjet() {
       {/* Étape 2 — Infrastructure */}
       {etape === 2 && (
         <div className="space-y-4">
+          {sansEspace && (
+            <Callout ton="warn" titre="Créez d’abord un Espace Cloud">
+              Un projet vit dans un Espace Cloud, et votre organisation n’en a
+              pas encore.{" "}
+              <Link
+                href="/app/espaces"
+                className="font-semibold underline underline-offset-2"
+              >
+                Créer un Espace Cloud
+              </Link>
+            </Callout>
+          )}
           <Field label="Espace Cloud">
             <Select
               value={espaceId}
               onChange={(e) => {
-                const id = e.target.value
-                setEspaceId(id)
-                const dispo = grappes.items.filter((c) => c.espaceId === id)
-                setClusterExistantId(dispo[0]?.id ?? '')
-                if (dispo.length === 0) setClusterMode('nouveau')
+                const id = e.target.value;
+                setEspaceId(id);
+                const dispo = grappes.items.filter((c) => c.espaceId === id);
+                setClusterExistantId(dispo[0]?.id ?? "");
+                if (dispo.length === 0) setClusterMode("nouveau");
               }}
             >
               {espacesCol.items.map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.code} · {SITE_LABEL[e.site]} · {e.quota.vcpu - e.usage.vcpu} vCPU libres
+                  {e.code} · {SITE_LABEL[e.site]} ·{" "}
+                  {e.quota.vcpu - e.usage.vcpu} vCPU libres
                 </option>
               ))}
             </Select>
           </Field>
 
-          <div>
-            <MicroLabel className="mb-1.5">Cluster Kubernetes</MicroLabel>
-            <p className="mb-2.5 text-[12.5px] leading-relaxed text-g-700">
-              Un projet est toujours servi par un cluster Kubernetes dédié — jamais par des
-              machines virtuelles choisies à la main.
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setClusterMode('nouveau')}
-                className={cn(
-                  'flex flex-col rounded-[10px] border-2 bg-white p-4 text-left transition-colors',
-                  clusterMode === 'nouveau' ? 'border-p-700' : 'border-g-300 hover:border-p-400',
-                )}
-              >
-                <span className="type-h3">Nouveau cluster</span>
-                <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">
-                  Provisionné à la création, rien que pour ce projet.
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={clustersDisponibles.length === 0}
-                onClick={() => setClusterMode('existant')}
-                className={cn(
-                  'flex flex-col rounded-[10px] border-2 bg-white p-4 text-left transition-colors',
-                  clusterMode === 'existant' ? 'border-p-700' : 'border-g-300 hover:border-p-400',
-                  clustersDisponibles.length === 0 && 'cursor-not-allowed opacity-55 hover:border-g-300',
-                )}
-              >
-                <span className="type-h3">Cluster existant</span>
-                <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">
-                  {clustersDisponibles.length === 0
-                    ? 'Aucun cluster dans cet Espace.'
-                    : 'Partagé avec d’autres projets de cet Espace.'}
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {clusterMode === 'nouveau' ? (
-            <Field
-              label="Taille du cluster"
-              hint="Ajustable ensuite — pools, autoscaling — depuis Kubernetes."
-            >
-              <Select value={tailleClusterId} onChange={(e) => setTailleClusterId(e.target.value)}>
-                {TAILLES_CLUSTER.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.nom} · {t.noeuds} nœuds · {t.vcpu} vCPU · {t.ramGo} Go
-                  </option>
-                ))}
-              </Select>
-            </Field>
+          {mutualise ? (
+            <Callout ton="violet" titre="Cluster applicatif de la plateforme">
+              Le projet reçoit son propre espace isolé (namespace) sur le
+              cluster Kubernetes applicatif : aucun cluster ni load balancer
+              n’est créé ni facturé à cette étape. Un service devient joignable
+              sur Internet en y branchant votre domaine.
+            </Callout>
           ) : (
-            <Field label="Cluster à rejoindre">
-              <Select
-                value={clusterExistantId}
-                onChange={(e) => setClusterExistantId(e.target.value)}
-              >
-                {clustersDisponibles.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nom} · v{c.version}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
+            <>
+              <div>
+                <MicroLabel className="mb-1.5">Cluster Kubernetes</MicroLabel>
+                <p className="mb-2.5 text-[12.5px] leading-relaxed text-g-700">
+                  Un projet est toujours servi par un cluster Kubernetes dédié —
+                  jamais par des machines virtuelles choisies à la main.
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setClusterMode("nouveau")}
+                    className={cn(
+                      "flex flex-col rounded-[10px] border-2 bg-white p-4 text-left transition-colors",
+                      clusterMode === "nouveau"
+                        ? "border-p-700"
+                        : "border-g-300 hover:border-p-400",
+                    )}
+                  >
+                    <span className="type-h3">Nouveau cluster</span>
+                    <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">
+                      Provisionné à la création, rien que pour ce projet.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={clustersDisponibles.length === 0}
+                    onClick={() => setClusterMode("existant")}
+                    className={cn(
+                      "flex flex-col rounded-[10px] border-2 bg-white p-4 text-left transition-colors",
+                      clusterMode === "existant"
+                        ? "border-p-700"
+                        : "border-g-300 hover:border-p-400",
+                      clustersDisponibles.length === 0 &&
+                        "cursor-not-allowed opacity-55 hover:border-g-300",
+                    )}
+                  >
+                    <span className="type-h3">Cluster existant</span>
+                    <span className="mt-2 text-[12.5px] leading-relaxed text-g-700">
+                      {clustersDisponibles.length === 0
+                        ? "Aucun cluster dans cet Espace."
+                        : "Partagé avec d’autres projets de cet Espace."}
+                    </span>
+                  </button>
+                </div>
+              </div>
 
-          <Card>
-            <CardHeader titre="Load balancer L7 dédié — automatique" />
-            <p className="text-[12.5px] leading-relaxed text-g-700">
-              Un load balancer public, avec certificat automatique, est provisionné en même temps
-              que le projet et pointé sur l’ingress du cluster. C’est la porte d’entrée par
-              laquelle tous les services du projet seront joignables — rien à configurer.
-            </p>
-          </Card>
+              {clusterMode === "nouveau" ? (
+                <Field
+                  label="Taille du cluster"
+                  hint="Ajustable ensuite — pools, autoscaling — depuis Kubernetes."
+                >
+                  <Select
+                    value={tailleClusterId}
+                    onChange={(e) => setTailleClusterId(e.target.value)}
+                  >
+                    {TAILLES_CLUSTER.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nom} · {t.noeuds} nœuds · {t.vcpu} vCPU · {t.ramGo}{" "}
+                        Go
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              ) : (
+                <Field label="Cluster à rejoindre">
+                  <Select
+                    value={clusterExistantId}
+                    onChange={(e) => setClusterExistantId(e.target.value)}
+                  >
+                    {clustersDisponibles.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nom} · v{c.version}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+
+              <Card>
+                <CardHeader titre="Load balancer L7 dédié — automatique" />
+                <p className="text-[12.5px] leading-relaxed text-g-700">
+                  Un load balancer public, avec certificat automatique, est
+                  provisionné en même temps que le projet et pointé sur
+                  l’ingress du cluster. C’est la porte d’entrée par laquelle
+                  tous les services du projet seront joignables — rien à
+                  configurer.
+                </p>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
@@ -457,28 +566,50 @@ export default function NouveauProjet() {
             <KeyValueList
               colonnes={2}
               items={[
-                { cle: 'Nom', valeur: <span className="font-mono">{nom}</span> },
-                { cle: 'Description', valeur: description || '—' },
-                { cle: 'Étiquettes', valeur: etiquettes.join(', ') || 'Aucune' },
-                { cle: 'Espace Cloud', valeur: espace.code },
                 {
-                  cle: 'Cluster Kubernetes',
-                  valeur:
-                    clusterMode === 'nouveau'
+                  cle: "Nom",
+                  valeur: <span className="font-mono">{nom}</span>,
+                },
+                { cle: "Description", valeur: description || "—" },
+                {
+                  cle: "Étiquettes",
+                  valeur: etiquettes.join(", ") || "Aucune",
+                },
+                { cle: "Espace Cloud", valeur: sansEspace ? "—" : espace.code },
+                {
+                  cle: "Cluster Kubernetes",
+                  valeur: mutualise
+                    ? "Cluster applicatif de la plateforme · espace isolé"
+                    : clusterMode === "nouveau"
                       ? `Nouveau (${tailleChoisie.nom} · ${tailleChoisie.noeuds} nœuds · ${tailleChoisie.vcpu} vCPU · ${tailleChoisie.ramGo} Go)`
-                      : `${clusterExistantChoisi?.nom ?? '—'} · v${clusterExistantChoisi?.version ?? ''}`,
+                      : `${clusterExistantChoisi?.nom ?? "—"} · v${clusterExistantChoisi?.version ?? ""}`,
                 },
-                { cle: 'Load balancer', valeur: 'L7 public, dédié, certificat automatique' },
-                { cle: 'Environnement de départ', valeur: 'Production' },
-                {
-                  cle: 'Zone applicative',
-                  valeur: <span className="font-mono">{ZONE_APPLICATIVE.wildcard}</span>,
-                },
+                ...(mutualise
+                  ? []
+                  : [
+                      {
+                        cle: "Load balancer",
+                        valeur: "L7 public, dédié, certificat automatique",
+                      },
+                    ]),
+                { cle: "Environnement de départ", valeur: "Production" },
+                ...(mutualise
+                  ? []
+                  : [
+                      {
+                        cle: "Zone applicative",
+                        valeur: (
+                          <span className="font-mono">
+                            {ZONE_APPLICATIVE.wildcard}
+                          </span>
+                        ),
+                      },
+                    ]),
               ]}
             />
           </Card>
 
-          <CostPreview lignes={lignesCout} />
+          {!mutualise && <CostPreview lignes={lignesCout} />}
 
           <Card>
             <Checkbox
@@ -486,32 +617,34 @@ export default function NouveauProjet() {
               onChange={(e) => setConditions(e.target.checked)}
               label="Je confirme la création de ce projet"
               description={`${
-                clusterMode === 'nouveau'
-                  ? 'Le cluster et le load balancer démarrent leur provisionnement immédiatement.'
-                  : 'Le load balancer démarre son provisionnement immédiatement.'
+                mutualise
+                  ? "Créer un projet ne facture rien ; les services le sont au déploiement."
+                  : clusterMode === "nouveau"
+                    ? "Le cluster et le load balancer démarrent leur provisionnement immédiatement."
+                    : "Le load balancer démarre son provisionnement immédiatement."
               } Montants hors taxes, TVA ${TVA_PCT} % appliquée à la facturation.`}
             />
           </Card>
         </div>
       )}
     </WizardShell>
-  )
+  );
 }
 
 function ChampEtiquettes({
   valeurs,
   onChange,
 }: {
-  valeurs: string[]
-  onChange: (v: string[]) => void
+  valeurs: string[];
+  onChange: (v: string[]) => void;
 }) {
-  const [saisie, setSaisie] = useState('')
+  const [saisie, setSaisie] = useState("");
 
   const ajouter = (brut: string) => {
-    const v = brut.trim()
-    if (!v || valeurs.includes(v)) return
-    onChange([...valeurs, v])
-  }
+    const v = brut.trim();
+    if (!v || valeurs.includes(v)) return;
+    onChange([...valeurs, v]);
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-[6px] border border-g-300 bg-white px-2 py-1.5 focus-within:border-p-600 focus-within:ring-2 focus-within:ring-p-100">
@@ -535,30 +668,45 @@ function ChampEtiquettes({
         value={saisie}
         onChange={(e) => setSaisie(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ',') {
-            e.preventDefault()
-            ajouter(saisie)
-            setSaisie('')
-          } else if (e.key === 'Backspace' && saisie === '' && valeurs.length > 0) {
-            onChange(valeurs.slice(0, -1))
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            ajouter(saisie);
+            setSaisie("");
+          } else if (
+            e.key === "Backspace" &&
+            saisie === "" &&
+            valeurs.length > 0
+          ) {
+            onChange(valeurs.slice(0, -1));
           }
         }}
         className="h-6 min-w-[100px] flex-1 border-0 bg-transparent text-[13px] text-ink outline-none placeholder:text-g-500"
-        placeholder={valeurs.length === 0 ? 'production, interne…' : undefined}
+        placeholder={valeurs.length === 0 ? "production, interne…" : undefined}
       />
     </div>
-  )
+  );
 }
 
-function Petit({ cle, valeur, mono }: { cle: string; valeur: string; mono?: boolean }) {
+function Petit({
+  cle,
+  valeur,
+  mono,
+}: {
+  cle: string;
+  valeur: string;
+  mono?: boolean;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-2">
       <dt className="shrink-0 text-[11.5px] text-g-500">{cle}</dt>
       <dd
-        className={cn('truncate text-right text-[11.5px] font-semibold text-ink', mono && 'font-mono')}
+        className={cn(
+          "truncate text-right text-[11.5px] font-semibold text-ink",
+          mono && "font-mono",
+        )}
       >
         {valeur}
       </dd>
     </div>
-  )
+  );
 }

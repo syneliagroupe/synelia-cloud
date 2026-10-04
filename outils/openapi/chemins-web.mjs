@@ -8,6 +8,7 @@
  */
 
 import {
+  MOTEURS_MANAGES,
   SITES,
   action,
   booleen,
@@ -617,7 +618,7 @@ const basesWeb = fusion(
           'Aucun accès distant : chaque serveur n’écoute que sur la boucle locale de son ' +
           'hébergement. C’est une propriété de l’offre, pas un réglage à activer.',
         paginee: true,
-        params: [filtre('hebergementId', chaine()), filtre('moteur', liste(['mariadb', 'postgresql', 'redis'])), filtre('actif', booleen())],
+        params: [filtre('hebergementId', chaine()), filtre('moteur', liste(MOTEURS_MANAGES)), filtre('actif', booleen())],
         ok: page(ref('ServeurBases')),
       }),
     },

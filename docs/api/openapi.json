@@ -3861,6 +3861,49 @@
       }
     },
     "/admin/placements": {
+      "get": {
+        "tags": [
+          "Super admin — infrastructure"
+        ],
+        "operationId": "listerPlacements",
+        "summary": "Lister les règles de placement des espaces",
+        "x-rbac": "capacity.manage",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Langue"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Succès.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Placement"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalide"
+          },
+          "401": {
+            "$ref": "#/components/responses/NonAuthentifie"
+          },
+          "403": {
+            "$ref": "#/components/responses/Interdit"
+          },
+          "429": {
+            "$ref": "#/components/responses/TropDeRequetes"
+          },
+          "500": {
+            "$ref": "#/components/responses/Serveur"
+          }
+        }
+      },
       "put": {
         "tags": [
           "Super admin — infrastructure"
@@ -4293,6 +4336,49 @@
       }
     },
     "/admin/statut/services": {
+      "get": {
+        "tags": [
+          "Super admin — exploitation"
+        ],
+        "operationId": "listerStatutServices",
+        "summary": "Lister l’état publié des services",
+        "x-rbac": "capacity.manage",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Langue"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Succès.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StatutService"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalide"
+          },
+          "401": {
+            "$ref": "#/components/responses/NonAuthentifie"
+          },
+          "403": {
+            "$ref": "#/components/responses/Interdit"
+          },
+          "429": {
+            "$ref": "#/components/responses/TropDeRequetes"
+          },
+          "500": {
+            "$ref": "#/components/responses/Serveur"
+          }
+        }
+      },
       "put": {
         "tags": [
           "Super admin — exploitation"
@@ -31758,8 +31844,10 @@
             "schema": {
               "type": "string",
               "enum": [
-                "mariadb",
                 "postgresql",
+                "mysql",
+                "mariadb",
+                "mongodb",
                 "redis"
               ]
             }
@@ -40586,8 +40674,11 @@
           "moteur": {
             "type": "string",
             "enum": [
+              "postgresql",
+              "mysql",
               "mariadb",
-              "postgresql"
+              "mongodb",
+              "redis"
             ]
           },
           "version": {
@@ -46301,6 +46392,15 @@
               "portSsh": {
                 "type": "integer",
                 "format": "int32"
+              },
+              "portSftp": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Port public SFTP (edge dev01 → conteneur)."
+              },
+              "hoteTransfert": {
+                "type": "string",
+                "description": "Hôte SFTP côté client (souvent l’IP edge du lab)."
               }
             },
             "required": [
@@ -46512,6 +46612,9 @@
       "Impaye": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "org": {
             "type": "string"
           },
@@ -50268,6 +50371,15 @@
           "portSsh": {
             "type": "integer",
             "format": "int32"
+          },
+          "portSftp": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port public SFTP (edge dev01 → conteneur)."
+          },
+          "hoteTransfert": {
+            "type": "string",
+            "description": "Hôte SFTP côté client (souvent l’IP edge du lab)."
           }
         }
       },
@@ -51202,8 +51314,10 @@
           "moteur": {
             "type": "string",
             "enum": [
-              "mariadb",
               "postgresql",
+              "mysql",
+              "mariadb",
+              "mongodb",
               "redis"
             ]
           },

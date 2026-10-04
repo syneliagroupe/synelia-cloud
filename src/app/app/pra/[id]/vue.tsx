@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
 import { dateCourte, dureeMin, pct } from '@/lib/format'
-import { SITE_LABEL } from '@/lib/types'
+import { SITE_LABEL, UN_SEUL_SITE, trajetSites } from '@/lib/types'
 import { DR_PLANS } from '@/lib/mock'
 import type { DRPlan } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -26,7 +26,7 @@ import { RpoRtoGauge } from '@/components/business/infra'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { requete } from '@/lib/api/client'
+import { estActif, requete } from '@/lib/api/client'
 
 const ONGLETS = [
   { id: 'composition', label: 'Composition' },
@@ -35,8 +35,14 @@ const ONGLETS = [
   { id: 'exercices', label: 'Exercices' },
 ]
 
+/** La bascule réelle échoue franchement côté API : aucun site de repli n'est provisionné. */
+const MOTIF_BASCULE_REELLE =
+  'Indisponible : la plateforme n’a qu’un site, aucun site de repli n’est provisionné pour une bascule réelle.'
+
 export function VuePra({ id }: { id: string }) {
   const { autorise, refus } = useApp()
+  const reelleOk = (a: boolean) => a && !estActif()
+  const motifReelle = (m: string) => (estActif() ? MOTIF_BASCULE_REELLE : m)
   const executer = useOperation()
   const plans = useCollection<DRPlan>('plans-pra', DR_PLANS)
   const [onglet, setOnglet] = useState('composition')
@@ -108,7 +114,11 @@ export function VuePra({ id }: { id: string }) {
           { label: plan.nom },
         ]}
         titre={<span className="font-mono">{plan.nom}</span>}
-        sousTitre={`${SITE_LABEL[plan.siteSource]} → ${SITE_LABEL[plan.siteRepli]} · réplication ${plan.replication.mode === 'continu' ? 'continue' : 'planifiée'} · retard actuel ${plan.replication.retardS} s`}
+        sousTitre={
+          UN_SEUL_SITE
+            ? `${trajetSites(plan.siteSource, plan.siteRepli)} · RPO cible ${dureeMin(plan.rpoCibleMin)} · RTO cible ${dureeMin(plan.rtoCibleMin)}`
+            : `${SITE_LABEL[plan.siteSource]} → ${SITE_LABEL[plan.siteRepli]} · réplication ${plan.replication.mode === 'continu' ? 'continue' : 'planifiée'} · retard actuel ${plan.replication.retardS} s`
+        }
         meta={
           <>
             <Badge
@@ -148,8 +158,8 @@ export function VuePra({ id }: { id: string }) {
               </Button>
             </GatedAction>
             <GatedAction
-              autorise={autorise('dr.failover.real')}
-              message={refus('dr.failover.real')}
+              autorise={reelleOk(autorise('dr.failover.real'))}
+              message={motifReelle(refus('dr.failover.real'))}
             >
               <Button variant="danger" iconBefore={<Zap size={14} />} onClick={() => setBascule(true)}>
                 Bascule réelle
@@ -159,16 +169,18 @@ export function VuePra({ id }: { id: string }) {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+      <div className={cn('grid grid-cols-1 gap-4', UN_SEUL_SITE ? 'lg:grid-cols-3' : 'lg:grid-cols-4')}>
         <RpoRtoGauge libelle="RPO" cibleMin={plan.rpoCibleMin} constateMin={plan.rpoConstateMin} />
         <RpoRtoGauge libelle="RTO" cibleMin={plan.rtoCibleMin} constateMin={plan.rtoConstateMin} />
-        <StatTile
-          libelle="Retard de réplication"
-          valeur={plan.replication.retardS < 120 ? plan.replication.retardS : Math.round(plan.replication.retardS / 60)}
-          unite={plan.replication.retardS < 120 ? 's' : 'min'}
-          ton={plan.replication.retardS < 120 ? 'ok' : 'warn'}
-          serie={seededSeries(`${id}-lag`, 24, plan.replication.retardS * 0.6, plan.replication.retardS * 1.4)}
-        />
+        {!UN_SEUL_SITE && (
+          <StatTile
+            libelle="Retard de réplication"
+            valeur={plan.replication.retardS < 120 ? plan.replication.retardS : Math.round(plan.replication.retardS / 60)}
+            unite={plan.replication.retardS < 120 ? 's' : 'min'}
+            ton={plan.replication.retardS < 120 ? 'ok' : 'warn'}
+            serie={seededSeries(`${id}-lag`, 24, plan.replication.retardS * 0.6, plan.replication.retardS * 1.4)}
+          />
+        )}
         <StatTile
           libelle="Exercices menés"
           valeur={plan.exercices.length}
@@ -183,13 +195,14 @@ export function VuePra({ id }: { id: string }) {
 
       {plan.statut === 'jamais_teste' && (
         <Callout ton="warn" titre="Ce plan n’a jamais été exercé">
-          Le RTO de {dureeMin(plan.rtoCibleMin)} affiché est une cible théorique, pas une mesure. Une
-          bascule de test démarre les ressources répliquées dans un réseau isolé, sans conflit
-          d’adressage et sans toucher au DNS public : elle n’a aucun impact sur votre production.
+          Le RTO de {dureeMin(plan.rtoCibleMin)} affiché est une cible théorique, pas une mesure.{' '}
+          {estActif()
+            ? 'Une bascule de test valide la procédure et enregistre un exercice daté, sans toucher à votre production.'
+            : 'Une bascule de test démarre les ressources répliquées dans un réseau isolé, sans conflit d’adressage et sans toucher au DNS public : elle n’a aucun impact sur votre production.'}
         </Callout>
       )}
 
-      <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
+      <Tabs tabs={UN_SEUL_SITE ? ONGLETS.filter((o) => o.id !== 'replication') : ONGLETS} active={onglet} onChange={setOnglet} />
 
       {/* ─── Composition ─────────────────────────────────────────────── */}
       {onglet === 'composition' && (
@@ -270,11 +283,18 @@ export function VuePra({ id }: { id: string }) {
                 </div>
               ))}
             </div>
-            <p className="mt-4 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
-              L’exercice de janvier 2026 avait échoué précisément sur cet ordre : sessions-redis
-              démarrait avant la base, ce qui provoquait une avalanche d’erreurs de connexion. La
-              correction est vérifiée depuis avril.
-            </p>
+            {!estActif() && (
+              <p className="mt-4 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
+                L’exercice de janvier 2026 avait échoué précisément sur cet ordre : sessions-redis
+                démarrait avant la base, ce qui provoquait une avalanche d’erreurs de connexion. La
+                correction est vérifiée depuis avril.
+              </p>
+            )}
+            {ordre.length === 0 && (
+              <p className="py-4 text-center text-[13px] text-g-500">
+                Aucun groupe de démarrage dans ce plan pour l’instant.
+              </p>
+            )}
           </Card>
 
           <Card>
@@ -283,7 +303,7 @@ export function VuePra({ id }: { id: string }) {
               colonnes={2}
               items={[
                 { cle: 'Site source', valeur: SITE_LABEL[plan.siteSource] },
-                { cle: 'Site de repli', valeur: SITE_LABEL[plan.siteRepli] },
+                ...(UN_SEUL_SITE ? [] : [{ cle: 'Site de repli', valeur: SITE_LABEL[plan.siteRepli] }]),
                 { cle: 'RPO cible', valeur: dureeMin(plan.rpoCibleMin) },
                 {
                   cle: 'RPO constaté',
@@ -294,11 +314,15 @@ export function VuePra({ id }: { id: string }) {
                   cle: 'RTO constaté',
                   valeur: plan.rtoConstateMin > 0 ? dureeMin(plan.rtoConstateMin) : 'non mesuré',
                 },
-                {
-                  cle: 'Mode de réplication',
-                  valeur: plan.replication.mode === 'continu' ? 'Continue (journalisation)' : 'Planifiée (snapshots)',
-                },
-                { cle: 'Bascule DNS', valeur: 'Automatisée sur les zones hébergées chez Synelia' },
+                ...(UN_SEUL_SITE
+                  ? []
+                  : [
+                      {
+                        cle: 'Mode de réplication',
+                        valeur: plan.replication.mode === 'continu' ? 'Continue (journalisation)' : 'Planifiée (snapshots)',
+                      },
+                      { cle: 'Bascule DNS', valeur: 'Automatisée sur les zones hébergées chez Synelia' },
+                    ]),
               ]}
             />
           </Card>
@@ -382,18 +406,33 @@ export function VuePra({ id }: { id: string }) {
                 <div className="min-w-0">
                   <h3 className="type-h3">Bascule de test</h3>
                   <p className="mt-1.5 text-[13px] leading-relaxed text-g-700">
-                    Démarre les ressources répliquées dans un <strong>réseau isolé</strong>, sans
-                    conflit d’adressage et sans toucher au DNS public. Votre production continue de
-                    tourner normalement pendant tout l’exercice. C’est précisément cette isolation
-                    qui permet de l’exercer souvent, sans négociation de fenêtre.
+                    {estActif() ? (
+                      <>
+                        Valide la procédure et enregistre un exercice daté. Aucune ressource n’est
+                        démarrée : la plateforme n’a ni second site ni réseau de reprise, et la
+                        durée enregistrée est une estimation de la procédure, pas une mesure de
+                        redémarrage.
+                      </>
+                    ) : (
+                      <>
+                        Démarre les ressources répliquées dans un <strong>réseau isolé</strong>,
+                        sans conflit d’adressage et sans toucher au DNS public. Votre production
+                        continue de tourner normalement pendant tout l’exercice. C’est précisément
+                        cette isolation qui permet de l’exercer souvent, sans négociation de
+                        fenêtre.
+                      </>
+                    )}
                   </p>
                   <ul className="mt-3 space-y-1">
-                    {[
-                      'Aucun impact sur la production',
-                      'Aucune coupure de service',
-                      'Produit un rapport avec le RTO réellement constaté',
-                      'Exerçable à volonté, y compris en heures ouvrées',
-                    ].map((x) => (
+                    {(estActif()
+                      ? ['Aucun impact sur la production', 'Aucune coupure de service']
+                      : [
+                          'Aucun impact sur la production',
+                          'Aucune coupure de service',
+                          'Produit un rapport avec le RTO réellement constaté',
+                          'Exerçable à volonté, y compris en heures ouvrées',
+                        ]
+                    ).map((x) => (
                       <li key={x} className="text-[12px] text-g-700">
                         · {x}
                       </li>
@@ -423,26 +462,39 @@ export function VuePra({ id }: { id: string }) {
                 <div className="min-w-0">
                   <h3 className="type-h3">Bascule réelle</h3>
                   <p className="mt-1.5 text-[13px] leading-relaxed text-g-700">
-                    Arrête la production sur {SITE_LABEL[plan.siteSource]}, démarre les ressources sur{' '}
-                    {SITE_LABEL[plan.siteRepli]}, et bascule le DNS public. C’est l’opération de
-                    sinistre. Elle exige une <strong>double confirmation</strong> et n’est accessible
-                    qu’aux rôles Provider Admin et Org Admin.
+                    {estActif() ? (
+                      <>
+                        Bascule vers un site de repli. La plateforme n’a qu’un site : aucun site de
+                        repli n’est provisionné, l’opération est donc indisponible.
+                      </>
+                    ) : (
+                      <>
+                        Arrête la production sur {SITE_LABEL[plan.siteSource]}, démarre les
+                        ressources sur {SITE_LABEL[plan.siteRepli]}, et bascule le DNS public.
+                        C’est l’opération de sinistre. Elle exige une{' '}
+                        <strong>double confirmation</strong> et n’est accessible qu’aux rôles
+                        Provider Admin et Org Admin.
+                      </>
+                    )}
                   </p>
                   <ul className="mt-3 space-y-1">
-                    {[
-                      'Interruption de service pendant la bascule',
-                      `Perte de données limitée au RPO constaté (${dureeMin(plan.rpoConstateMin || plan.rpoCibleMin)})`,
-                      'Bascule DNS publique effective en quelques minutes',
-                      'Retour arrière possible après resynchronisation',
-                    ].map((x) => (
+                    {(estActif()
+                      ? []
+                      : [
+                          'Interruption de service pendant la bascule',
+                          `Perte de données limitée au RPO constaté (${dureeMin(plan.rpoConstateMin || plan.rpoCibleMin)})`,
+                          'Bascule DNS publique effective en quelques minutes',
+                          'Retour arrière possible après resynchronisation',
+                        ]
+                    ).map((x) => (
                       <li key={x} className="text-[12px] text-g-700">
                         · {x}
                       </li>
                     ))}
                   </ul>
                   <GatedAction
-                    autorise={autorise('dr.failover.real')}
-                    message={refus('dr.failover.real')}
+                    autorise={reelleOk(autorise('dr.failover.real'))}
+                    message={motifReelle(refus('dr.failover.real'))}
                   >
                     <Button
                       variant="danger"
@@ -458,6 +510,7 @@ export function VuePra({ id }: { id: string }) {
             </Card>
           </div>
 
+          {!UN_SEUL_SITE && (
           <Card>
             <CardHeader
               titre="Retour arrière"
@@ -525,6 +578,7 @@ export function VuePra({ id }: { id: string }) {
               }}
             />
           </Card>
+          )}
         </div>
       )}
 
@@ -534,14 +588,25 @@ export function VuePra({ id }: { id: string }) {
           {plan.exercices.length === 0 ? (
             <Card>
               <Callout ton="warn" titre="Aucun exercice à ce jour">
-                Ce plan n’a jamais été exercé. Le RTO affiché est une cible contractuelle, pas une
-                mesure. Nous recommandons un premier exercice de test dans les trente jours : il est
-                inclus dans l’offre et n’a aucun impact sur votre production.
+                Ce plan n’a jamais été exercé. Le RTO affiché est une cible, pas une mesure.{' '}
+                {estActif()
+                  ? 'Une bascule de test enregistre un premier exercice sans impact sur votre production.'
+                  : 'Nous recommandons un premier exercice de test dans les trente jours : il est inclus dans l’offre et n’a aucun impact sur votre production.'}
               </Callout>
               <GatedAction
                 autorise={autorise('dr.failover.test')}
                 message={refus('dr.failover.test')}
               >
+                {estActif() ? (
+                  // Seul « maintenant » existe côté API : pas de planification ni de rappel.
+                  <Button
+                    className="mt-4"
+                    iconBefore={<FlaskConical size={14} />}
+                    onClick={basculeDeTest}
+                  >
+                    Lancer une bascule de test
+                  </Button>
+                ) : (
                 <BoutonFormulaire
                   libelle="Planifier le premier exercice"
                   variant="primary"
@@ -593,6 +658,7 @@ export function VuePra({ id }: { id: string }) {
                         }
                   }
                 />
+                )}
               </GatedAction>
             </Card>
           ) : (
@@ -619,7 +685,7 @@ export function VuePra({ id }: { id: string }) {
                       {plan.exercices.map((e) => {
                         const conforme = e.rtoConstateMin <= plan.rtoCibleMin
                         return (
-                          <tr key={e.date} className="border-b border-g-100 last:border-0">
+                          <tr key={`${e.date}-${e.type}-${e.dureeMin}`} className="border-b border-g-100 last:border-0">
                             <td className="px-3 py-2.5 text-[13px] text-ink">
                               {dateCourte(e.date)}
                             </td>
@@ -646,13 +712,18 @@ export function VuePra({ id }: { id: string }) {
                               </Badge>
                             </td>
                             <td className="px-3 py-2.5">
-                              <a
-                                href={e.rapportUrl}
-                                className="inline-flex items-center gap-1 text-[12px] font-semibold text-p-700 hover:underline"
-                              >
-                                <FileDown size={12} />
-                                Télécharger
-                              </a>
+                              {estActif() ? (
+                                // L'API renvoie une adresse de rapport qui ne mène à aucun fichier.
+                                <span className="text-[12px] text-g-500">Pas de rapport</span>
+                              ) : (
+                                <a
+                                  href={e.rapportUrl}
+                                  className="inline-flex items-center gap-1 text-[12px] font-semibold text-p-700 hover:underline"
+                                >
+                                  <FileDown size={12} />
+                                  Télécharger
+                                </a>
+                              )}
                             </td>
                           </tr>
                         )
@@ -662,6 +733,7 @@ export function VuePra({ id }: { id: string }) {
                 </div>
               </Card>
 
+              {plan.exercices.some((e) => e.incidents && e.incidents.length > 0) && (
               <Card>
                 <CardHeader
                   titre="Incidents relevés lors des exercices"
@@ -689,7 +761,9 @@ export function VuePra({ id }: { id: string }) {
                     ))}
                 </div>
               </Card>
+              )}
 
+              {!estActif() && (
               <Callout ton="ok" titre="Progression mesurée">
                 Le RTO constaté est passé de {dureeMin(plan.exercices[plan.exercices.length - 1].rtoConstateMin)}{' '}
                 en janvier à {dureeMin(plan.exercices[0].rtoConstateMin)} en juillet, soit une
@@ -704,6 +778,7 @@ export function VuePra({ id }: { id: string }) {
                 )}
                 . Prochain exercice planifié : 15 octobre 2026.
               </Callout>
+              )}
             </>
           )}
         </div>

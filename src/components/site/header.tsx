@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 import { ChevronDown, Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MEGAMENU } from '@/lib/mock/vitrine'
+import { estActif } from '@/lib/api/client'
+import { LIEUX_HEBERGEMENT } from '@/lib/types'
 import { Logo } from '@/components/brand/logo'
 import { ButtonLink } from '@/components/ui/button'
 
@@ -13,15 +15,19 @@ import { ButtonLink } from '@/components/ui/button'
  * techniques : rien ne menait aux pages qui parlent des personnes. Deux
  * groupes libellés valent mieux qu'une liste de dix entrées dépareillées.
  */
-const SOCIETE = [
+const SOCIETE_MAQUETTE = [
   { nom: 'L’équipe', href: '/equipe', resume: 'Les huit personnes qui exploitent la plateforme.' },
   { nom: 'Notre histoire', href: '/histoire', resume: 'Pourquoi nous avons construit nos propres sites.' },
   { nom: 'Témoignages', href: '/temoignages', resume: 'Quatre migrations racontées, accrocs compris.' },
   { nom: 'Écosystème', href: '/communaute', resume: 'Écoles, alternance, contributions en amont.' },
 ]
 
+/** Ces quatre rubriques racontent une société fictive : absentes en mode API. */
+const SOCIETE = estActif() ? [] : SOCIETE_MAQUETTE
+
 const RESSOURCES = [
-  { nom: 'Ressources', href: '/ressources', resume: 'Livres blancs, guides, webinaires, études.' },
+  // En mode API, aucun livre blanc n'est publié : pas d'entrée qui mène à une page vide.
+  ...(estActif() ? [] : [{ nom: 'Ressources', href: '/ressources', resume: 'Livres blancs, guides, webinaires, études.' }]),
   { nom: 'Documentation', href: '/docs', resume: 'Documentation technique et utilisateur, en français.' },
   { nom: 'Datacenters', href: '/datacenters', resume: 'Fiche par site : alimentation, refroidissement, connectivité.' },
   { nom: 'Souveraineté', href: '/souverainete', resume: 'Les trois niveaux, et notre position sur chacun.' },
@@ -136,8 +142,7 @@ export function SiteHeader() {
           <div className="border-t border-g-100 bg-g-050">
             <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
               <p className="text-[13px] text-g-700">
-                Solutions open source, opérées par Synelia, réversibles. Hébergées à Abidjan et
-                Grand-Bassam.
+                Solutions open source, opérées par Synelia, réversibles. Hébergées à {LIEUX_HEBERGEMENT}.
               </p>
               <Link
                 href="/simulateur"
@@ -157,7 +162,9 @@ export function SiteHeader() {
             {[
               { colonne: 'Ressources', entrees: RESSOURCES },
               { colonne: 'La société', entrees: SOCIETE },
-            ].map((groupe) => (
+            ]
+              .filter((g) => g.entrees.length > 0)
+              .map((groupe) => (
               <div key={groupe.colonne}>
                 <p className="type-micro mb-3 text-m-600">{groupe.colonne}</p>
                 <ul className="space-y-2.5">

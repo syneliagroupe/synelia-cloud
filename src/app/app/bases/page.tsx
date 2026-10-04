@@ -17,6 +17,7 @@ import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
 import { creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 import type { LigneLog, ManagedDatabase } from '@/lib/types'
 
 // `id` reste le code attendu par le backend (`BaseManageeCreation.palier` :
@@ -201,8 +202,12 @@ export default function BasesManagees() {
       {bases.length === 0 ? (
         <EmptyState
           titre="Aucune base managée dans cet espace"
-          phrase="Une base managée vous évite d’exploiter vous-même le moteur : nous gérons la haute disponibilité, les sauvegardes avec restauration à un instant précis, les montées de version et la supervision fine."
+          phrase={phraseVideEspace(
+            espace.code,
+            'Une base managée vous évite d’exploiter le moteur vous-même : haute disponibilité, sauvegardes PITR, montées de version et supervision.',
+          )}
           action={{ libelle: 'Créer une base', onClick: () => setCreationOuverte(true) }}
+          actionSecondaire={actionChangerEspace}
         />
       ) : (
         <>

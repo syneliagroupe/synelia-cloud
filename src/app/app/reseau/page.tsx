@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Download, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { MAINTENANT, dateHeure, num } from '@/lib/format'
+import { MAINTENANT, dateHeure } from '@/lib/format'
 import { NETWORKS, PUBLIC_IPS, SECURITY_GROUPS, VMS, VPN_TUNNELS } from '@/lib/mock'
 import type { Network, PublicIP, SecurityGroup, VM, VpnTunnel } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -11,7 +11,7 @@ import { Button, IconButton } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
-import { EmptyState } from '@/components/composition/states'
+import { EmptyState, SkeletonTable } from '@/components/composition/states'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
@@ -23,6 +23,7 @@ import {
   supprimerRessource,
 } from '@/lib/api/client'
 import { telechargerTexte } from '@/lib/export'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 
 interface ProfilOvpnReponse {
   nom: string
@@ -138,11 +139,17 @@ export default function Reseau() {
               />
             }
           />
-          {reseaux.length === 0 ? (
+          {lesReseaux.chargement ? (
+            <SkeletonTable lignes={3} colonnes={5} />
+          ) : reseaux.length === 0 ? (
             <EmptyState
               titre="Aucun réseau privé"
-              phrase={`Découpez la plage ${espace.cidr} en sous-réseaux par usage — front, données, cache — pour appliquer des politiques de filtrage distinctes.`}
+              phrase={phraseVideEspace(
+                espace.code,
+                `Découpez la plage ${espace.cidr} en sous-réseaux par usage — front, données, cache — pour des politiques de filtrage distinctes.`,
+              )}
               action={{ libelle: 'Créer un réseau', onClick: () => setCreationReseauOuverte(true) }}
+              actionSecondaire={actionChangerEspace}
             />
           ) : (
             <div className="overflow-x-auto">
@@ -231,8 +238,7 @@ export default function Reseau() {
             </div>
           )}
           <p className="mt-3 border-t border-g-100 pt-3 text-[12px] leading-relaxed text-g-500">
-            Plage totale {espace.cidr} · {num(reseaux.length * 254)} adresses actuellement découpées
-            sur les 1 024 disponibles. Le routage entre réseaux privés d’un même espace est
+            Plage totale {espace.cidr}. Le routage entre réseaux privés d’un même espace est
             automatique ; le filtrage se fait par groupe de sécurité.
           </p>
         </Card>
@@ -310,6 +316,18 @@ export default function Reseau() {
                 />
               }
             />
+            {lesIps.chargement ? (
+              <SkeletonTable lignes={3} colonnes={5} />
+            ) : ips.length === 0 ? (
+              <EmptyState
+                titre="Aucune IP publique"
+                phrase={phraseVideEspace(
+                  espace.code,
+                  'Une IP publique réservée rend une machine joignable depuis Internet ; elle reste facturée tant qu’elle n’est pas libérée.',
+                )}
+                actionSecondaire={actionChangerEspace}
+              />
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-max border-collapse">
                 <thead>
@@ -475,6 +493,7 @@ export default function Reseau() {
                 </tbody>
               </table>
             </div>
+            )}
             <Callout ton="info" className="mt-4" titre="Reverse DNS et réputation">
               Un enregistrement PTR correct est indispensable si la machine envoie du courrier :
               sans lui, la plupart des serveurs destinataires rejettent ou classent en indésirable.
@@ -555,6 +574,23 @@ export default function Reseau() {
               })}
             />
           </div>
+
+          {lesGroupes.chargement ? (
+            <Card>
+              <SkeletonTable lignes={3} colonnes={5} />
+            </Card>
+          ) : groupes.length === 0 ? (
+            <Card>
+              <EmptyState
+                titre="Aucun groupe de sécurité"
+                phrase={phraseVideEspace(
+                  espace.code,
+                  'Un groupe de sécurité filtre le trafic entrant et sortant des machines auxquelles il est attaché.',
+                )}
+                actionSecondaire={actionChangerEspace}
+              />
+            </Card>
+          ) : null}
 
           {groupes.map((sg) => (
             <Card key={sg.id}>
@@ -900,6 +936,11 @@ export default function Reseau() {
                   action="network.manage"
                   titre="Générer un profil d’accès nomade"
                   description="Un profil est nominatif : il porte un certificat client révocable individuellement. Il n’y a pas de profil partagé."
+                  sansApi={
+                    tunnels.some((t) => t.type === 'ssl')
+                      ? undefined
+                      : 'Aucun service OpenVPN n’est déployé dans cet Espace : un profil n’a rien à rejoindre.'
+                  }
                   champs={[
                     { id: 'nom', label: 'Nom du profil', placeholder: 'poste-portable-ak', obligatoire: true },
                     { id: 'utilisateur', label: 'Utilisateur', placeholder: 'a.kone@dba.africa', obligatoire: true },
@@ -948,6 +989,12 @@ export default function Reseau() {
                 />
               }
             />
+            {!lesTunnels.chargement && !tunnels.some((t) => t.type === 'ssl') && (
+              <EmptyState
+                titre="Aucun service OpenVPN dans cet Espace"
+                phrase="Les profils nomades se rattachent à un service OpenVPN déployé dans l’Espace ; tant qu’il n’y en a pas, aucun profil ne peut être généré."
+              />
+            )}
             {tunnels
               .filter((t) => t.type === 'ssl')
               .map((t) => (

@@ -14,7 +14,7 @@ import { DOMAINES } from '@/lib/mock/web'
 import { HEBERGEMENTS, SERVICES_PARTAGES, nomServi } from '@/lib/mock/hebergement'
 import { BACKENDS } from '@/lib/mock/iaas'
 import { estActif, requete } from '@/lib/api/client'
-import type { Portee } from '@/lib/navigation'
+import { UNIVERS_CLIENT, UNIVERS_SUPER_ADMIN, type Portee } from '@/lib/navigation'
 
 interface Entree {
   id: string
@@ -77,25 +77,28 @@ function entreesClient(): Entree[] {
       href: '/app/applications/projets',
       meta: `${m.solution} ${m.version}`,
     })),
-    ...HEBERGEMENTS.map((h) => ({
-      id: h.id,
-      label: nomServi(h),
-      categorie: 'Hébergements web',
-      href: `/app/web/hebergement/${h.id}`,
-      meta: `${h.serveur.nom} · ${h.palier}`,
-    })),
+    ...HEBERGEMENTS.map((h) => {
+      const cle = h.domaine ?? h.domaineProvisoire
+      return {
+        id: h.id,
+        label: nomServi(h),
+        categorie: 'Hébergements web',
+        href: cle ? `/app/web/sites/${encodeURIComponent(cle)}/serveur` : '/app/web/sites',
+        meta: `${h.serveur.nom} · ${h.palier}`,
+      }
+    }),
     ...SERVICES_PARTAGES.map((sp) => ({
       id: sp.id,
       label: `${sp.nom} — ${sp.hote}`,
       categorie: 'Services partagés',
-      href: `/app/web/${sp.hebergementId}`,
+      href: `/app/web/hebergement/${sp.hebergementId}`,
       meta: sp.solution,
     })),
     ...DOMAINES.map((d) => ({
       id: d.id,
       label: d.nom,
       categorie: 'Domaines',
-      href: '/app/web',
+      href: `/app/web/domaines/${encodeURIComponent(d.nom)}`,
       meta: `expire le ${d.expiration}`,
     })),
     ...FACTURES.map((f) => ({
@@ -205,8 +208,17 @@ export function RechercheGlobale({ portee = 'client' }: { portee?: Portee }) {
     }
   }, [q, ouvert])
 
-  const entrees = useMemo(
-    () => (portee === 'client' ? entreesClient() : entreesSuperAdmin()),
+  // En mode API, les raccourcis sont les pages du portail (jamais les
+  // ressources fictives de la maquette) ; les ressources viennent de `/recherche`.
+  const entrees = useMemo<Entree[]>(
+    () =>
+      estActif()
+        ? (portee === 'client' ? UNIVERS_CLIENT : UNIVERS_SUPER_ADMIN).flatMap((u) =>
+            u.sections.map((s) => ({ id: s.href, label: s.nom, categorie: u.nom, href: s.href })),
+          )
+        : portee === 'client'
+          ? entreesClient()
+          : entreesSuperAdmin(),
     [portee],
   )
 

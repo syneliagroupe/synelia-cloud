@@ -20,6 +20,7 @@ import { Button, IconButton } from '@/components/ui/button'
 import { Checkbox, Field, Input, Select, Slider, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout } from '@/components/composition/card'
 import { QuotaBar } from '@/components/composition/metrics'
+import { prixMachine } from '@/lib/tarifs'
 
 /**
  * Rôle de serveur : un gabarit de départ, pas une contrainte.
@@ -209,7 +210,7 @@ const ICONES = {
 
 /** Prix indicatif d'un lot, à la ressource. Les mêmes règles que le simulateur. */
 export function coutLot(l: LotServeurs): number {
-  const parMachine = l.cpu * 2200 + l.ramGo * 900 + l.diskGo * 55 + (l.nics - 1) * 1500
+  const parMachine = prixMachine(l.cpu, l.ramGo, l.diskGo) + (l.nics - 1) * 1500
   return parMachine * l.quantite + (l.sauvegarde ? Math.round(parMachine * 0.12) * l.quantite : 0)
 }
 

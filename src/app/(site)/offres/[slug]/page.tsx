@@ -1,11 +1,21 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { ArrowDown, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { money } from '@/lib/format'
+import { dureeMin, money, pct, slaLibelle } from '@/lib/format'
+import { PRIX } from '@/lib/tarifs'
 import { FICHES_PRODUIT } from '@/lib/mock'
 import { lirePublicServeur } from '@/lib/api/public-serveur'
-import { fusionnerFicheProduit, type FicheProduitPublique } from '@/lib/api/vitrine'
+import {
+  CATEGORIES_PAR_FICHE,
+  ficheDeCategorie,
+  fusionnerFicheProduit,
+  paliersDepuisTarifs,
+  type FicheProduitPublique,
+  type TarifsPublics,
+} from '@/lib/api/vitrine'
+import { estActif } from '@/lib/api/client'
+import { SITES } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { Card, KeyValueList } from '@/components/composition/card'
@@ -17,13 +27,86 @@ import { Accordeon, AppelFinal, Container, SiteSection } from '@/components/site
  * active (nom, accroche, résumé, paliers, FAQ). Une offre connue du seul
  * backend n’a ni schéma ni architecture à montrer : la page reste 404.
  */
+interface LigneSla {
+  dispo: number
+  reponseCritique: number
+  resolutionCritique: number
+}
+const SLA_INFRA = ['espace-cloud', 'machines-virtuelles', 'kubernetes', 'load-balancer', 'stockage-objet', 'cloud-backup', 'reseau-vpn', 'ip-antiddos', 'volumes', 'pra']
+const SLA_MANAGES = ['bases-managees', 'hebergement-web', 'wordpress', 'smtp', 'dns']
+
+/** Fiche portée par des offres qui annoncent chacune leur SLA : la fourchette réelle. */
+function dispoOffres(tarifs: TarifsPublics | undefined, slug: string): string | undefined {
+  const offres = (tarifs?.familles ?? [])
+    .filter((f) => CATEGORIES_PAR_FICHE[slug]?.includes(f.code))
+    .flatMap((f) => f.offres)
+    .filter((o) => o.sla && o.statut !== 'brouillon')
+    .sort((a, b) => parseFloat(a.sla!) - parseFloat(b.sla!))
+  if (offres.length === 0) return undefined
+  const [min, max] = [offres[0], offres[offres.length - 1]]
+  return min.sla === max.sla
+    ? slaLibelle(min.sla!)
+    : `${slaLibelle(min.sla!)} (${min.nom}) à ${slaLibelle(max.sla!)} (${max.nom})`
+}
+
 async function ficheDe(slug: string) {
   const locale = FICHES_PRODUIT.find((x) => x.slug === slug)
-  if (!locale) return undefined
+  if (!locale) {
+    // `/offres/espace-pro` : un code d’offre du catalogue (lien de la page
+    // Facturation, par exemple) renvoie à la fiche du produit qui la porte.
+    const offre = await lirePublicServeur<FicheProduitPublique>(`/public/offres/${encodeURIComponent(slug)}`)
+    const produit = offre && ficheDeCategorie(offre.categorie)
+    if (produit) redirect(`/offres/${produit}`)
+    return undefined
+  }
   const distante = await lirePublicServeur<FicheProduitPublique>(
     `/public/offres/${encodeURIComponent(slug)}`,
   )
-  return fusionnerFicheProduit(distante, locale)
+  const fiche = fusionnerFicheProduit(distante, locale)
+  if (!estActif()) return fiche
+  const [tarifs, catalogue, sla] = await Promise.all([
+    lirePublicServeur<TarifsPublics>('/public/tarifs'),
+    slug === 'wordpress'
+      ? lirePublicServeur<{ paliers?: Array<{ nom: string; specs: string; prixMois?: number }> }>(
+          '/public/catalogue/services/wordpress',
+        )
+      : undefined,
+    lirePublicServeur<LigneSla[]>('/public/sla'),
+  ])
+  // Produits tarifés à l'unité par la grille de facturation (`PRIX`, miroir du backend), sans offre au catalogue.
+  const GRILLE: Record<string, typeof fiche.paliers> = {
+    'load-balancer': [{ nom: 'Load balancer', specs: 'L4 ou L7, tarif plat par load balancer', prix: PRIX.lbMois, unite: '/mois' }],
+    'ip-antiddos': [{ nom: 'Adresse publique', specs: 'IPv4 · PTR modifiable · anti-DDoS inclus', prix: PRIX.ipPubliqueMois, unite: '/mois' }],
+    'stockage-objet': [{ nom: 'Classe chaude', specs: 'Accès fréquent · compatible S3', prix: 1500, unite: '/To/mois' }],
+    volumes: fiche.paliers.filter((p) => p.prix !== null && p.unite === '/To/mois'),
+  }
+  // Les paliers affichés sont ceux du catalogue publié, pas ceux de la maquette ;
+  // pour les produits sans offre au catalogue, un prix de la grille ou « sur devis ».
+  const paliers =
+    paliersDepuisTarifs(tarifs, slug) ??
+    GRILLE[slug] ??
+    (slug === 'kubernetes'
+      ? [
+          { nom: 'Plan de contrôle simple', specs: 'Un master géré ; les workers se facturent comme des machines virtuelles', prix: PRIX.k8sControleMois, unite: '/mois' },
+          { nom: 'Plan de contrôle haute disponibilité', specs: 'Trois masters ; les workers se facturent comme des machines virtuelles', prix: PRIX.k8sControleHaMois, unite: '/mois', recommande: true },
+        ]
+      : slug === 'pra' || slug === 'cloud-backup'
+        ? [{ nom: 'Sur mesure', specs: slug === 'pra' ? 'Dimensionné après un atelier de cadrage : RPO/RTO, volumétrie, fréquence des exercices' : 'Plan, rétention et volumétrie chiffrés sur devis : la grille publique ne publie pas de tarif de sauvegarde', prix: null, surDevis: true, unite: '' }]
+        : slug === 'wordpress' && catalogue?.paliers?.some((p) => p.prixMois)
+          ? catalogue.paliers.map((p, i) => ({ nom: p.nom, specs: p.specs, prix: p.prixMois ?? null, surDevis: !p.prixMois, unite: p.prixMois ? '/mois' : '', recommande: i === 0 }))
+          : undefined)
+  // Engagements de service : ceux de `/public/sla`, les mêmes que l'accueil et l'annexe légale.
+  const ligne = sla?.[SLA_MANAGES.includes(slug) ? 1 : 0]
+  const engagement =
+    ligne && (SLA_INFRA.includes(slug) || SLA_MANAGES.includes(slug))
+      ? {
+          ...fiche.sla,
+          dispo: dispoOffres(tarifs, slug) ?? pct(ligne.dispo, 2),
+          reponse: `${dureeMin(ligne.reponseCritique)} en gravité critique`,
+          resolution: `${dureeMin(ligne.resolutionCritique)} en gravité critique`,
+        }
+      : fiche.sla
+  return { ...fiche, paliers: paliers ?? fiche.paliers, sla: engagement }
 }
 
 export async function generateMetadata({
@@ -275,8 +358,9 @@ export default async function FicheProduit({
             </figure>
           )}
           <p className="mt-6 text-center text-[12px] text-g-500">
-            Chaque ressource affiche son emplacement physique — site ABJ ou GBM — partout dans le
-            portail.
+            {SITES.length > 1
+              ? 'Chaque ressource affiche son emplacement physique — site ABJ ou GBM — partout dans le portail.'
+              : 'Chaque ressource affiche son emplacement physique — site ABJ — partout dans le portail.'}
           </p>
         </Container>
       </SiteSection>
@@ -290,8 +374,12 @@ export default async function FicheProduit({
       </SiteSection>
 
       <AppelFinal
-        titre={`Prêt à déployer votre ${f.nom.toLowerCase()} ?`}
-        chapeau="Créez un compte pour explorer l’assistant de création dans un portail peuplé de données de démonstration, ou faites chiffrer votre besoin réel par un architecte."
+        titre={`Prêt à démarrer avec ${f.nom} ?`}
+        chapeau={
+          estActif()
+            ? 'Créez un compte pour ouvrir l’assistant de création, ou faites chiffrer votre besoin par un architecte.'
+            : 'Créez un compte pour explorer l’assistant de création dans un portail peuplé de données de démonstration, ou faites chiffrer votre besoin réel par un architecte.'
+        }
         primaire={{ libelle: 'Créer un compte', href: '/signup' }}
         secondaire={{ libelle: 'Demander un devis', href: '/entreprises#contact' }}
       />

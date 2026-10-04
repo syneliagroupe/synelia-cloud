@@ -16,6 +16,7 @@ import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire } from '@/components/app/actions'
 import { creerRessource, requete, supprimerRessource } from '@/lib/api/client'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 
 const PRIX_GO: Record<Volume['classe'], number> = {
   nvme: 5.4,
@@ -55,6 +56,7 @@ export default function Stockage() {
     },
     { id: 'chiffre', label: 'Chiffrement au repos', type: 'switch' as const, placeholder: 'Activé' },
   ]
+  const detaches = volumes.filter((v) => !v.attachedTo)
   const total = volumes.reduce((a, v) => a + v.tailleGo, 0)
   const cout = volumes.reduce((a, v) => a + Math.round(v.tailleGo * PRIX_GO[v.classe]), 0)
 
@@ -322,11 +324,12 @@ export default function Stockage() {
           valeur={`${volumes.filter((v) => v.chiffre).length}/${volumes.length}`}
           ton={volumes.every((v) => v.chiffre) ? 'ok' : 'warn'}
         />
-        <StatTile libelle="Coût mensuel" valeur={money(cout).replace(' FCFA', '')} unite="FCFA" />
+        <StatTile libelle="Coût mensuel" valeur={money(cout)} />
       </div>
 
       <DataTable
         lignes={volumes}
+        chargement={disques.chargement}
         colonnes={colonnes}
         placeholderRecherche="Rechercher un volume ou un point de montage…"
         filtres={[
@@ -376,15 +379,20 @@ export default function Stockage() {
                 action: 'backup.plan.write',
                 titre: `Plan appliqué à ${ids.length} volume(s)`,
                 detail: `Prise en compte à la prochaine fenêtre, le ${MAINTENANT.slice(8, 10)} à 02h00.`,
+                sansApi:
+                  'Indisponible : l’API n’associe pas encore un plan de sauvegarde à un volume.',
               }}
             />
           </>
         )}
         vide={{
           titre: 'Aucun volume dans cet espace',
-          phrase:
-            'Un volume est un disque indépendant du système. Il s’étend à chaud, se déplace d’une machine à l’autre, et se sauvegarde séparément.',
+          phrase: phraseVideEspace(
+            espace.code,
+            'Un volume est un disque indépendant du système : extensible à chaud, déplaçable et sauvegardable séparément.',
+          ),
           action: { libelle: 'Créer un volume', onClick: () => setCreationOuverte(true) },
+          actionSecondaire: actionChangerEspace,
         }}
       />
 
@@ -412,8 +420,8 @@ export default function Stockage() {
         </Card>
 
         <Callout ton="warn" titre="Les volumes détachés restent facturés">
-          {volumes.filter((v) => !v.attachedTo).length > 0
-            ? `${volumes.filter((v) => !v.attachedTo).map((v) => v.nom).join(', ')} n’est attaché à aucune machine mais continue d’occuper — et de facturer — sa capacité. C’est voulu : détacher un volume ne détruit pas ses données. Si vous n’en avez plus besoin, créez d’abord un snapshot, puis supprimez le volume.`
+          {detaches.length > 0
+            ? `${detaches.map((v) => v.nom).join(', ')} ${detaches.length > 1 ? 'ne sont attachés' : 'n’est attaché'} à aucune machine mais ${detaches.length > 1 ? 'continuent' : 'continue'} d’occuper — et de facturer — ${detaches.length > 1 ? 'leur' : 'sa'} capacité. C’est voulu : détacher un volume ne détruit pas ses données. Si vous n’en avez plus besoin, créez d’abord un snapshot, puis supprimez le volume.`
             : 'Tous vos volumes sont attachés. Un volume détaché conserve ses données et reste facturé : c’est ce qui permet de le déplacer d’une machine à l’autre sans risque.'}
         </Callout>
       </div>

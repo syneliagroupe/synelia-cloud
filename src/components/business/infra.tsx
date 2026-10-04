@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { AlertTriangle, Plus, Server } from 'lucide-react'
 import { cn, clamp } from '@/lib/utils'
-import { dateCourte, dureeMin, num, pct } from '@/lib/format'
-import { BACKEND_LABEL, SITE_COURT, type Backend, type DRPlan } from '@/lib/types'
+import { dateCourte, dureeMin, num, pct, toHumain } from '@/lib/format'
+import { BACKEND_LABEL, SITE_COURT, UN_SEUL_SITE, trajetSites, type Backend, type DRPlan } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, Callout } from '@/components/composition/card'
@@ -56,10 +56,9 @@ export function BackendGauge({
         />
         <QuotaBar
           libelle="Stockage"
-          utilise={Math.round((backend.capacite.stockageTo * backend.usage.stockagePct) / 100)}
+          utilise={(backend.capacite.stockageTo * backend.usage.stockagePct) / 100}
           total={backend.capacite.stockageTo}
-          unite="To"
-          formateur={(v) => num(v)}
+          formateur={toHumain}
           compact
         />
       </div>
@@ -242,7 +241,7 @@ export function RpoRtoGauge({
   className?: string
 }) {
   const conforme = constateMin > 0 && constateMin <= cibleMin
-  const jamaisMesure = constateMin === 0
+  const jamaisMesure = !constateMin
   const ratio = jamaisMesure ? 0 : clamp((constateMin / cibleMin) * 100, 0, 140)
 
   return (
@@ -344,7 +343,7 @@ export function DrPlanSummary({ plan, className }: { plan: DRPlan; className?: s
     <Card className={className}>
       <CardHeader
         titre={<span className="font-mono">{plan.nom}</span>}
-        sousTitre={`${SITE_COURT[plan.siteSource]} → ${SITE_COURT[plan.siteRepli]} · réplication ${plan.replication.mode === 'continu' ? 'continue' : 'planifiée'}`}
+        sousTitre={`${trajetSites(plan.siteSource, plan.siteRepli)}${UN_SEUL_SITE ? '' : ` · réplication ${plan.replication.mode === 'continu' ? 'continue' : 'planifiée'}`}`}
         actions={<HealthBadge etat={plan.statut} size="sm" />}
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -353,7 +352,9 @@ export function DrPlanSummary({ plan, className }: { plan: DRPlan; className?: s
       </div>
       <div className="mt-3.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-g-100 pt-3">
         <Meta cle="Groupes de démarrage" valeur={String(plan.groupes.length)} />
-        <Meta cle="Retard de réplication" valeur={`${plan.replication.retardS} s`} />
+        {!UN_SEUL_SITE && (
+          <Meta cle="Retard de réplication" valeur={`${plan.replication.retardS} s`} />
+        )}
         <Meta
           cle="Dernier exercice"
           valeur={dernier ? `${dateCourte(dernier.date)} · ${dernier.succes ? 'réussi' : 'échoué'}` : 'jamais'}
@@ -393,12 +394,14 @@ export function Regle321({
     { ok: supports, label: '2 supports' },
     { ok: horsSite, label: '1 hors site' },
   ]
+  // Un seul site réel : la copie « hors site » ne peut pas être satisfaite sur la plateforme.
+  const noteHorsSite = UN_SEUL_SITE ? ' (la plateforme n’a qu’un site)' : ''
   return (
     <span className="inline-flex items-center gap-1.5">
       {items.map((it) => (
         <span
           key={it.label}
-          title={`${it.label} — ${it.ok ? 'conforme' : 'non conforme'}`}
+          title={`${it.label} — ${it.ok ? 'conforme' : 'non conforme'}${it === items[2] ? noteHorsSite : ''}`}
           className={cn(
             'inline-flex h-4 w-4 items-center justify-center rounded-full text-[11px] font-bold text-white',
             it.ok ? 'bg-ok' : 'bg-g-300',

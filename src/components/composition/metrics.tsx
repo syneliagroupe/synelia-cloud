@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { cn, clamp } from '@/lib/utils'
+import { cn, clamp, estSerieFictive, modeApiActif } from '@/lib/utils'
 import { delta, pct } from '@/lib/format'
 import { Badge, type Tone } from '@/components/ui/badge'
 
@@ -127,7 +127,7 @@ export function StatTile({
         </p>
       )}
       {detail && <p className="mt-1.5 text-[12px] leading-snug text-g-500">{detail}</p>}
-      {serie && (
+      {serie && !(modeApiActif() && estSerieFictive(serie)) && (
         <div className="mt-auto pt-3">
           <Sparkline serie={serie} couleur={couleurs[ton]} />
         </div>
@@ -171,11 +171,16 @@ export function QuotaBar({
             </span>
           )}
           <span className="tnum text-[12px] text-g-500">
-            {fmt(utilise)} / {fmt(total)}
-            {unite ? ` ${unite}` : ''}
+            {/* Un taux déjà sur 100 : « 6 / 100 % 6 % » dirait deux fois la même chose. */}
+            {unite === '%' && total === 100 ? null : (
+              <>
+                {fmt(utilise)} / {fmt(total)}
+                {unite ? ` ${unite}` : ''}
+              </>
+            )}
             <span
               className={cn(
-                'ml-1.5 font-bold',
+                unite === '%' && total === 100 ? 'text-[12px] font-bold' : 'ml-1.5 font-bold',
                 critique ? 'text-err' : alerte ? 'text-warn' : 'text-g-700',
               )}
             >
@@ -369,5 +374,15 @@ export function HealthBadge({
     <Badge tone={v.tone} dot size={size} className={v.pulse ? 'animate-pulse-dot' : undefined}>
       {v.label}
     </Badge>
+  )
+}
+
+/** Contenu illustratif (courbes, récits chiffrés) : remplacé par une mention honnête quand l’API réelle est active. */
+export function HistoriqueSimule({ children }: { children: ReactNode }) {
+  if (!modeApiActif()) return <>{children}</>
+  return (
+    <p className="rounded-[6px] border border-dashed border-g-300 px-3 py-6 text-center text-[12.5px] text-g-500">
+      Historique non disponible pour le moment.
+    </p>
   )
 }

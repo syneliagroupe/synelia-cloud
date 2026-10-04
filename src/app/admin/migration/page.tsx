@@ -192,13 +192,32 @@ export default function Migration() {
     .reduce((a, v) => a + v.machines, 0)
   const total = vagues.items.reduce((a, v) => a + v.machines, 0)
   const enCours = vagues.items.find((v) => v.statut === 'en_cours')
+  const api = estActif()
+  const vcpuTotal = SOCLES.reduce((a, b) => a + b.capacite.vcpu, 0)
+  const vcpuLibre = SOCLES.filter((b) => !b.enSortie?.actif).reduce(
+    (a, b) => a + b.capacite.vcpu,
+    0,
+  )
+  const partLibre = api ? (vcpuTotal ? Math.round((vcpuLibre / vcpuTotal) * 100) : 100) : 50
+  const trajectoire = api
+    ? SOCLES.map((b) => ({
+        backend: `${BACKEND_LABEL[b.type]} · ${b.code}`,
+        part: `${vcpuTotal ? Math.round((b.capacite.vcpu / vcpuTotal) * 100) : 0} % de la capacité`,
+        cible: b.enSortie?.actif ? b.enSortie.cibleMigration : 'Socle cible',
+        avancement: b.enSortie?.actif ? 0 : 100,
+      }))
+    : TRAJECTOIRE_SORTIE
 
   return (
     <div className="space-y-5">
       <PageHeader
         fil={[{ label: 'Espace super admin', href: '/admin' }, { label: 'Migration entre socles' }]}
         titre="Migration entre socles"
-        sousTitre="Nous exploitons encore des hyperviseurs propriétaires, et nous le disons. Voici le calendrier de sortie, son avancement réel, et ce qui reste à faire. Cette page a son équivalent public : nous ne communiquons pas un chiffre différent à l’extérieur."
+        sousTitre={
+          api
+            ? 'Le calendrier de sortie des socles propriétaires, son avancement réel et ce qui reste à faire. Cette page a son équivalent public : nous ne communiquons pas un chiffre différent à l’extérieur.'
+            : 'Nous exploitons encore des hyperviseurs propriétaires, et nous le disons. Voici le calendrier de sortie, son avancement réel, et ce qui reste à faire. Cette page a son équivalent public : nous ne communiquons pas un chiffre différent à l’extérieur.'
+        }
         actions={
           <>
             <BoutonFormulaire
@@ -289,30 +308,42 @@ export default function Migration() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {enSortie.length} socles en sortie
+              {enSortie.length} socle{enSortie.length > 1 ? 's' : ''} en sortie
             </Badge>
             <Badge tone="neutral" size="sm">
               {migrees} / {total} machines migrées
             </Badge>
-            <Badge tone="info" size="sm">
-              Fin de trajectoire : juin 2027
-            </Badge>
+            {!api && (
+              <Badge tone="info" size="sm">
+                Fin de trajectoire : juin 2027
+              </Badge>
+            )}
           </>
         }
       />
 
       <Callout ton="violet" titre="Trajectoire publiée, trimestre par trimestre">
-        50 % de la capacité est déjà sur des socles libres, le reste sort d’ici juin 2027, et
-        l’avancement est publié côté vitrine. Un client sous contrainte réglementaire stricte peut
-        demander dès aujourd’hui un placement exclusivement souverain.
+        {api ? (
+          enSortie.length === 0 ? (
+            <>Aucun socle propriétaire n’est en sortie : toute la capacité installée est sur des socles libres.</>
+          ) : (
+            <>{partLibre} % de la capacité est déjà sur des socles libres ; {enSortie.length} socle{enSortie.length > 1 ? 's restent' : ' reste'} à migrer.</>
+          )
+        ) : (
+          <>
+            50 % de la capacité est déjà sur des socles libres, le reste sort d’ici juin 2027, et
+            l’avancement est publié côté vitrine. Un client sous contrainte réglementaire stricte
+            peut demander dès aujourd’hui un placement exclusivement souverain.
+          </>
+        )}
       </Callout>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatTile
           libelle="Capacité déjà libre"
-          valeur={pct(50)}
+          valeur={pct(partLibre)}
           ton="ok"
-          detail="OpenStack, Proxmox, CloudStack"
+          detail={api ? 'Socles non marqués en sortie' : 'OpenStack, Proxmox, CloudStack'}
         />
         <StatTile
           libelle="Machines migrées"
@@ -324,18 +355,22 @@ export default function Migration() {
           libelle="Vagues terminées"
           valeur={`${vagues.items.filter((v) => v.statut === 'terminee').length}/${vagues.items.length}`}
         />
-        <StatTile
-          libelle="Interruptions constatées"
-          valeur="0"
-          ton="ok"
-          detail="Sur 62 machines migrées à ce jour"
-        />
-        <StatTile
-          libelle="Licences économisées"
-          valeur={money(28_800_000)}
-          ton="ok"
-          detail="Par an, à la fin de la trajectoire"
-        />
+        {!api && (
+          <>
+            <StatTile
+              libelle="Interruptions constatées"
+              valeur="0"
+              ton="ok"
+              detail="Sur 62 machines migrées à ce jour"
+            />
+            <StatTile
+              libelle="Licences économisées"
+              valeur={money(28_800_000)}
+              ton="ok"
+              detail="Par an, à la fin de la trajectoire"
+            />
+          </>
+        )}
       </div>
 
       <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
@@ -348,7 +383,7 @@ export default function Migration() {
               sousTitre="Part de la capacité installée, par nature de socle. Ces chiffres sont ceux publiés sur la page publique."
             />
             <div className="space-y-4">
-              {TRAJECTOIRE_SORTIE.map((t) => (
+              {trajectoire.map((t) => (
                 <div key={t.backend}>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="min-w-0">
@@ -443,6 +478,11 @@ export default function Migration() {
               titre="Calendrier"
               sousTitre="Les dates sont fermes pour les vagues planifiées, indicatives pour celles à planifier."
             />
+            {vagues.items.length === 0 && (
+              <p className="rounded-[6px] border border-dashed border-g-300 px-3 py-4 text-center text-[12px] text-g-500">
+                Aucune vague planifiée : « Nouvelle campagne » en ajoute une.
+              </p>
+            )}
             <Timeline
               evenements={vagues.items.map((v) => ({
                 id: v.id,
@@ -709,7 +749,7 @@ export default function Migration() {
                   </tr>
                 </thead>
                 <tbody>
-                  {VMS.slice(0, 12).map((v, i) => {
+                  {(api ? [] : VMS.slice(0, 12)).map((v, i) => {
                     const chaud = i % 3 !== 2
                     const vague = VAGUES[Math.min(VAGUES.length - 1, 2 + (i % 3))]
                     return (
@@ -745,6 +785,13 @@ export default function Migration() {
                       </tr>
                     )
                   })}
+                  {api && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-6 text-center text-[12px] text-g-500">
+                        Aucune machine à migrer : aucune campagne n’est planifiée.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -780,12 +827,14 @@ export default function Migration() {
                 </div>
               ))}
             </div>
+            {!api && (
             <Callout ton="info" className="mt-4" titre="Nous préférons annoncer 20 minutes et en prendre 6">
               L’estimation d’interruption communiquée au client est volontairement pessimiste. Sur les
               62 machines déjà migrées, la durée réelle a toujours été inférieure à l’estimation. Un
               client qui a réservé une fenêtre de 20 minutes et qui récupère son service en 6 est
               satisfait ; l’inverse produit un incident.
             </Callout>
+            )}
           </Card>
         </div>
       )}
@@ -878,6 +927,7 @@ export default function Migration() {
               </div>
             </Card>
 
+            {!api && (
             <Card>
               <CardHeader
                 titre="Bilan des migrations déjà faites"
@@ -900,6 +950,7 @@ export default function Migration() {
                 semaines plus tard après mise à jour du pilote.
               </Callout>
             </Card>
+            )}
           </div>
         </div>
       )}

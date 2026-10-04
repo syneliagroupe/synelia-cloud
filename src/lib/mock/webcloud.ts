@@ -176,6 +176,12 @@ export const MOTEUR_WEB_LABEL: Record<MoteurWeb, string> = {
   redis: 'Redis',
 }
 
+/** « MariaDB 11 » : l'API renvoie parfois la version déjà préfixée du moteur. */
+export const moteurWebAvecVersion = (moteur: MoteurWeb, version: string) =>
+  version.toLowerCase().startsWith(MOTEUR_WEB_LABEL[moteur].toLowerCase())
+    ? version
+    : `${MOTEUR_WEB_LABEL[moteur]} ${version}`
+
 export const MOTEUR_WEB_TEINTE: Record<MoteurWeb, string> = {
   mariadb: '#C0765A',
   mysql: '#00758F',

@@ -5,19 +5,19 @@ import { Download, File, Folder, KeyRound, Lock, Plus, RotateCw, Trash2 } from '
 import { cn, seededSeries } from '@/lib/utils'
 import { MAINTENANT, dateCourte, dateHeure, goHumain, money, num } from '@/lib/format'
 import { BUCKETS, CLES_S3, LOGS_EXECUTION } from '@/lib/mock'
-import type { Bucket } from '@/lib/types'
+import { SITE_COURT, SITES, type Bucket } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Input, MonoTextarea, Radio, Select, Slider, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
-import { EmptyState } from '@/components/composition/states'
+import { EmptyState, SkeletonCards } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { LogPeek } from '@/components/business/observabilite'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource, modifierRessource, supprimerRessource } from '@/lib/api/client'
+import { creerRessource, estActif, modifierRessource, supprimerRessource } from '@/lib/api/client'
 import { CHAMPS_CLE, type CleS3 } from '../cles'
 
 interface Entree {
@@ -84,8 +84,8 @@ export function VueBucket({ id }: { id: string }) {
   const executer = useOperation()
   const seaux = useCollection<Bucket>('buckets', BUCKETS)
   const cles = useCollection<CleS3>('cles-s3', CLES_S3)
-  const entrees = useCollection<Entree>(`objets-${id}`, ARBORESCENCE)
-  const regles = useCollection<RegleCycle>(`cycle-${id}`, REGLES_CYCLE)
+  const entrees = useCollection<Entree>(`objets-${id}`, estActif() ? [] : ARBORESCENCE)
+  const regles = useCollection<RegleCycle>(`cycle-${id}`, estActif() ? [] : REGLES_CYCLE)
   const [onglet, setOnglet] = useState('objets')
   /** Identifiants renvoyés une seule fois à la création d’une clé S3. */
   const [secretS3, setSecretS3] = useState<{
@@ -95,6 +95,9 @@ export function VueBucket({ id }: { id: string }) {
   } | null>(null)
 
   const bucket = seaux.items.find((b) => b.id === id)
+  const api = estActif()
+
+  if (!bucket && seaux.chargement) return <SkeletonCards nombre={2} />
 
   if (!bucket) {
     return (
@@ -151,21 +154,22 @@ export function VueBucket({ id }: { id: string }) {
         <StatTile
           libelle="Volume stocké"
           valeur={goHumain(bucket.tailleGo)}
-          serie={seededSeries(`${id}-vol`, 24, bucket.tailleGo * 0.94, bucket.tailleGo)}
+          serie={api ? undefined : seededSeries(`${id}-vol`, 24, bucket.tailleGo * 0.94, bucket.tailleGo)}
         />
         <StatTile libelle="Objets" valeur={num(bucket.objets)} />
         <StatTile
           libelle="Coût mensuel"
-          valeur={money(Math.round(bucket.tailleGo * prixGo)).replace(' FCFA', '')}
-          unite="FCFA"
+          valeur={money(Math.round(bucket.tailleGo * prixGo))}
           detail={`${money(Math.round(prixGo * 1000))} par To`}
         />
-        <StatTile
-          libelle="Trafic sortant du mois"
-          valeur={goHumain(Math.round(bucket.tailleGo * 0.12))}
-          detail={`Quota inclus : ${goHumain(bucket.classe === 'chaud' ? bucket.tailleGo : bucket.tailleGo * 0.2)}`}
-          ton="ok"
-        />
+        {!api && (
+          <StatTile
+            libelle="Trafic sortant du mois"
+            valeur={goHumain(Math.round(bucket.tailleGo * 0.12))}
+            detail={`Quota inclus : ${goHumain(bucket.classe === 'chaud' ? bucket.tailleGo : bucket.tailleGo * 0.2)}`}
+            ton="ok"
+          />
+        )}
       </div>
 
       <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
@@ -190,6 +194,7 @@ export function VueBucket({ id }: { id: string }) {
                   ]}
                   valeursDepart={{ taille: 4 }}
                   libelleValider="Téléverser"
+                  sansApi="Indisponible : le portail ne téléverse pas encore d’objet. Utilisez aws-cli ou rclone avec une clé d’accès."
                   operation={(v) => ({
                     titre: `${v.cle} téléversé`,
                     effet: () => {
@@ -213,6 +218,12 @@ export function VueBucket({ id }: { id: string }) {
               <span className="text-p-700">{bucket.nom}</span>
               <span>/</span>
             </div>
+            {api ? (
+              <EmptyState
+                titre="Liste des objets indisponible"
+                phrase="L’API n’expose pas encore le contenu d’un bucket. Utilisez aws-cli ou rclone avec une clé d’accès (onglet Clés d’accès) pour parcourir les objets."
+              />
+            ) : (
             <div className="overflow-x-auto rounded-[6px] border border-g-300">
               <table className="w-full min-w-max border-collapse">
                 <thead>
@@ -305,6 +316,7 @@ export function VueBucket({ id }: { id: string }) {
                 </tbody>
               </table>
             </div>
+            )}
             {bucket.objectLock?.actif && (
               <Callout ton="info" className="mt-3.5" titre="Suppression désactivée">
                 Ce bucket est protégé par un verrouillage d’objet de {bucket.objectLock.retentionJours}{' '}
@@ -324,25 +336,35 @@ export function VueBucket({ id }: { id: string }) {
             <div className="space-y-3">
               <Radio
                 name="politique"
+                disabled={api}
                 defaultChecked={bucket.policy === 'prive'}
                 label="Privé"
                 description="Accès uniquement par clé d’accès signée. Aucune lecture anonyme. C’est le réglage à conserver pour tout bucket de sauvegarde ou d’export."
               />
               <Radio
                 name="politique"
+                disabled={api}
                 defaultChecked={bucket.policy === 'lecture_publique'}
                 label="Lecture publique"
                 description="Tout objet est lisible sans authentification par son URL. À réserver aux médias destinés à être servis sur un site web."
               />
               <Radio
                 name="politique"
+                disabled={api}
                 defaultChecked={bucket.policy === 'json'}
                 label="Politique JSON personnalisée"
                 description="Contrôle fin par préfixe, par action et par principal."
               />
             </div>
 
-            {bucket.policy === 'json' && (
+            {api && (
+              <Callout ton="info" className="mt-4" titre="Lecture seule">
+                Le portail affiche la politique actuelle du bucket ; l’API ne permet pas encore de la
+                modifier ni d’en lire le contenu JSON.
+              </Callout>
+            )}
+
+            {bucket.policy === 'json' && !api && (
               <div className="mt-4">
                 <MicroLabel className="mb-2">Politique appliquée</MicroLabel>
                 <MonoTextarea
@@ -420,7 +442,7 @@ export function VueBucket({ id }: { id: string }) {
               label="Conserver chaque version d’un objet"
               description="Une écriture sur une clé existante crée une nouvelle version au lieu d’écraser l’ancienne. Une suppression pose un marqueur sans détruire les versions précédentes."
             />
-            {bucket.versioning ? (
+            {bucket.versioning && api ? null : bucket.versioning ? (
               <>
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <StatTile
@@ -488,6 +510,7 @@ export function VueBucket({ id }: { id: string }) {
                   ]}
                   valeursDepart={{ prefixe: '*', apres: 30, action: 'Passer en classe froide' }}
                   libelleValider="Ajouter la règle"
+                  sansApi="Indisponible : le cycle de vie d’un bucket n’est pas encore exposé par l’API."
                   operation={(v) => ({
                     titre: `Règle « ${v.nom} » ajoutée`,
                     detail: `${v.action} · ${v.apres} jours`,
@@ -503,6 +526,12 @@ export function VueBucket({ id }: { id: string }) {
                 />
               }
             />
+            {api && (
+              <EmptyState
+                titre="Cycle de vie non exposé"
+                phrase="L’API ne gère pas encore les règles de cycle de vie d’un bucket : aucune règle n’est appliquée depuis le portail."
+              />
+            )}
             <div className="space-y-3">
               {regles.items
                 .map((regle) => ({
@@ -643,7 +672,7 @@ export function VueBucket({ id }: { id: string }) {
                     unite="jours"
                   />
                   <Field label="Mode de rétention">
-                    <Select defaultValue="conformite">
+                    <Select defaultValue="conformite" disabled>
                       <option value="gouvernance">
                         Gouvernance — un rôle privilégié peut lever la rétention
                       </option>
@@ -658,22 +687,26 @@ export function VueBucket({ id }: { id: string }) {
 
             {bucket.objectLock?.actif && (
               <div className="mt-4 grid grid-cols-1 gap-3 border-t border-g-100 pt-4 sm:grid-cols-3">
-                <StatTile
-                  libelle="Objets sous rétention"
-                  valeur={num(Math.round(bucket.objets * 0.92))}
-                  ton="ok"
-                />
+                {!api && (
+                  <StatTile
+                    libelle="Objets sous rétention"
+                    valeur={num(Math.round(bucket.objets * 0.92))}
+                    ton="ok"
+                  />
+                )}
                 <StatTile
                   libelle="Rétention en cours"
                   valeur={bucket.objectLock.retentionJours}
                   unite="jours"
                 />
-                <StatTile
-                  libelle="Mode"
-                  valeur="Conformité"
-                  detail="Non contournable"
-                  ton="ok"
-                />
+                {!api && (
+                  <StatTile
+                    libelle="Mode"
+                    valeur="Conformité"
+                    detail="Non contournable"
+                    ton="ok"
+                  />
+                )}
               </div>
             )}
           </Card>
@@ -732,8 +765,13 @@ export function VueBucket({ id }: { id: string }) {
                     },
               )
             }
-            label={`Répliquer vers ${bucket.region === 'ABJ' ? 'Grand-Bassam' : 'Abidjan'}`}
-            description="Réplication asynchrone de chaque nouvel objet vers le second site. Le trafic inter-site n’est pas facturé ; seul le stockage de la copie l’est."
+            label={`Répliquer vers ${SITE_COURT[bucket.region === 'ABJ' ? 'GBM' : 'ABJ']}`}
+            disabled={SITES.length < 2 && !bucket.replication}
+            description={
+              SITES.length < 2 && !bucket.replication
+                ? 'Indisponible : la plateforme n’a qu’un seul site (Abidjan), il n’y a pas de second site vers lequel répliquer.'
+                : 'Réplication asynchrone de chaque nouvel objet vers le second site. Le trafic inter-site n’est pas facturé ; seul le stockage de la copie l’est.'
+            }
           />
           {bucket.replication ? (
             <>
@@ -744,9 +782,13 @@ export function VueBucket({ id }: { id: string }) {
                   { cle: 'Bucket cible', valeur: <span className="font-mono">{bucket.nom.replace(bucket.region.toLowerCase(), bucket.replication.cible.toLowerCase())}</span> },
                   { cle: 'Région cible', valeur: bucket.replication.cible },
                   { cle: 'Mode', valeur: 'Asynchrone, à l’écriture' },
-                  { cle: 'Retard moyen', valeur: '18 secondes' },
-                  { cle: 'Objets répliqués', valeur: num(Math.round(bucket.objets * 0.998)) },
-                  { cle: 'En attente', valeur: num(Math.round(bucket.objets * 0.002)) },
+                  ...(api
+                    ? []
+                    : [
+                        { cle: 'Retard moyen', valeur: '18 secondes' },
+                        { cle: 'Objets répliqués', valeur: num(Math.round(bucket.objets * 0.998)) },
+                        { cle: 'En attente', valeur: num(Math.round(bucket.objets * 0.002)) },
+                      ]),
                 ]}
               />
               <Callout ton="ok" className="mt-4" titre="Vous satisfaites la règle « une copie hors site »">
@@ -955,7 +997,12 @@ aws --endpoint-url https://s3.${bucket.region.toLowerCase()}.synelia.cloud \\
                 />
               }
             />
-            {bucket.accessLogs ? (
+            {bucket.accessLogs && api ? (
+              <Callout ton="info" titre="Journaux activés">
+                Les requêtes sont journalisées, mais l’API n’expose pas encore leur consultation
+                depuis le portail.
+              </Callout>
+            ) : bucket.accessLogs ? (
               <LogPeek lignes={LOGS_EXECUTION} max={20} titre="Requêtes récentes sur ce bucket" />
             ) : (
               <Callout ton="warn" titre="Journaux d’accès désactivés">

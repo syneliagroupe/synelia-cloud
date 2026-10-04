@@ -3,6 +3,90 @@
  * Tarifs indicatifs, TVA 18 %, montants en FCFA.
  */
 
+import { PRIX } from '@/lib/tarifs'
+
+// ─── Mode API : une seule implantation ────────────────────────────────
+
+/**
+ * La maquette raconte deux sites (Synertech Vallon, VITIB Grand-Bassam). En
+ * mode API la plateforme n'en exploite qu'un, Abidjan : `unSite()` réécrit
+ * ces phrases au chargement du module (la variable est figée à la
+ * construction) et laisse la maquette intacte. Une règle à `null` retire
+ * l'entrée de liste (ligne de tableau, puce) qui la contient.
+ */
+const REECRITURES: Array<[string, string | null]> = [
+  ['Sur deux sites nommés, en Côte d’Ivoire : Synertech Vallon à Cocody (Abidjan) et le parc VITIB à Grand-Bassam.', 'Sur un site nommé, en Côte d’Ivoire : le datacenter d’Abidjan.'],
+  ['Sur nos deux sites en Côte d’Ivoire : Synertech Vallon à Cocody (Abidjan) et le parc technologique VITIB à Grand-Bassam. Vous choisissez le site à la création de chaque Espace Cloud, et l’emplacement physique', 'Sur notre site d’Abidjan, en Côte d’Ivoire. L’emplacement physique'],
+  ['Abidjan et Grand-Bassam. Nous fournissons', 'Abidjan. Nous fournissons'],
+  ['dans un autre Espace Cloud, sur l’autre site, ou en téléchargement', 'dans un autre Espace Cloud ou en téléchargement'],
+  ['Même emplacement, autre espace, autre site, téléchargement local', 'Même emplacement, autre espace, téléchargement local'],
+  ['Bascule inter-site testée, RPO et RTO constatés.', 'Plan de reprise exercé, RPO et RTO mesurés à chaque exercice.'],
+  ['Bascule inter-site en réseau isolé', 'Bascule de test en réseau isolé'],
+  ['réplication vers le second site', 'sauvegarde immuable'],
+  ['Bascule Abidjan → Grand-Bassam', 'Redémarrage ordonné sur place'],
+  ['réplique hors site sur stockage objet à Grand-Bassam, et copie', 'réplique hors site sur stockage objet, et copie'],
+  ['Bucket S3 froid, site Grand-Bassam, verrouillage', 'Bucket S3 froid hors site, verrouillage'],
+  ['réplication inter-site et verrouillage', 'réplication hors site et verrouillage'],
+  ['Vers l’autre site, asynchrone', 'Au sein du site, asynchrone'],
+  ['Réplication vers Grand-Bassam', 'Réplication au sein du site'],
+  ['40 Gbit/s mutualisés à Abidjan, 20 Gbit/s à Grand-Bassam', '40 Gbit/s mutualisés à Abidjan'],
+  ['Abidjan et Grand-Bassam, choisis à la création', 'Abidjan'],
+  ['Optionnelle, incluse dans les offres PRA', 'Sur devis, avec les offres PRA'],
+  ['Abidjan (Synertech Vallon) · Grand-Bassam (VITIB)', 'Abidjan'],
+  ['Sans interruption, du Flex à l’Enterprise', 'Sans interruption'],
+  ['Aucun sur les offres Pro, Souverain et Enterprise', null],
+  ['vers le second site', 'au sein du site'],
+  ['production, préproduction et site de repli', 'production, préproduction et recette'],
+  ['Latence inter-site', null],
+  ['SLA 99,99 % avec crédits majorés', 'SLA sur mesure, crédits de service fixés au cadrage'],
+  ['réplication inter-site, exercices trimestriels', 'plan de reprise sur place, exercices trimestriels'],
+  ['Serveurs de noms Synelia sur deux sites', 'Serveurs de noms Synelia'],
+  ['servies depuis nos deux sites', 'servies depuis nos serveurs de noms'],
+  ['Quatre, répartis sur Abidjan et Grand-Bassam', 'Hébergés à Abidjan'],
+  ['Choisir entre Abidjan et Grand-Bassam', 'Le site d’hébergement : Abidjan'],
+  ['Réplication inter-site', 'Réplication hors site'],
+  ['PRA inter-site', 'PRA'],
+  ['réplication inter-site', 'réplication au sein du site'],
+  ['Les services Synelia Cloud sont hébergés dans les datacenters de Synertech Vallon (Cocody, Abidjan) et du parc VITIB (Grand-Bassam), tous deux situés en Côte d’Ivoire.', 'Les services Synelia Cloud sont hébergés dans le datacenter d’Abidjan, en Côte d’Ivoire.'],
+  ['exclusivement sur les sites d’Abidjan et de Grand-Bassam, en Côte d’Ivoire', 'exclusivement sur le site d’Abidjan, en Côte d’Ivoire'],
+  ['Cette instance est une maquette de démonstration. Les organisations, utilisateurs, ressources, factures et incidents présentés sont entièrement fictifs.', 'Cette instance est un environnement d’essai : les mentions d’immatriculation et les coordonnées sont des données d’exemple, sans valeur juridique.'],
+  ['Pools hétérogènes : standard, mémoire, GPU, préemptible, avec autoscaling', 'Pools hétérogènes : standard, mémoire, préemptible, avec autoscaling'],
+  ['liaison dédiée vers Abidjan (4–6 ms)', null],
+  ['GPU / vGPU', null],
+  ['vGPU 8 Go', null],
+  ['Synertech Vallon', 'Datacenter Abidjan'],
+]
+
+const SUPPRIME = Symbol('supprime')
+
+function reecrire(v: unknown): unknown {
+  if (typeof v === 'string') {
+    let t = v
+    for (const [a, b] of REECRITURES) {
+      if (!t.includes(a)) continue
+      if (b === null) return SUPPRIME
+      t = t.split(a).join(b)
+    }
+    return t
+  }
+  if (Array.isArray(v)) return v.map(reecrire).filter((x) => x !== SUPPRIME)
+  if (v && typeof v === 'object') {
+    const o: Record<string, unknown> = {}
+    for (const [k, x] of Object.entries(v)) {
+      const r = reecrire(x)
+      if (r === SUPPRIME) return SUPPRIME
+      o[k] = r
+    }
+    return o
+  }
+  return v
+}
+
+/** Réécriture « un seul site » — identité en mode maquette. */
+function unSite<T>(v: T): T {
+  return process.env.NEXT_PUBLIC_API_URL ? (reecrire(v) as T) : v
+}
+
 // ─── Mégamenu Produits — quatre colonnes (§2.1) ───────────────────────
 
 export interface EntreeMegamenu {
@@ -66,11 +150,17 @@ export const MEGAMENU: Array<{ colonne: string; entrees: EntreeMegamenu[] }> = [
 
 // ─── Indicateurs du héros (§2.2) ──────────────────────────────────────
 
-export const INDICATEURS_HERO = [
-  { valeur: '99,98 %', libelle: 'disponibilité constatée sur 30 jours' },
-  { valeur: '< 30 min', libelle: 'délai de première réponse en critique' },
-  { valeur: '2 sites', libelle: 'Abidjan et Grand-Bassam' },
-]
+export const INDICATEURS_HERO = process.env.NEXT_PUBLIC_API_URL
+  ? [
+      { valeur: '99,9 %', libelle: 'disponibilité visée (SLA)' },
+      { valeur: '< 30 min', libelle: 'délai de première réponse en critique' },
+      { valeur: '1 site', libelle: 'Abidjan' },
+    ]
+  : [
+      { valeur: '99,98 %', libelle: 'disponibilité constatée sur 30 jours' },
+      { valeur: '< 30 min', libelle: 'délai de première réponse en critique' },
+      { valeur: '2 sites', libelle: 'Abidjan et Grand-Bassam' },
+    ]
 
 export const BANDEAU_CONFIANCE = [
   { valeur: '40+', libelle: 'organisations clientes' },
@@ -94,7 +184,7 @@ export const PORTES_ENTREE = [
     accroche: 'Drive, messagerie, visio, GED, ERP. Vous utilisez, nous provisionnons, sauvegardons et supervisons.',
     items: ['Drive Pro', 'Email Pro', 'Visio & Chat', 'GED', 'ERP / CRM'],
     cta: { libelle: 'Explorer le marketplace', href: '/marketplace' },
-    prix: 'À partir de 700 FCFA/siège/mois',
+    prix: 'À partir de 1 100 FCFA/siège/mois',
   },
 ]
 
@@ -111,20 +201,20 @@ export const PORTES_ENTREE = [
  * `icone` est un pictogramme en pâte à modeler, de la même famille que les
  * visuels de la vitrine.
  */
-export const CARTES_PRODUIT = [
+export const CARTES_PRODUIT = unSite([
   { nom: 'Espace Cloud', slug: 'espace-cloud', icone: 'nuage', phrase: 'Votre enveloppe de capacité, isolée et dimensionnable.', prix: 25000, unite: '/mois', famille: 'Calcul' },
   { nom: 'Machines virtuelles', slug: 'machines-virtuelles', icone: 'serveurs', phrase: 'Linux ou Windows, du 2 vCPU au 64 vCPU.', prix: 4200, unite: '/mois', famille: 'Calcul' },
   { nom: 'Kubernetes managé', slug: 'kubernetes', icone: 'kubernetes', phrase: 'Control plane opéré, pools autoscalés, modules prêts.', prix: 45000, unite: '/mois', famille: 'Calcul' },
   { nom: 'Stockage objet S3', slug: 'stockage-objet', icone: 'stockage-objet', phrase: 'Compatible S3, versioning, verrouillage WORM.', prix: 1500, unite: '/To/mois', famille: 'Stockage' },
   { nom: 'Cloud Backup', slug: 'cloud-backup', icone: 'sauvegarde', phrase: 'Sauvegarde immuable, restauration au fichier près.', prix: 2800, unite: '/To/mois', famille: 'Protection' },
   { nom: 'PRA / DRaaS', slug: 'pra', icone: 'bouclier', phrase: 'Bascule inter-site testée, RPO et RTO constatés.', prix: 96000, unite: '/mois', famille: 'Protection' },
-  { nom: 'Drive Pro', slug: 'drive-pro', icone: 'drive-pro', href: '/marketplace/drive-pro', phrase: 'Fichiers partagés et documents collaboratifs.', prix: 2200, unite: '/siège/mois', famille: 'Applications' },
+  { nom: 'Drive Pro', slug: 'drive-pro', icone: 'drive-pro', href: '/marketplace/drive-pro', phrase: 'Fichiers partagés et documents collaboratifs.', prix: 3400, unite: '/siège/mois', famille: 'Applications' },
   { nom: 'WordPress managé', slug: 'wordpress', icone: 'wordpress', phrase: 'Votre site opéré, mis à jour et protégé.', prix: 14000, unite: '/mois', famille: 'Web' },
-]
+])
 
 // ─── Bloc PRA (§2.2 §5) ───────────────────────────────────────────────
 
-export const BLOC_PRA = {
+export const BLOC_PRA = unSite({
   titre: 'Votre plan de reprise, testé et prouvé.',
   texte:
     'Un plan de reprise qui n’a jamais été exercé n’est pas un plan, c’est une intention. Nous exerçons le vôtre trimestriellement, en réseau isolé, et nous vous remettons le rapport avec le temps de reprise réellement constaté.',
@@ -134,11 +224,11 @@ export const BLOC_PRA = {
     { valeur: '12/07/2026', libelle: 'dernier exercice réussi', cible: 'prochain : 15/10/2026' },
   ],
   cta: 'Demander une évaluation PRA',
-}
+})
 
 // ─── Bloc souveraineté (§2.2 §6 · §2.7) ───────────────────────────────
 
-export const BLOC_SOUVERAINETE = [
+export const BLOC_SOUVERAINETE = unSite([
   {
     titre: 'Où sont vos données',
     illustration: '/illustrations/souverainete-lieu.svg',
@@ -150,7 +240,7 @@ export const BLOC_SOUVERAINETE = [
     titre: 'Qui peut y accéder',
     illustration: '/illustrations/souverainete-acces.svg',
     texte:
-      'Un modèle de droits explicite — onze rôles, une matrice publiée — et un journal d’audit qui enregistre aussi les refus. Les accès de nos ingénieurs sont nominatifs, élevés temporairement et justifiés.',
+      'Un modèle de droits explicite — dix rôles, une matrice publiée — et un journal d’audit qui enregistre aussi les refus. Les accès de nos ingénieurs sont nominatifs, élevés temporairement et justifiés.',
     lien: { libelle: 'Voir la matrice des rôles', href: '/souverainete#acces' },
   },
   {
@@ -160,10 +250,10 @@ export const BLOC_SOUVERAINETE = [
       'Chaque service documente son format d’export et son délai. Nous testons la réversibilité, comme nous testons les restaurations. Partir doit être possible pour que rester soit un choix.',
     lien: { libelle: 'Lire la procédure', href: '/souverainete#reversibilite' },
   },
-]
+])
 
 /** Les trois niveaux de souveraineté et la position de Synelia (§2.7). */
-export const NIVEAUX_SOUVERAINETE = [
+export const NIVEAUX_SOUVERAINETE = unSite([
   {
     niveau: 'Souveraineté des données',
     question: 'Où vos données sont-elles physiquement stockées ?',
@@ -188,7 +278,7 @@ export const NIVEAUX_SOUVERAINETE = [
       'Nos offres Cloud Souverain reposent exclusivement sur OpenStack, Proxmox VE et Apache CloudStack. Nous exploitons encore de la capacité VMware vSphere et Microsoft Hyper-V, héritée de reprises de parcs clients : ces backends sont marqués « en sortie » avec une date cible de migration (juin 2027 pour vSphere, mars 2027 pour Hyper-V). Nous préférons l’afficher que le taire.',
     statut: 'transition' as const,
   },
-]
+])
 
 /** Trajectoire de sortie des backends propriétaires — arbitrage §12.1. */
 export const TRAJECTOIRE_SORTIE = [
@@ -233,7 +323,7 @@ export const ETUDES_CAS = [
  * deux. Les durées sont des ordres de grandeur constatés, pas un engagement
  * contractuel : c'est dit dans la note de la section.
  */
-export const PARCOURS_DEMARRAGE = [
+export const PARCOURS_DEMARRAGE = unSite([
   {
     jalon: 'Jour 0',
     titre: 'Atelier de cadrage',
@@ -262,7 +352,7 @@ export const PARCOURS_DEMARRAGE = [
       'Bascule inter-site en réseau isolé, sans toucher à la production. Vous recevez le temps de reprise réellement constaté, pas la cible contractuelle.',
     livrable: 'Rapport opposable à un auditeur',
   },
-]
+])
 
 /** Ce que le parcours n'inclut pas — dit avant qu'on le demande. */
 export const PARCOURS_LIMITES =
@@ -281,7 +371,7 @@ export const MOYENS_PAIEMENT = [
 
 // ─── FAQ d'accueil (§2.2 §9) ──────────────────────────────────────────
 
-export const FAQ_ACCUEIL = [
+export const FAQ_ACCUEIL = unSite([
   {
     question: 'Où mes données sont-elles hébergées ?',
     reponse:
@@ -312,7 +402,7 @@ export const FAQ_ACCUEIL = [
     reponse:
       'Oui. L’assistant de restauration descend jusqu’au fichier, au dossier, à la boîte aux lettres ou à la base, et permet de restaurer au même endroit, dans un autre Espace Cloud, sur l’autre site, ou en téléchargement local.',
   },
-]
+])
 
 // ─── Tarifs (§2.4) ────────────────────────────────────────────────────
 
@@ -324,7 +414,7 @@ export interface FamilleTarif {
   lignes: Array<{ caracteristique: string; valeurs: Array<string | boolean> }>
 }
 
-export const FAMILLES_TARIFS: FamilleTarif[] = [
+export const FAMILLES_TARIFS: FamilleTarif[] = unSite([
   {
     id: 'espace-cloud',
     nom: 'Espace Cloud',
@@ -426,7 +516,7 @@ export const FAMILLES_TARIFS: FamilleTarif[] = [
       { caracteristique: 'Certificat automatique', valeurs: [true, true, true] },
     ],
   },
-]
+])
 
 // ─── Fiches produit (§2.3) ────────────────────────────────────────────
 
@@ -452,7 +542,7 @@ export interface FicheProduit {
   faq: Array<{ question: string; reponse: string }>
 }
 
-export const FICHES_PRODUIT: FicheProduit[] = [
+export const FICHES_PRODUIT: FicheProduit[] = unSite([
   {
     slug: 'espace-cloud',
     icone: 'nuage',
@@ -1186,9 +1276,10 @@ export const FICHES_PRODUIT: FicheProduit[] = [
       'Instantanés à la demande, indépendants du plan de sauvegarde',
     ],
     paliers: [
-      { nom: 'Archive', specs: 'HDD · lecture peu fréquente · 60 Mo/s', prix: 300, unite: '/Go/mois' },
-      { nom: 'Standard', specs: 'SSD · 3 000 IOPS · usage général', prix: 700, unite: '/Go/mois', recommande: true },
-      { nom: 'Performance', specs: 'NVMe · 25 000 IOPS · bases et journaux', prix: 1400, unite: '/Go/mois' },
+      // Même grille que la facturation et le simulateur (SSD 3,2 F/Go, NVMe 5,4 F/Go, archive 0,32 F/Go).
+      { nom: 'Archive', specs: 'HDD · lecture peu fréquente · 60 Mo/s', prix: 320, unite: '/To/mois' },
+      { nom: 'Standard', specs: 'SSD · 6 000 IOPS · usage général', prix: 3200, unite: '/To/mois', recommande: true },
+      { nom: 'Performance', specs: 'NVMe · 12 000 IOPS · bases et journaux', prix: 5400, unite: '/To/mois' },
       { nom: 'Performance dédiée', specs: 'NVMe local, IOPS garanties, latence sous la milliseconde', prix: null, surDevis: true, unite: '' },
     ],
     caracteristiques: [
@@ -1584,11 +1675,11 @@ export const FICHES_PRODUIT: FicheProduit[] = [
       { question: 'Que faire si mes messages partent en indésirable ?', reponse: 'Le portail commence par vérifier que SPF, DKIM et DMARC sont réellement publiés et alignés, ce qui règle la majorité des cas. Ensuite viennent le contenu, le volume et l’ancienneté de l’adresse, points sur lesquels le support niveau 2 intervient.' },
     ],
   },
-]
+])
 
 // ─── Datacenters (§2.7) ───────────────────────────────────────────────
 
-export const DATACENTERS = [
+export const DATACENTERS = unSite([
   {
     code: 'ABJ',
     nom: 'Synertech Vallon',
@@ -1619,7 +1710,7 @@ export const DATACENTERS = [
     puissance: '800 kW installés',
     services: ['Espace Cloud', 'Site de repli PRA', 'Stockage objet froid et immuable', 'Services managés'],
   },
-]
+])
 
 // ─── Ressources & documentation (§2.7) ────────────────────────────────
 
@@ -1634,7 +1725,7 @@ export const RESSOURCES = [
   { type: 'Modèle', titre: 'Trame de cahier des charges cloud pour appel d’offres', duree: 'Document éditable', theme: 'Achat', extrait: 'Les exigences à formuler pour comparer des offres réellement comparables.' },
 ]
 
-export const SECTIONS_DOCS = [
+export const SECTIONS_DOCS = unSite([
   {
     titre: 'Prise en main',
     articles: [
@@ -1678,7 +1769,7 @@ export const SECTIONS_DOCS = [
     articles: [
       'Souscrire un service en six étapes',
       'Rattacher votre propre domaine à un service',
-      'Mapper vos groupes d’annuaire vers les rôles applicatifs',
+      'Choisir le rôle d’un membre invité',
       'Attribuer et retirer des sièges',
       'Générer un export de réversibilité',
     ],
@@ -1689,26 +1780,26 @@ export const SECTIONS_DOCS = [
       'Authentification par clé d’API',
       'Provisionner un Espace Cloud par API',
       'Webhooks d’événements',
-      'Fournisseur Terraform Synelia Cloud',
+      'Suivre un travail asynchrone par son identifiant',
     ],
   },
-]
+])
 
 // ─── Simulateur (§2.6) ────────────────────────────────────────────────
 
 export const TARIFS_UNITAIRES = {
-  vcpu: 1400,
-  ramGo: 480,
+  vcpu: PRIX.vcpuMois,
+  ramGo: PRIX.ramGoMois,
   stockageGoSsd: 3.2,
-  stockageGoNvme: 5.4,
-  ipPublique: 3500,
+  stockageGoNvme: PRIX.stockageGoMois,
+  ipPublique: PRIX.ipPubliqueMois,
   antiDdos: 2000,
-  loadBalancer: 18000,
+  loadBalancer: PRIX.lbMois,
   sauvegardeGo: 4.6,
   objetGoChaud: 1.5,
   objetGoFroid: 0.62,
-  k8sControlPlaneHa: 62000,
-  k8sControlPlaneSingle: 18000,
+  k8sControlPlaneHa: PRIX.k8sControleHaMois,
+  k8sControlPlaneSingle: PRIX.k8sControleMois,
   siegeDrive: 3400,
   siegeMail: 2900,
   siegeVisio: 1600,
@@ -1741,7 +1832,7 @@ export const REFERENCES_COMPARATEUR = [
 
 // ─── Formulaires entreprises (§2.7) ───────────────────────────────────
 
-export const OFFRES_ENTREPRISE = [
+export const OFFRES_ENTREPRISE = unSite([
   {
     titre: 'Datacenter virtuel dédié',
     texte: 'Capacité réservée sur hôtes dédiés, plage réseau étendue, engagement pluriannuel avec révision annuelle.',
@@ -1762,7 +1853,7 @@ export const OFFRES_ENTREPRISE = [
     texte: 'Exploitation déléguée de tout ou partie de votre plateforme, avec astreinte nominative.',
     points: ['NOC 24/7 basé à Abidjan', 'Astreinte nominative', 'Comité d’exploitation mensuel'],
   },
-]
+])
 
 export const SECTEURS = [
   'Banque & finance',
@@ -1806,7 +1897,7 @@ export const PAYS = [
 
 // ─── Pages légales (§2.7) ─────────────────────────────────────────────
 
-export const PAGES_LEGALES = [
+export const PAGES_LEGALES = unSite([
   {
     slug: 'mentions-legales',
     titre: 'Mentions légales',
@@ -1851,4 +1942,4 @@ export const PAGES_LEGALES = [
       { titre: 'Escalade', texte: 'Trois niveaux : ingénieur de permanence, responsable d’exploitation, direction technique. Les coordonnées et les délais de bascule figurent dans l’espace client, onglet Assistance & SLA.' },
     ],
   },
-]
+])

@@ -204,7 +204,7 @@ Dérivé le 2026-09-19 depuis `registre_capacites.py` (`REGISTRE`) + `x-etat` pa
 | `conformite-sauvegarde` | `/sauvegarde/conformite` | `sauvegarde` | `simule` | `backup.plan` | Tableau calculé depuis données réelles de sauvegarde mais amont Backup simule. |
 | `projets` | `/projets` | `projets` | `reel` | `k8s.workload` / `magnum.cluster` | PaaS : `K8sWorkloadReel` réel seulement si `SYNELIA_PAAS_CLUSTER_ID` posé (sinon `K8sSimule`). `DepotsReel` (GitHub) réel si `SYNELIA_GITHUB_TOKEN`. |
 | `deploiements` | `/deploiements` | `deploiements` | `reel` (théâtre) | `argo.application` | Persistance, RBAC et journal d’audit réels ; le pipeline lui-même (`ExecuteurAppDeploy`) est un théâtre d’étapes — build/scan/provision/deploy ne construisent aucune image et n’appellent jamais `K8sWorkloadReel` (contrairement à `projets`, qui l’appelle réellement pour un service). Le canari (`/deploiements/{id}/canari`) stocke un pourcentage sans routeur. `x-etat: reel` mais disclaimer obligatoire. |
-| `domaines-applicatifs` | `/domaines-applicatifs` | `projets` (`router_domaines`) | `reel` | `k8s.workload` | |
+| `domaines-applicatifs` | `/domaines-applicatifs` | `projets` (`router_domaines`) | `reel` | `k8s.workload` | Domaine personnalisé d’un service k8s à image : job `domaine_routage.appliquer` (DNS → LB OCCM + IP flottante → vhost Apache dev01 → Let’s Encrypt). Vérifié en direct 2026-09-30 (`nginx.demo-0619db8a.com`). Les adresses « offertes » `*.apps.synelia.cloud` restent des enregistrements sans route ; le bouton est désactivé quand l’entrée dev01 est configurée. Voir `synelia-cloud-backend/docs/runbooks/lab-openstack.md`. |
 | `factures` | `/facturation/factures` | `facturation` | `persiste` | — | |
 | `souscriptions` | `/facturation/souscriptions` | `facturation` | `persiste` | — | |
 | `moyens-paiement` | `/facturation/moyens-paiement` | `facturation` | `persiste` | — | |
@@ -281,6 +281,60 @@ donnée affichée vient du composant client voisin (`vue.tsx`) via
 `useCollection`/`useEntite`. Une ressource créée uniquement par l'API aura donc
 un titre d'onglet générique (« … introuvable ») mais un contenu de page
 correct — un défaut cosmétique, pas un défaut de données.
+
+## Grille de prix unique (2026-10-01)
+
+Un seul barème (FCFA HT / mois) alimente tout : `facturation/metrologie.py::PRIX` côté
+backend, `src/lib/tarifs.ts::PRIX` côté front (à tenir en miroir).
+
+| Ressource | Prix |
+|---|---|
+| vCPU | 6 500 |
+| Go de RAM | 1 400 |
+| Go de stockage bloc | NVMe 5,4 · SSD 3,2 · HDD 1,1 · archive 0,32 |
+| IP publique / load balancer | 3 500 / 18 000 |
+| Control plane Kubernetes | 18 000 (mono) · 62 000 (HA) |
+
+Une enveloppe de calcul vaut `vcpu·6 500 + ram·1 400 + disque·5,4` (`metrologie.mensuel`) :
+S1 Small ≈ 9 400 (catalogue 9 000), G1 Medium ≈ 18 800 (19 000). Ce qui en découle :
+
+- **Métrologie** (`metrologie.postes`) : VM, volumes, LB, IP, clusters K8s dédiés (control plane +
+  pools), Web Cloud et services PaaS des projets (à l'Espace du projet). Un jour = mensuel ÷
+  nombre de jours du mois ; la projection de fin de mois retombe donc sur le mensuel.
+- **Ventilation** (`/facturation/ventilation`, axes espace/famille/application/site) et
+  **facture** (une ligne par famille Calcul/Stockage/Réseau) lisent les mêmes `postes` : leurs
+  totaux égalent la projection (test `test_ventilation_egale_prevision_mensuelle`).
+- **Coût d'un service de projet** = `mensuel(cpu, ram, disque)` (`projets/router._cout`).
+- **Estimation** (`/facturation/estimation`, `/modeles/{slug}/estimation`) et **simulateur public**
+  (`/public/simulateur`, `/public/tarifs`) : même grille.
+- Front : assistants VM / Kubernetes / LB / projet / service, composeur de serveurs et simulateur
+  de la vitrine lisent `PRIX`. Pas encore branchés : les tableaux de plans de la vitrine
+  (Cloud Flex, etc.) et les prix `prixIndicatif` des modèles applicatifs.
+- Un cluster en cours de création n'est pas facturé ; un cluster en échec reste à supprimer.
+- Les forfaits « Espace Cloud » (Cloud Flex 25 000, Cloud Pro 85 000) sont des enveloppes sur
+  une autre échelle que la grille unitaire : le simulateur affiche le forfait qui couvre le
+  besoin chiffré (« forfait équivalent »), il ne les recalcule pas.
+
+## Démo 2026-10-01 — comportements à connaître
+
+- **Supprimer un Espace Cloud** (`DELETE /espaces/{id}`) répond `409 espace_non_vide` tant qu'il
+  contient des machines, volumes, load balancers, clusters ou projets : plus de ressources
+  orphelines facturées.
+- **Domaine par défaut des environnements et aperçus** : `SYNELIA_DOMAINE_APPS_DEFAUT`
+  (défaut `synelia.app`) ; sur dev01 le poser sur un domaine demo* réellement routé.
+- **Routage** (`/app/applications/routage`) : en mode API, les services/projets du sélecteur et
+  les valeurs DNS (A edge `198.244.179.212`, CNAME `dev01.ovh.smile.ci`) sont réels ; la carte de
+  zone et les tuiles fictives sont masquées. La lecture `GET /projets/services` alimente la
+  collection `services-projet`.
+- **Onboarding** : les jalons sont déduits des collections réelles (espace, machine, projet…),
+  pas d'un compteur local.
+- **Hébergement Web — création** (`POST /web/hebergements` depuis la fiche d'un domaine) : vérifié
+  de bout en bout sur dev01 (job `hebergement.creer` → `done`, hébergement `en_ligne`).
+  Les moteurs de bases d'un VPS sont les cinq du contrat (`postgresql`, `mysql`, `mariadb`,
+  `mongodb`, `redis`) : un contrat réduit à trois faisait échouer la finalisation du job.
+- **Mode maquette** : `useCollection` ne fait aucun appel réseau tant que `estActif()` est faux ;
+  la lecture `/projets/services` de `services-projet` n'existe qu'en mode API. L'audit
+  (`outils/audit.mjs`) est à zéro sur les cinq indicateurs à 1440 et 390 px.
 
 ## Vérification
 

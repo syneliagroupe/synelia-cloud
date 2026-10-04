@@ -185,7 +185,11 @@ export default function CentreDeTaches() {
           ton={echecs.length ? 'err' : 'ok'}
           detail={echecs.length ? 'Rollback automatique effectué' : undefined}
         />
-        <StatTile libelle="Total" valeur={jobs.items.length} />
+        <StatTile
+          libelle="Total"
+          valeur={jobs.items.length}
+          detail={jobs.items.length >= 200 ? 'les 200 plus récentes' : undefined}
+        />
       </div>
 
       {echecs.length > 0 && (
@@ -198,6 +202,7 @@ export default function CentreDeTaches() {
 
       <DataTable
         lignes={jobs.items}
+        chargement={jobs.chargement && jobs.items.length === 0}
         colonnes={colonnes}
         placeholderRecherche="Rechercher une opération…"
         filtres={[

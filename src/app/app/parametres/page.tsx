@@ -5,7 +5,7 @@ import { Building2, Globe, Palette, Terminal, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, money } from '@/lib/format'
 import { ESPACES, ORG_COURANTE } from '@/lib/mock'
-import { ROLE_LABEL, SITE_LABEL, type EspaceCloud, type Organisation, type Role } from '@/lib/types'
+import { ROLE_LABEL, SITE_LABEL, SITES, type EspaceCloud, type Organisation, type Role } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -96,7 +96,12 @@ export default function Parametres() {
     requete<Organisation>(`/organisations/${organisationId}`).then(setOrgDetail, () => {})
   }, [organisationId])
   const orgReelle: Organisation =
-    orgDetail ?? (orgActive ? { ...ORG_COURANTE, id: orgActive.id, nom: orgActive.nom } : ORG_COURANTE)
+    orgDetail ??
+    (orgActive
+      ? { ...ORG_COURANTE, id: orgActive.id, nom: orgActive.nom }
+      : estActif()
+        ? { ...ORG_COURANTE, id: '', nom: '' }
+        : ORG_COURANTE)
   const executer = useOperation()
   const jetons = useCollection<Jeton>('jetons-api', JETONS)
   // Même collection que `/app/espaces` : le nombre d'Espaces Cloud affiché ici
@@ -137,7 +142,7 @@ export default function Parametres() {
       if (p.fuseau === 'Africa/Abidjan' || p.fuseau === 'Africa/Dakar' || p.fuseau === 'Africa/Lagos' || p.fuseau === 'Europe/Paris' || p.fuseau === 'UTC') {
         setFuseau(p.fuseau)
       }
-      if (p.sitePrefere) setSiteDefaut(p.sitePrefere)
+      if (p.sitePrefere && (SITES as string[]).includes(p.sitePrefere)) setSiteDefaut(p.sitePrefere)
       if (p.deviseAffichee) setDevise(p.deviseAffichee)
       if (typeof p.formatCompact === 'boolean') setDensiteCompacte(p.formatCompact)
     }, () => {})
@@ -162,10 +167,10 @@ export default function Parametres() {
               {orgReelle.nom}
             </Badge>
             <Badge tone="neutral" size="sm">
-              Cliente depuis {dateCourte(ORG_COURANTE.createdAt)} (démonstration)
+              Cliente depuis {dateCourte(orgReelle.createdAt)}{estActif() ? '' : ' (démonstration)'}
             </Badge>
-            <Badge tone={ORG_COURANTE.statut === 'active' ? 'ok' : 'warn'} dot size="sm">
-              {ORG_COURANTE.statut === 'active' ? 'Active' : ORG_COURANTE.statut}
+            <Badge tone={orgReelle.statut === 'active' ? 'ok' : 'warn'} dot size="sm">
+              {orgReelle.statut === 'active' ? 'Active' : orgReelle.statut}
             </Badge>
           </>
         }
@@ -178,7 +183,7 @@ export default function Parametres() {
           <Card>
             <CardHeader
               titre="Identité"
-              sousTitre="Ces informations figurent sur vos factures et vos contrats. Un changement de raison sociale exige un justificatif."
+              sousTitre="Ces informations figurent sur vos factures et vos contrats. Un changement de raison sociale exige un justificatif ; pays, domaine et adresse se modifient via le support."
             />
             <div className="space-y-4">
               <Field label="Raison sociale">
@@ -186,7 +191,7 @@ export default function Parametres() {
               </Field>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Pays">
-                  <Select defaultValue={orgReelle.pays}>
+                  <Select defaultValue={orgReelle.pays} disabled>
                     <option value="Côte d’Ivoire">Côte d’Ivoire</option>
                     <option value="Sénégal">Sénégal</option>
                     <option value="Bénin">Bénin</option>
@@ -204,11 +209,16 @@ export default function Parametres() {
                   <Input value={tvaOrg} onChange={(e) => setTvaOrg(e.target.value)} />
                 </Field>
                 <Field label="Domaine principal" hint="utilisé pour la découverte de la fédération d’identité">
-                  <Input defaultValue={orgReelle.domaine ?? 'dba.africa'} />
+                  <Input defaultValue={orgReelle.domaine ?? (estActif() ? '' : 'dba.africa')} disabled />
                 </Field>
               </div>
               <Field label="Adresse de facturation">
-                <Textarea rows={3} defaultValue={'Plateau, Boulevard de la République\nImmeuble Alpha 2000, 8e étage\nAbidjan, Côte d’Ivoire'} />
+                <Textarea
+                  rows={3}
+                  disabled
+                  placeholder="Adresse non renseignée"
+                  defaultValue={estActif() ? '' : 'Plateau, Boulevard de la République\nImmeuble Alpha 2000, 8e étage\nAbidjan, Côte d’Ivoire'}
+                />
               </Field>
             </div>
             {/* `PATCH /organisations/{id}` exige `org.manage` — réservé à l'équipe Synelia
@@ -250,10 +260,10 @@ export default function Parametres() {
                   { cle: 'Contrat', valeur: 'Direct avec Synelia Cloud' },
                   { cle: 'Plan de service', valeur: orgReelle.tenantPlan ?? 'Standard' },
                   { cle: 'Espaces Cloud', valeur: String(espacesCol.items.length) },
-                  { cle: 'Cliente depuis (démonstration)', valeur: dateCourte(ORG_COURANTE.createdAt) },
+                  { cle: estActif() ? 'Cliente depuis' : 'Cliente depuis (démonstration)', valeur: dateCourte(orgReelle.createdAt) },
                   {
                     cle: 'Dépense mensuelle',
-                    valeur: ORG_COURANTE.caMensuel ? money(ORG_COURANTE.caMensuel) : '—',
+                    valeur: !estActif() && ORG_COURANTE.caMensuel ? money(ORG_COURANTE.caMensuel) : '—',
                   },
                 ]}
               />
@@ -342,8 +352,11 @@ export default function Parametres() {
               </Field>
               <Field label="Site physique par défaut" hint="proposé en premier à la création d’une ressource">
                 <Select value={siteDefaut} onChange={(e) => setSiteDefaut(e.target.value)}>
-                  <option value="ABJ">{SITE_LABEL['ABJ']}</option>
-                  <option value="GBM">{SITE_LABEL['GBM']}</option>
+                  {SITES.map((s) => (
+                    <option key={s} value={s}>
+                      {SITE_LABEL[s]}
+                    </option>
+                  ))}
                 </Select>
               </Field>
               <div className="space-y-3">
@@ -621,32 +634,27 @@ export default function Parametres() {
             <Card>
               <CardHeader
                 titre="Utiliser l’interface programmatique"
-                sousTitre="API REST documentée, plus une interface en ligne de commande."
+                sousTitre="API REST documentée. Il n’existe pas, pour l’instant, de ligne de commande ni de fournisseur Terraform."
                 actions={<Terminal size={15} className="text-p-700" />}
               />
               <div className="space-y-3">
-                <CopyField label="Adresse de l’API" value="https://api.synelia.cloud/v1" />
+                <CopyField label="Adresse de l’API" value={process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'https://api.cloud.dev01.ovh.smile.ci/v1'} />
                 <CopyField label="Organisation" value={orgReelle.id} />
               </div>
               <MicroLabel className="mt-4 mb-2">Exemple</MicroLabel>
               <CodeBlock
                 langue="bash"
-                code={`export SYNELIA_TOKEN="syn_…"
+                code={`export SYNELIA_API="…"   # adresse ci-dessus
+export SYNELIA_TOKEN="syn_…"
 
-# Lister les machines d'un espace
-curl -sS https://api.synelia.cloud/v1/espaces/ec-dba-01/vms \\
-  -H "Authorization: Bearer $SYNELIA_TOKEN" | jq '.[] | {nom, statut, site}'
-
-# Créer une machine (l'aperçu de coût est renvoyé avant validation)
-synelia vm create --espace EC-DBA-01 --gabarit c2.medium \\
-  --site ABJ-1 --etiquette centre-de-cout=DSI --dry-run`}
+# Lister les machines de l'organisation
+curl -sS "$SYNELIA_API/vms?parPage=50" \\
+  -H "Authorization: Bearer $SYNELIA_TOKEN" \\
+  -H "X-Organisation-Id: ${orgReelle.id}" | jq '.donnees[] | {nom, statut}'`}
               />
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <ButtonLink size="sm" variant="secondary" href="/app/docs">
                   Documentation de l’API
-                </ButtonLink>
-                <ButtonLink size="sm" variant="ghost" external href="https://registry.terraform.io">
-                  Fournisseur Terraform
                 </ButtonLink>
               </div>
             </Card>

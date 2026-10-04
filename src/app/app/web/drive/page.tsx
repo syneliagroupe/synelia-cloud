@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { ExternalLink, FolderOpen, Plus, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { money, relatif } from '@/lib/format'
+import { goHumain, money, relatif } from '@/lib/format'
 import { DRIVES, drivesDeLOrg, type DriveDomaine } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -46,13 +46,13 @@ export default function ListeDrives() {
         />
         <StatTile
           libelle="Espace occupé"
-          valeur={`${(actifs.reduce((a, d) => a + d.quota.utiliseGo, 0) / 1024).toFixed(2)} To`}
-          detail={`sur ${(actifs.reduce((a, d) => a + d.quota.totalGo, 0) / 1024).toFixed(0)} To`}
+          valeur={goHumain(actifs.reduce((a, d) => a + d.quota.utiliseGo, 0))}
+          detail={`sur ${goHumain(actifs.reduce((a, d) => a + d.quota.totalGo, 0))}`}
         />
         <StatTile
           libelle="Liens de partage actifs"
           valeur={actifs.reduce((a, d) => a + d.partage.liensActifs, 0)}
-          detail="dont certains publics"
+          detail={actifs.some((d) => d.partage.externeAutorise) ? 'partage externe autorisé' : 'partage externe bloqué'}
           ton={actifs.some((d) => d.partage.externeAutorise) ? 'warn' : 'neutral'}
         />
       </div>
@@ -92,7 +92,7 @@ export default function ListeDrives() {
                     utilise={d.quota.utiliseGo}
                     total={d.quota.totalGo}
                     compact
-                    formateur={(v) => `${(v / 1024).toFixed(2)} To`}
+                    formateur={goHumain}
                   />
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-g-100 pt-3">
@@ -100,7 +100,7 @@ export default function ListeDrives() {
                     Partage externe {d.partage.externeAutorise ? 'autorisé' : 'bloqué'}
                   </Badge>
                   <Badge tone="neutral" size="sm">
-                    {d.partage.liensActifs} liens actifs
+                    {d.partage.liensActifs} {d.partage.liensActifs > 1 ? 'liens actifs' : 'lien actif'}
                   </Badge>
                   <Badge tone="neutral" size="sm">
                     Versions {d.versionsFichiers.retentionJours} j

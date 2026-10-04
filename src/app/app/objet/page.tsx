@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { KeyRound, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { MAINTENANT, goHumain, money, num } from '@/lib/format'
-import type { Bucket, Site } from '@/lib/types'
+import { SITE_COURT, SITES, type Bucket, type Site } from '@/lib/types'
 import { BUCKETS, CLES_S3 } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { Button, IconButton } from '@/components/ui/button'
@@ -15,8 +15,9 @@ import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
-import { creerRessource, supprimerRessource } from '@/lib/api/client'
+import { creerRessource, estActif, supprimerRessource } from '@/lib/api/client'
 import { CHAMPS_CLE, type CleS3 } from './cles'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 
 const PRIX_GO = { chaud: 1.5, froid: 0.62 }
 
@@ -171,16 +172,13 @@ export default function StockageObjet() {
             ouvert={creationOuverte}
             onOuvertChange={setCreationOuverte}
             champs={[
-              { id: 'nom', label: 'Nom du bucket', placeholder: 'dba-archives-abj', obligatoire: true },
+              { id: 'nom', label: 'Nom du bucket', placeholder: 'archives-abj', obligatoire: true },
               {
                 id: 'region',
                 label: 'Région',
                 type: 'select',
                 demi: true,
-                options: [
-                  { value: 'ABJ', label: 'Abidjan' },
-                  { value: 'GBM', label: 'Grand-Bassam' },
-                ],
+                options: SITES.map((s) => ({ value: s, label: SITE_COURT[s] })),
               },
               {
                 id: 'classe',
@@ -199,7 +197,7 @@ export default function StockageObjet() {
             libelleValider="Créer le bucket"
             operation={(v) => ({
               titre: `Bucket ${v.nom} créé`,
-              detail: `${v.region === 'ABJ' ? 'Abidjan' : 'Grand-Bassam'} · classe ${v.classe}`,
+              detail: `${SITE_COURT[v.region as Site]} · classe ${v.classe}`,
               effet: () =>
                 seaux.creer({
                   id: seaux.identifiant('bkt'),
@@ -229,22 +227,25 @@ export default function StockageObjet() {
           ton="ok"
           detail="Anti-rançongiciel"
         />
-        <StatTile libelle="Coût mensuel" valeur={money(cout).replace(' FCFA', '')} unite="FCFA" />
+        <StatTile libelle="Coût mensuel" valeur={money(cout)} />
       </div>
 
       <DataTable
         lignes={buckets}
+        chargement={seaux.chargement}
         colonnes={colonnes}
         placeholderRecherche="Rechercher un bucket…"
         filtres={[
-          {
-            id: 'region',
-            libelle: 'Région',
-            options: [
-              { value: 'ABJ', label: 'Abidjan' },
-              { value: 'GBM', label: 'Grand-Bassam' },
-            ],
-          },
+          // Une seule région : un filtre à une option ne filtre rien.
+          ...(SITES.length > 1
+            ? [
+                {
+                  id: 'region',
+                  libelle: 'Région',
+                  options: SITES.map((s) => ({ value: s, label: SITE_COURT[s] })),
+                },
+              ]
+            : []),
           {
             id: 'classe',
             libelle: 'Classe',
@@ -259,9 +260,12 @@ export default function StockageObjet() {
         exportable
         vide={{
           titre: 'Aucun bucket',
-          phrase:
-            'Un bucket de stockage objet accueille sauvegardes, médias, exports et archives, avec versioning et verrouillage WORM.',
+          phrase: phraseVideEspace(
+            espace.code,
+            'Un bucket accueille sauvegardes, médias, exports et archives, avec versioning et verrouillage WORM.',
+          ),
           action: { libelle: 'Créer un bucket', onClick: () => setCreationOuverte(true) },
+          actionSecondaire: actionChangerEspace,
         }}
       />
 
@@ -337,6 +341,12 @@ export default function StockageObjet() {
               />
             }
           />
+          {!cles.chargement && cles.items.length === 0 && (
+            <p className="rounded-[6px] border border-dashed border-g-300 px-3 py-4 text-[13px] text-g-700">
+              Aucune clé d’accès. Sans clé, aucun outil S3 ne peut se connecter à vos buckets :
+              créez-en une avec « Créer une clé ».
+            </p>
+          )}
           <div className="space-y-2">
             {cles.items.map((c) => (
               <div
@@ -435,23 +445,28 @@ aws configure set aws_access_key_id     "SYN…"
 aws configure set aws_secret_access_key "…"
 aws configure set region                "abj"
 
-export S3_ENDPOINT="https://s3.abj.synelia.cloud"
+export S3_ENDPOINT="${estActif() ? '<endpoint affiché à la création de la clé>' : 'https://s3.abj.synelia.cloud'}"
 
 # Lister les buckets
 aws --endpoint-url $S3_ENDPOINT s3 ls
 
 # Synchroniser un dossier
 aws --endpoint-url $S3_ENDPOINT s3 sync ./exports \\
-  s3://dba-exports-reversibilite/2026-08/
+  s3://mon-bucket/exports/
 
 # rclone fonctionne également
-rclone copy ./medias synelia:dba-medias-publics --progress`}
+rclone copy ./medias synelia:mon-bucket --progress`}
           />
           <p className="mt-3 text-[12px] leading-relaxed text-g-500">
             La compatibilité couvre les opérations sur les objets, le versioning, le cycle de vie, le
-            verrouillage d’objet et les téléversements multipartites. Endpoints :{' '}
-            <span className="font-mono">s3.abj.synelia.cloud</span> et{' '}
-            <span className="font-mono">s3.gbm.synelia.cloud</span>.
+            verrouillage d’objet et les téléversements multipartites.{' '}
+            {estActif() ? (
+              'L’endpoint est affiché une fois, avec le secret, à la création d’une clé.'
+            ) : (
+              <>
+                Endpoint : <span className="font-mono">s3.abj.synelia.cloud</span>.
+              </>
+            )}
           </p>
         </Card>
       </div>

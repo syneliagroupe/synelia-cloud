@@ -210,15 +210,20 @@ export const UNIVERS_CLIENT: UniversNav[] = [
       // en particulier, donc pas de panneau. Toutes les autres sections, sauf
       // le relais SMTP qui est un service unique, suivent le maître-détail.
       { nom: 'Accueil', href: '/app/web' },
-      { nom: 'Domaines', href: '/app/web/domaines', panneau: ['/app/web/domaines'] },
-      { nom: 'Hébergement Web', href: '/app/web/hebergement', panneau: ['/app/web/hebergement'] },
-      { nom: 'Bases de données', href: '/app/web/bases', panneau: ['/app/web/bases'] },
-      { nom: 'Messagerie', href: '/app/web/emails', panneau: ['/app/web/emails'] },
+      {
+        nom: 'Domaines',
+        href: '/app/web/domaines',
+        panneau: ['/app/web/domaines'],
+        aussi: ['/app/web/sites'],
+      },
+      {
+        nom: 'Hébergements',
+        href: '/app/web/hebergement',
+        panneau: ['/app/web/hebergement'],
+        aussi: ['/app/web/applications', '/app/web/bases'],
+      },
+      { nom: 'Emails', href: '/app/web/emails', panneau: ['/app/web/emails'], aussi: ['/app/smtp'] },
       { nom: 'Drive', href: '/app/web/drive', panneau: ['/app/web/drive'] },
-      { nom: 'Applications', href: '/app/web/applications', panneau: ['/app/web/applications'] },
-      { nom: 'SSL', href: '/app/web/ssl', panneau: ['/app/web/ssl'] },
-      { nom: 'Sauvegardes', href: '/app/web/backup', panneau: ['/app/web/backup'] },
-      { nom: 'Relais SMTP', href: '/app/smtp' },
     ],
   },
   {
@@ -243,7 +248,7 @@ export const UNIVERS_SUPER_ADMIN: UniversNav[] = [
     nom: 'Pilotage',
     sections: [
       { nom: 'Vue plateforme', href: '/admin' },
-      { nom: 'Santé du parc', href: '/admin/sante' },
+      { nom: 'Santé de la plateforme', href: '/admin/sante' },
     ],
   },
   {
@@ -268,8 +273,8 @@ export const UNIVERS_SUPER_ADMIN: UniversNav[] = [
       // dans CLAUDE.md) : cette section reste une vue d'usage IA — modèles
       // appelés, agents et orchestration par organisation — pas de matériel.
       { nom: 'IA & Agents', href: '/admin/ia' },
-      { nom: 'Sites & zones', href: '/admin/sites' },
-      { nom: 'Migration inter-backend', href: '/admin/migration' },
+      { nom: 'Sites physiques', href: '/admin/sites' },
+      { nom: 'Migration entre socles', href: '/admin/migration' },
     ],
   },
   {
@@ -283,7 +288,7 @@ export const UNIVERS_SUPER_ADMIN: UniversNav[] = [
   {
     id: 'finance',
     nom: 'Finance',
-    sections: [{ nom: 'Facturation & marge', href: '/admin/facturation' }],
+    sections: [{ nom: 'Facturation', href: '/admin/facturation' }],
   },
   {
     id: 'exploitation',

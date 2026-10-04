@@ -3,11 +3,13 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { ArrowRightLeft, Globe, Lock, ServerCog, ShieldCheck } from 'lucide-react'
-import { dateCourte } from '@/lib/format'
-import { SITE_LABEL } from '@/lib/types'
+import { dateCourte, moneyPerMonth } from '@/lib/format'
+import { PALIERS_HEBERGEMENT } from '@/lib/tarifs'
+import { SITES, SITE_COURT, SITE_LABEL } from '@/lib/types'
 import { abonnementDeLEntree, assemblerEntrees, entreeWebCloudById, sitesDeLHebergement } from '@/lib/mock'
-import { DOMAINES, HEBERGEMENTS, ZONES_DNS } from '@/lib/mock'
-import type { DnsZone, Domaine, WebHosting } from '@/lib/types'
+import { DOMAINES, DRIVES, HEBERGEMENTS, MESSAGERIES, SITES_WEB, ZONES_DNS } from '@/lib/mock'
+import type { DriveDomaine, MessagerieDomaine } from '@/lib/mock'
+import type { DnsZone, Domaine, SiteWeb, WebHosting } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
@@ -18,7 +20,10 @@ import { EditeurZone } from '@/components/business/editeur-zone'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
+import { ResilierDomaine } from '@/components/business/resilier-domaine'
 import { creerRessource, estActif, requete } from '@/lib/api/client'
+import { useParametresEntreeWeb } from '@/lib/web/dns-entree'
+import { hrefSite } from '@/lib/web/entrees'
 
 /**
  * Fiche d'un domaine auquel aucun serveur n'est attaché.
@@ -27,13 +32,35 @@ import { creerRessource, estActif, requete } from '@/lib/api/client'
  * onglets d'un hébergement en les grisant serait pire que de ne pas les
  * afficher — le client croirait avoir perdu quelque chose.
  */
-export function VueDomaine({ id }: { id: string }) {
+export function VueDomaine({
+  id,
+  navigation = 'domaines',
+  vue = 'complet',
+}: {
+  id: string
+  navigation?: 'domaines' | 'sites'
+  vue?: 'complet' | 'apercu' | 'dns'
+}) {
   const { autorise, refus } = useApp()
   const executer = useOperation()
-  const [onglet, setOnglet] = useState('apercu')
+  const dnsEntree = useParametresEntreeWeb()
+  const [onglet, setOnglet] = useState(vue === 'dns' ? 'zone' : 'apercu')
+  const section =
+    navigation === 'sites'
+      ? { label: 'Sites', href: '/app/web/sites' }
+      : { label: 'Domaines', href: '/app/web/domaines' }
+  const lienServeur = (hebergementId: string) =>
+    navigation === 'sites' ? hrefSite(id, '/serveur') : `/app/web/hebergement/${hebergementId}`
+  const lienApplications =
+    navigation === 'sites' ? hrefSite(id, '/applications') : '/app/web/applications'
+  const lienBases = navigation === 'sites' ? hrefSite(id, '/bases') : '/app/web/bases'
+  const lienDns = navigation === 'sites' ? hrefSite(id, '/dns') : undefined
   const portefeuille = useCollection<Domaine>('domaines', DOMAINES)
   const parcHebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
   const zones = useCollection<DnsZone>('zones-dns', ZONES_DNS)
+  const tousSites = useCollection<SiteWeb>('sites-web', SITES_WEB)
+  const messageries = useCollection<MessagerieDomaine>('messageries', MESSAGERIES)
+  const drives = useCollection<DriveDomaine>('drives', DRIVES)
 
   // Avec l’API, l’entrée est assemblée depuis les collections distantes (le
   // backend nomme les mêmes champs, `hebergementId` et `zoneId` compris) ; un
@@ -49,19 +76,22 @@ export function VueDomaine({ id }: { id: string }) {
         <PageHeader
           fil={[
             { label: 'Espace client', href: '/app' },
-            { label: 'Domaines', href: '/app/web/domaines' },
+            { label: 'Web Cloud', href: '/app/web' },
+            section,
             { label: 'Introuvable' },
           ]}
-          titre="Domaine introuvable"
+          titre={navigation === 'sites' ? 'Site introuvable' : 'Domaine introuvable'}
         />
         <EmptyState
           titre="Ce domaine n’existe pas ou plus"
           phrase="Il a peut-être été supprimé, ou vous avez suivi un lien vers une autre organisation."
-          action={{ libelle: 'Retour aux domaines', href: '/app/web/domaines' }}
+          action={{ libelle: section.label, href: section.href }}
         />
       </div>
     )
   const d = entree.domaine
+  const messagerie = messageries.items.find((m) => m.domaine === entree.nom)
+  const drive = drives.items.find((x) => x.domaine === entree.nom)
   const h = entree.hebergement
   const abonnement = abonnementDeLEntree(entree)
 
@@ -75,7 +105,8 @@ export function VueDomaine({ id }: { id: string }) {
       <PageHeader
         fil={[
           { label: 'Espace client', href: '/app' },
-          { label: 'Domaines', href: '/app/web/domaines' },
+          { label: 'Web Cloud', href: '/app/web' },
+          section,
           { label: entree.nom },
         ]}
         titre={<span className="break-words font-mono">{entree.nom}</span>}
@@ -86,13 +117,13 @@ export function VueDomaine({ id }: { id: string }) {
         }
         meta={
           <>
-            {d && <Badge tone="neutral">{d.extension}</Badge>}
+            {d && <Badge tone="neutral">{extensionAffichee(d.extension)}</Badge>}
             {entree.provisoire ? (
               <Badge tone="warn">Nom provisoire</Badge>
             ) : (
               <Badge tone="ok">Enregistré</Badge>
             )}
-            {h && <Badge tone="violet">{h.palier}</Badge>}
+            {h && <Badge tone="violet">{h.palier.charAt(0).toUpperCase() + h.palier.slice(1)}</Badge>}
             {entree.zone ? (
               <Badge tone="violet">Zone gérée chez nous</Badge>
             ) : (
@@ -104,8 +135,8 @@ export function VueDomaine({ id }: { id: string }) {
         actions={
           <>
             {h ? (
-              <ButtonLink href={`/app/web/hebergement/${h.id}`} iconBefore={<ServerCog size={14} />}>
-                Gérer l’hébergement
+              <ButtonLink href={lienServeur(h.id)} iconBefore={<ServerCog size={14} />}>
+                {navigation === 'sites' ? 'Gérer le serveur' : 'Gérer l’hébergement'}
               </ButtonLink>
             ) : (
               <BoutonFormulaire
@@ -121,27 +152,23 @@ export function VueDomaine({ id }: { id: string }) {
                     id: 'palier',
                     label: 'Palier',
                     type: 'select',
-                    options: [
-                      { value: 'Démarrage', label: 'Démarrage · 2 vCPU · 4 Go' },
-                      { value: 'Pro', label: 'Pro · 4 vCPU · 8 Go' },
-                      { value: 'Agence', label: 'Agence · 8 vCPU · 16 Go' },
-                    ],
+                    options: PALIERS_HEBERGEMENT.map((p) => ({
+                      value: p.code,
+                      label: `${p.nom} · ${p.vcpu} vCPU · ${p.ramGo} Go · ${moneyPerMonth(p.prixMois)}`,
+                    })),
                   },
                   {
                     id: 'site',
                     label: 'Site physique',
                     type: 'select',
-                    options: [
-                      { value: 'ABJ', label: 'Abidjan' },
-                      { value: 'GBM', label: 'Grand-Bassam' },
-                    ],
+                    options: SITES.map((s) => ({ value: s, label: SITE_COURT[s] })),
                   },
                 ]}
-                valeursDepart={{ palier: 'Pro', site: 'ABJ' }}
+                valeursDepart={{ palier: 'starter', site: 'ABJ' }}
                 libelleValider="Attacher"
                 operation={(v) => ({
                   titre: `Hébergement ${v.palier} en cours de création`,
-                  detail: `Serveur à ${v.site === 'ABJ' ? 'Abidjan' : 'Grand-Bassam'}. La zone sera pointée vers son adresse.`,
+                  detail: `Serveur à ${SITE_COURT[v.site as 'ABJ' | 'GBM']}. La zone sera pointée vers son adresse.`,
                   appel: () =>
                     creerRessource('/web/hebergements', {
                       palier: String(v.palier),
@@ -163,6 +190,9 @@ export function VueDomaine({ id }: { id: string }) {
                 })}
               />
             )}
+            {d && !h && (
+              <ResilierDomaine domaineId={d.id} nom={entree.nom} />
+            )}
             <BoutonFormulaire
               libelle="Transférer"
               size="md"
@@ -177,14 +207,16 @@ export function VueDomaine({ id }: { id: string }) {
                   type: 'select',
                   options: [
                     { value: 'sortant', label: 'Vers un autre bureau d’enregistrement' },
-                    { value: 'interne', label: 'Vers une autre organisation Synelia' },
+                    // Le transfert interne n'a pas de route côté backend.
+                    ...(estActif() ? [] : [{ value: 'interne', label: 'Vers une autre organisation Synelia' }]),
                   ],
                 },
-                { id: 'destinataire', label: 'Destinataire', placeholder: 'organisation ou bureau d’enregistrement' },
               ]}
               valeursDepart={{ sens: 'sortant' }}
               libelleValider="Demander le transfert"
-              operation={(v) => ({
+              operation={(v) => {
+                let codeAuth: string | undefined
+                return {
                 ton: 'info',
                 titre:
                   v.sens === 'sortant'
@@ -192,28 +224,39 @@ export function VueDomaine({ id }: { id: string }) {
                     : `Transfert interne de ${entree.nom} demandé`,
                 detail:
                   v.sens === 'sortant'
-                    ? 'Le verrou de transfert est levé pour cinq jours. Le code est envoyé au contact titulaire.'
+                    ? estActif()
+                      ? 'Le code d’autorisation s’affiche dans la notification suivante.'
+                      : 'Le verrou de transfert est levé pour cinq jours. Le code est envoyé au contact titulaire.'
                     : 'L’organisation destinataire doit accepter le transfert depuis son espace.',
                 // Le transfert sortant remet le code d’autorisation sans
                 // friction ; le transfert interne n’a pas d’équivalent contrat.
                 ...(v.sens === 'sortant'
                   ? {
-                      appel: () =>
-                        requete(`/web/domaines/${encodeURIComponent(entree.id)}/code-auth`, {
-                          methode: 'POST',
-                        }),
+                      appel: async () => {
+                        const r = await requete<{ code?: string }>(
+                          `/web/domaines/${encodeURIComponent(entree.id)}/code-auth`,
+                          { methode: 'POST' },
+                        )
+                        codeAuth = r?.code
+                        return r
+                      },
                     }
                   : {}),
-                effetFinal: () => portefeuille.recharger(),
-              })}
+                effetFinal: () => {
+                  portefeuille.recharger()
+                  if (codeAuth)
+                    executer({ ton: 'info', titre: `Code d’autorisation de ${entree.nom}`, detail: codeAuth, audit: false })
+                },
+                }
+              }}
             />
           </>
         }
       />
 
-      <Tabs tabs={onglets} active={onglet} onChange={setOnglet} />
+      {vue === 'complet' && <Tabs tabs={onglets} active={onglet} onChange={setOnglet} />}
 
-      {onglet === 'apercu' && (
+      {(vue === 'complet' ? onglet === 'apercu' : vue === 'apercu') && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
             <Card>
@@ -256,7 +299,7 @@ export function VueDomaine({ id }: { id: string }) {
               <KeyValueList
                 className="mt-4 border-t border-g-100 pt-4"
                 items={[
-                  { cle: 'Extension', valeur: d?.extension ?? '—' },
+                  { cle: 'Extension', valeur: d ? extensionAffichee(d.extension) : '—' },
                   { cle: 'Échéance', valeur: d ? dateCourte(d.expiration) : '—' },
                   {
                     cle: 'WHOIS',
@@ -276,7 +319,7 @@ export function VueDomaine({ id }: { id: string }) {
                 titre="Le serveur qui sert ce nom"
                 sousTitre="Un domaine est attaché à un serveur et à un seul. Chaque sujet a sa section dans la barre du haut."
                 actions={
-                  <ButtonLink href={`/app/web/hebergement/${h.id}`} variant="secondary" size="sm">
+                  <ButtonLink href={lienServeur(h.id)} variant="secondary" size="sm">
                     Ouvrir la fiche
                   </ButtonLink>
                 }
@@ -293,8 +336,15 @@ export function VueDomaine({ id }: { id: string }) {
               />
               <div className="mt-3 flex flex-wrap gap-2 border-t border-g-100 pt-3">
                 {[
-                  { l: `${sitesDeLHebergement(h.id).length} applications`, href: '/app/web/applications' },
-                  { l: 'Bases de données', href: '/app/web/bases' },
+                  {
+                    l: `${
+                      estActif()
+                        ? tousSites.items.filter((s) => s.hebergementId === h.id).length
+                        : sitesDeLHebergement(h.id).length
+                    } applications`,
+                    href: lienApplications,
+                  },
+                  { l: 'Bases de données', href: lienBases },
                   { l: 'Messagerie', href: '/app/web/emails' },
                   { l: 'Drive', href: '/app/web/drive' },
                   { l: 'Certificats', href: '/app/web/ssl' },
@@ -313,18 +363,42 @@ export function VueDomaine({ id }: { id: string }) {
                 sousTitre="Un domaine est attaché à un serveur et à un seul. L’attacher crée le serveur, son Apache, son PHP et son serveur de bases."
               />
               <Callout ton="info" titre="Ce que l’attachement fait, concrètement">
-                Nous créons le serveur, nous posons le certificat, nous ajoutons les
-                enregistrements <span className="font-mono">A</span> de la zone vers son adresse, et
-                vous pouvez installer vos sites sur autant de sous-domaines que vous voulez. Rien
-                n’est perdu si vous détachez plus tard : la zone reste.
+                Nous créons le serveur, nous posons le certificat, nous configurons l’entrée DNS
+                (A sur <span className="font-mono">@</span>
+                {dnsEntree.dnsEntreeWildcardCname ? (
+                  <>
+                    {' '}
+                    et CNAME <span className="font-mono">*</span> vers le vhost edge
+                  </>
+                ) : null}
+                ), et vous pouvez installer vos sites sur autant de sous-domaines que vous voulez.
+                Rien n’est perdu si vous détachez plus tard : la zone reste.
               </Callout>
-              <div className="mt-3">
-                <MicroLabel>Adresse à viser depuis un DNS externe</MicroLabel>
-                <CopyField value="102.176.20.13" mono className="mt-1.5" />
+              <div className="mt-3 space-y-2">
+                <div>
+                  <MicroLabel>Enregistrement A (@) — entrée IPv4</MicroLabel>
+                  <CopyField
+                    value={dnsEntree.dnsEntreeA ?? '—'}
+                    mono
+                    className="mt-1.5"
+                  />
+                </div>
+                {dnsEntree.dnsEntreeWildcardCname ? (
+                  <div>
+                    <MicroLabel>Enregistrement CNAME (*) — sous-domaines</MicroLabel>
+                    <CopyField
+                      value={dnsEntree.dnsEntreeWildcardCname}
+                      mono
+                      className="mt-1.5"
+                    />
+                  </div>
+                ) : null}
               </div>
-              <ButtonLink href="/app/web/hebergement" variant="secondary" size="sm" className="mt-4">
-                Comparer les paliers d’hébergement
-              </ButtonLink>
+              {navigation === 'sites' && (
+                <ButtonLink href={section.href} variant="secondary" size="sm" className="mt-4">
+                  Retour au portefeuille
+                </ButtonLink>
+              )}
             </Card>
             )}
           </div>
@@ -352,14 +426,31 @@ export function VueDomaine({ id }: { id: string }) {
                   libelle="Hébergement"
                   etat={h ? `${h.palier} · ${h.serveur.nom}` : 'Aucun'}
                   action={h ? 'Gérer' : 'Attacher'}
-                  href={h ? `/app/web/hebergement/${h.id}` : '/app/web/hebergement'}
+                  href={h ? lienServeur(h.id) : undefined}
+                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
                 />
-                <Associe libelle="Messagerie" etat="Voir la section" action="Ouvrir" href="/app/web/emails" />
-                <Associe libelle="Drive" etat="Voir la section" action="Ouvrir" href="/app/web/drive" />
+                <Associe
+                  libelle="Messagerie"
+                  etat={
+                    messagerie?.actif
+                      ? `${messagerie.boites.length} boîte${messagerie.boites.length > 1 ? 's' : ''}`
+                      : 'Non activée'
+                  }
+                  action="Ouvrir"
+                  href="/app/web/emails"
+                />
+                <Associe
+                  libelle="Drive"
+                  etat={drive?.actif ? `${drive.sieges.attribues} / ${drive.sieges.souscrits} sièges` : 'Non activé'}
+                  action="Ouvrir"
+                  href="/app/web/drive"
+                />
                 <Associe
                   libelle="Zone DNS"
                   etat={entree.zone ? 'Gérée chez nous' : 'Externe'}
                   action={entree.zone ? 'Modifier' : 'Rapatrier'}
+                  href={lienDns}
+                  onClick={() => setOnglet('zone')}
                 />
                 <Associe libelle="Sauvegardes" etat="Voir la section" action="Ouvrir" href="/app/web/backup" />
               </ul>
@@ -368,13 +459,13 @@ export function VueDomaine({ id }: { id: string }) {
         </div>
       )}
 
-      {onglet === 'zone' &&
+      {(vue === 'complet' ? onglet === 'zone' : vue === 'dns') &&
         (entree.zone ? (
           <EditeurZone zoneId={entree.zone.id} />
         ) : (
           <EmptyState
             titre="La zone de ce domaine est servie ailleurs"
-            phrase="Les serveurs de noms déclarés au registre appartiennent à un autre fournisseur. Rapatriez la zone pour l’éditer ici : nous la recopions, vous vérifiez, puis vous changez les serveurs de noms."
+            phrase="Les serveurs de noms déclarés au registre appartiennent à un autre fournisseur. Rapatriez la zone pour l’éditer ici : nous la créons vide, vous y recopiez vos enregistrements, puis vous changez les serveurs de noms chez votre bureau d’enregistrement."
             action={{
               libelle: 'Rapatrier la zone',
               onClick: () =>
@@ -401,6 +492,9 @@ export function VueDomaine({ id }: { id: string }) {
     </div>
   )
 }
+
+/** Le backend stocke l’extension sans point (« com »), la graine avec (« .ci »). */
+const extensionAffichee = (e: string) => (e.startsWith('.') ? e : `.${e}`)
 
 function Etat({
   icone,
@@ -434,11 +528,13 @@ function Associe({
   etat,
   action,
   href,
+  onClick,
 }: {
   libelle: string
   etat: string
   action: string
   href?: string
+  onClick?: () => void
 }) {
   return (
     <li className="flex items-center justify-between gap-2 border-b border-g-100 pb-2 last:border-0 last:pb-0">
@@ -450,6 +546,10 @@ function Associe({
         <Link href={href} className="shrink-0 text-[12px] font-semibold text-p-700 hover:underline">
           {action} →
         </Link>
+      ) : onClick ? (
+        <button type="button" onClick={onClick} className="shrink-0 text-[12px] font-semibold text-p-700 hover:underline">
+          {action} →
+        </button>
       ) : (
         <span className="shrink-0 text-[12px] font-semibold text-g-500">{action}</span>
       )}

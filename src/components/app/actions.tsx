@@ -528,6 +528,7 @@ export function ModaleFormulaire({
   const depart = useMemo(() => valeursInitiales(champs, valeursDepart), [champs, valeursDepart])
   const [valeurs, setValeurs] = useState<ValeursFormulaire>(depart)
   const [cle, setCle] = useState(0)
+  const [touches, setTouches] = useState<string[]>([])
 
   // Remonte les valeurs de départ quand la modale se rouvre sur une autre ressource.
   const signature = JSON.stringify(depart)
@@ -535,10 +536,14 @@ export function ModaleFormulaire({
   if (signature !== signaturePrec) {
     setSignaturePrec(signature)
     setValeurs(depart)
+    setTouches([])
     setCle((c) => c + 1)
   }
 
-  const poser = (id: string, v: ValeurChamp) => setValeurs((p) => ({ ...p, [id]: v }))
+  const poser = (id: string, v: ValeurChamp) => {
+    setValeurs((p) => ({ ...p, [id]: v }))
+    setTouches((p) => (p.includes(id) ? p : [...p, id]))
+  }
 
   const complet = champs.every(
     (c) => !c.obligatoire || String(valeurs[c.id] ?? '').trim().length > 0,
@@ -558,6 +563,7 @@ export function ModaleFormulaire({
           </Button>
           <Button
             disabled={!complet}
+            title={complet ? undefined : 'Renseignez les champs obligatoires'}
             onClick={() => {
               onValider(valeurs)
               if (fermetureAuto) onFermer()
@@ -575,7 +581,14 @@ export function ModaleFormulaire({
             label={c.label}
             hint={c.hint}
             required={c.obligatoire}
-            error={erreurs?.[c.id]}
+            error={
+              erreurs?.[c.id] ??
+              (c.obligatoire &&
+              touches.includes(c.id) &&
+              String(valeurs[c.id] ?? '').trim().length === 0
+                ? 'Champ obligatoire.'
+                : undefined)
+            }
             className={c.demi ? 'sm:col-span-1' : 'sm:col-span-2'}
           >
             {c.type === 'select' ? (

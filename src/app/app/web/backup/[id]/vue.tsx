@@ -109,7 +109,14 @@ export function VueSauvegarde({ id }: { id: string }) {
               }}
             />
             {h && (
-              <ButtonLink href={`/app/web/hebergement/${h.id}`} variant="ghost">
+              <ButtonLink
+                href={
+                  h.domaine ?? h.domaineProvisoire
+                    ? `/app/web/sites/${encodeURIComponent(h.domaine ?? h.domaineProvisoire!)}/serveur`
+                    : '/app/web/sites'
+                }
+                variant="ghost"
+              >
                 Le serveur
               </ButtonLink>
             )}

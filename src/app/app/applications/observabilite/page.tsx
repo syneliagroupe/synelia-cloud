@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 import { EventList, LiensSortie } from '@/components/business/observabilite'
 
 export default function ObservabiliteTousProjets() {
@@ -106,13 +107,16 @@ export default function ObservabiliteTousProjets() {
         <LiensSortie className="mt-4" />
       </Card>
 
-      <Card>
-        <CardHeader
-          titre="Derniers événements de l’organisation"
-          sousTitre="Toutes ressources confondues, applicatives ou non."
-        />
-        <EventList evenements={EVENEMENTS_SUPERVISION} />
-      </Card>
+      {/* Le flux d'événements de supervision n'a pas de contrepartie API : en mode API il ne montrerait que la maquette. */}
+      {!estActif() && (
+        <Card>
+          <CardHeader
+            titre="Derniers événements de l’organisation"
+            sousTitre="Toutes ressources confondues, applicatives ou non."
+          />
+          <EventList evenements={EVENEMENTS_SUPERVISION} />
+        </Card>
+      )}
 
       <Callout ton="info" titre="Quatre formats, et des liens de sortie">
         Le portail montre des indicateurs, une courbe par métrique sur 24 h, 7 j ou 30 j, huit

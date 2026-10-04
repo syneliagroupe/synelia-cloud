@@ -3,7 +3,9 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { ArrowUpRight, FileText, Terminal } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { SECTIONS_DOCS } from '@/lib/mock'
+import { estActif } from '@/lib/api/client'
 import { MicroLabel } from '@/components/ui/badge'
 import { SearchInput } from '@/components/ui/field'
 import { CodeBlock } from '@/components/ui/display'
@@ -18,31 +20,28 @@ const EXEMPLES = [
     code: `# Créez une clé depuis /app/securite → onglet Clés d'API.
 # La valeur n'est affichée qu'une seule fois.
 
-export SYNELIA_TOKEN="syn_live_…"
+export SYNELIA_KEY="…"
 
-curl -sS https://api.synelia.cloud/v1/me \\
-  -H "Authorization: Bearer $SYNELIA_TOKEN" \\
+curl -sS https://api.synelia.cloud/v1/espaces \\
+  -H "X-Api-Key: $SYNELIA_KEY" \\
   -H "Accept: application/json"`,
   },
   {
     titre: 'Créer un Espace Cloud',
     langue: 'bash',
     code: `curl -sS -X POST https://api.synelia.cloud/v1/espaces \\
-  -H "Authorization: Bearer $SYNELIA_TOKEN" \\
+  -H "X-Api-Key: $SYNELIA_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "code": "EC-DBA-04",
-    "offerId": "off-souverain",
+    "offerId": "offre-espace-starter",
     "site": "ABJ",
     "cidr": "10.6.0.0/22",
-    "options": {
-      "backupPlanId": "bp-prod-quotidien",
-      "supervision": true
-    }
+    "quota": { "vcpu": 2, "ramGo": 8, "stockageTo": 0.1 }
   }'
 
-# Réponse : 202 Accepted + identifiant de job.
-# Suivez l'avancement sur /v1/jobs/{id} ou dans le centre de tâches.`,
+# Réponse : 202 Accepted + identifiant de travail.
+# Suivez l'avancement sur /v1/travaux/{id} ou dans le centre de tâches.`,
   },
   {
     titre: 'Provisionner avec Terraform',
@@ -86,6 +85,12 @@ resource "synelia_vm" "web" {
   },
 ]
 
+/** Mode API : l'adresse réelle de l'API, et pas de fournisseur Terraform (il n'en existe pas). */
+const BASE_API = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '')
+const EXEMPLES_AFFICHES = estActif()
+  ? EXEMPLES.slice(0, 2).map((e) => ({ ...e, code: e.code.split('https://api.synelia.cloud/v1').join(BASE_API) }))
+  : EXEMPLES
+
 export default function Docs() {
   const [q, setQ] = useState('')
 
@@ -108,6 +113,20 @@ export default function Docs() {
         chapeau="Pas de traduction automatique, pas de renvoi vers une base de connaissances anglophone. La documentation est rédigée en français par les équipes qui exploitent la plateforme, et versionnée avec elle."
       />
 
+      {estActif() ? (
+        <SiteSection>
+          <Container>
+            <Callout ton="info" titre="Pas encore d’articles en ligne">
+              Les articles de documentation ne sont pas encore publiés. Ce qui existe aujourd’hui :
+              le contrat de l’API, lisible et téléchargeable à{' '}
+              <a className="break-all font-mono text-[12px] text-p-700 underline" href={`${BASE_API}/openapi.json`}>
+                {BASE_API}/openapi.json
+              </a>
+              , et les exemples ci-dessous.
+            </Callout>
+          </Container>
+        </SiteSection>
+      ) : (
       <SiteSection>
         <Container>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -156,6 +175,7 @@ export default function Docs() {
           )}
         </Container>
       </SiteSection>
+      )}
 
       <SiteSection fond="clair">
         <Container>
@@ -164,8 +184,8 @@ export default function Docs() {
             titre="Provisionner par API ou par Terraform"
             chapeau="Tout ce que fait le portail est disponible par API. Les clés d’API ont une portée limitée et une valeur affichée une seule fois à la création."
           />
-          <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-3">
-            {EXEMPLES.map((e) => (
+          <div className={cn('mt-8 grid grid-cols-1 gap-5', EXEMPLES_AFFICHES.length > 2 ? 'lg:grid-cols-3' : 'lg:grid-cols-2')}>
+            {EXEMPLES_AFFICHES.map((e) => (
               // `min-w-0` : sans lui, la colonne de la grille s'élargit à la
               // ligne de code la plus longue et pousse la page hors de l'écran.
               <div key={e.titre} className="min-w-0">
@@ -178,11 +198,16 @@ export default function Docs() {
             ))}
           </div>
 
-          <Callout ton="info" className="mt-6" titre="Limites de débit et idempotence">
-            L’API accepte 600 requêtes par minute et par clé, 60 pour les opérations de création.
-            Toutes les opérations de création acceptent un en-tête{' '}
-            <span className="font-mono text-[12px]">Idempotency-Key</span> : rejouer la même
-            requête avec la même clé ne crée pas de doublon. Les opérations longues renvoient un{' '}
+          <Callout ton="info" className="mt-6" titre={estActif() ? 'Limites de débit et opérations longues' : 'Limites de débit et idempotence'}>
+            L’API accepte 600 requêtes par minute et par clé.
+            {!estActif() && (
+              <>
+                {' '}Toutes les opérations de création acceptent un en-tête{' '}
+                <span className="font-mono text-[12px]">Idempotency-Key</span> : rejouer la même
+                requête avec la même clé ne crée pas de doublon.
+              </>
+            )}{' '}
+            Les opérations longues renvoient un{' '}
             <span className="font-mono text-[12px]">202 Accepted</span> avec un identifiant de job
             à suivre.
           </Callout>
@@ -203,8 +228,6 @@ export default function Docs() {
                   'Dossier d’exploitation : procédures, astreinte, escalade',
                   'Dossier de sécurité : durcissement, gestion des accès, chiffrement',
                   'Plan de réversibilité par service souscrit',
-                  'Parcours de formation administrateur et exploitant, avec suivi de complétion',
-                  'Accès à un environnement de bac à sable pour la formation',
                 ].map((x) => (
                   <li key={x} className="flex items-start gap-2 text-[13px] text-g-700">
                     <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-p-600" />
@@ -221,6 +244,7 @@ export default function Docs() {
               </Link>
             </Card>
 
+            {!estActif() && (
             <Card>
               <CardHeader
                 titre="Contribuer à la documentation"
@@ -237,6 +261,7 @@ export default function Docs() {
                 trimestrielle systématique, indépendamment des signalements.
               </p>
             </Card>
+            )}
           </div>
         </Container>
       </SiteSection>

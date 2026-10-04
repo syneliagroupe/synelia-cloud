@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { HardDrive, RotateCcw, ShieldAlert } from 'lucide-react'
 import { dateHeure, MAINTENANT, relatif } from '@/lib/format'
-import type { Projet, ServiceProjet } from '@/lib/types'
+import { SITES, type Projet, type ServiceProjet } from '@/lib/types'
 import {
   PROJETS,
   SERVICES_PROJET,
@@ -166,21 +166,29 @@ export function VueBackup({ id }: { id: string }) {
                         label: 'Destination',
                         type: 'select',
                         options: [
-                          { value: 'Grand-Bassam — objet immuable', label: 'Grand-Bassam — objet immuable (hors site)' },
-                          { value: 'Abidjan — objet immuable', label: 'Abidjan — objet immuable (même site)' },
+                          ...(SITES.includes('GBM')
+                            ? [{ value: 'Grand-Bassam — objet immuable', label: 'Grand-Bassam — objet immuable (hors site)' }]
+                            : []),
+                          { value: 'Abidjan — objet immuable', label: SITES.includes('GBM') ? 'Abidjan — objet immuable (même site)' : 'Abidjan — objet immuable' },
                         ],
                       },
                     ]}
                     valeursDepart={{
                       frequence: '0 2 * * *',
                       retention: 30,
-                      destination: 'Grand-Bassam — objet immuable',
+                      destination: SITES.includes('GBM') ? 'Grand-Bassam — objet immuable' : 'Abidjan — objet immuable',
                     }}
                     complement={(v) =>
-                      String(v.destination).startsWith('Abidjan') ? (
+                      SITES.includes('GBM') && String(v.destination).startsWith('Abidjan') ? (
                         <Callout ton="warn" titre="Même site que le service">
                           Une sauvegarde qui vit sur le site du service ne protège pas d’un sinistre
                           de site. La règle 3-2-1 demande une copie hors site : c’est Grand-Bassam.
+                        </Callout>
+                      ) : !SITES.includes('GBM') ? (
+                        <Callout ton="info" titre="Même site que le service">
+                          La plateforme n’a qu’un site : cette sauvegarde protège d’une erreur ou
+                          d’une suppression, pas de la perte du site. Gardez une copie hors de
+                          Synelia pour la règle 3-2-1.
                         </Callout>
                       ) : null
                     }

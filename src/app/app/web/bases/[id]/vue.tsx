@@ -5,7 +5,7 @@ import { Download, ExternalLink, Plus, RotateCcw, Trash2, Upload } from 'lucide-
 import { cn, surfaceMarque } from '@/lib/utils'
 import { dateHeure, num, relatif } from '@/lib/format'
 import {
-  MOTEUR_WEB_LABEL,
+  MOTEUR_WEB_LABEL, moteurWebAvecVersion,
   MOTEUR_WEB_TEINTE,
   SERVEURS_BASES,
   hebergementById,
@@ -79,7 +79,7 @@ export function VueServeurBases({ id }: { id: string }) {
               {MOTEUR_WEB_LABEL[s.moteur].slice(0, 2).toUpperCase()}
             </span>
             <span>
-              {MOTEUR_WEB_LABEL[s.moteur]} {s.version}
+              {moteurWebAvecVersion(s.moteur, s.version)}
             </span>
           </span>
         }

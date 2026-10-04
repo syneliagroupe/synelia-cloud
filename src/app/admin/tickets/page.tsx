@@ -13,7 +13,7 @@ import { Avatar, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, MonoTextarea, Select, Switch } from '@/components/ui/field'
 import { Drawer, Modal } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
-import { StatTile } from '@/components/composition/metrics'
+import { StatTile, HistoriqueSimule } from '@/components/composition/metrics'
 import { DataTable } from '@/components/composition/data-table'
 import { Timeline } from '@/components/composition/flow'
 import { useApp, useMaintenant } from '@/components/app/contexte'
@@ -137,7 +137,7 @@ export default function TicketsAdmin() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {ouverts.length} tickets ouverts
+              {ouverts.length} ticket{ouverts.length > 1 ? 's' : ''} ouvert{ouverts.length > 1 ? 's' : ''}
             </Badge>
             {critiques.length > 0 && (
               <Badge tone="err" dot size="sm">
@@ -152,7 +152,7 @@ export default function TicketsAdmin() {
           </>
         }
         actions={
-          <ButtonLink variant="secondary" external href="https://centreon.synelia.cloud">
+          <ButtonLink variant="secondary" external href="https://centreon.synelia.tech">
             Console de supervision
           </ButtonLink>
         }
@@ -206,12 +206,14 @@ export default function TicketsAdmin() {
           valeur={enAttente.length}
           detail="Horloge suspendue"
         />
-        <StatTile
-          libelle="Première réponse médiane"
-          valeur="14 min"
-          ton="ok"
-          detail="Engagement : 30 min sur critique"
-        />
+        {!estActif() && (
+          <StatTile
+            libelle="Première réponse médiane"
+            valeur="14 min"
+            ton="ok"
+            detail="Engagement : 30 min sur critique"
+          />
+        )}
       </div>
 
       <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
@@ -220,6 +222,7 @@ export default function TicketsAdmin() {
         <Card padding={false}>
           <div className="p-4">
             <DataTable<Ticket>
+              chargement={tickets.chargement}
               lignes={[...tickets.items].sort(
                 (a, b) => (a.slaRestantMin ?? 99999) - (b.slaRestantMin ?? 99999),
               )}
@@ -515,6 +518,7 @@ export default function TicketsAdmin() {
                 titre="Volume de tickets sur 30 jours"
                 sousTitre="Un pic soudain signale généralement un incident sous-jacent mal communiqué."
               />
+              <HistoriqueSimule>
               <div className="flex items-end gap-1">
                 {seededSeries('admin-tickets-30j', 30, 1, 14).map((v, i) => (
                   <span
@@ -534,8 +538,10 @@ export default function TicketsAdmin() {
                 communication publique est partie trente minutes trop tard : la moitié de ces tickets
                 n’aurait pas été ouverte si la page de statut avait été à jour plus tôt.
               </Callout>
+              </HistoriqueSimule>
             </Card>
 
+            {!estActif() && (
             <Card>
               <CardHeader
                 titre="Motifs de ticket les plus fréquents"
@@ -584,6 +590,7 @@ export default function TicketsAdmin() {
                 de notre volume de tickets. C’est le meilleur investissement possible pour le support.
               </Callout>
             </Card>
+            )}
           </div>
         </div>
       )}
@@ -593,13 +600,15 @@ export default function TicketsAdmin() {
           <Card>
             <CardHeader
               titre="Engagements par gravité"
-              sousTitre="Ce que nous nous engageons à tenir, et ce que nous tenons réellement."
+              sousTitre={estActif() ? 'Ce que nous nous engageons à tenir. Les délais constatés apparaîtront quand l’historique sera disponible.' : 'Ce que nous nous engageons à tenir, et ce que nous tenons réellement.'}
             />
             <div className="overflow-x-auto rounded-[8px] border border-g-300">
               <table className="w-full min-w-max border-collapse">
                 <thead>
                   <tr className="border-b border-g-300 bg-g-050">
-                    {['Gravité', 'Première réponse engagée', 'Constatée', 'Résolution engagée', 'Constatée', 'Taux de respect'].map(
+                    {['Gravité', 'Première réponse engagée', 'Constatée', 'Résolution engagée', 'Constatée', 'Taux de respect']
+                      .filter((h, i) => !estActif() || i === 0 || i === 1 || i === 3)
+                      .map(
                       (h) => (
                         <th key={h} className="type-micro px-3 py-2 text-left font-semibold text-g-500">
                           {h}
@@ -624,19 +633,24 @@ export default function TicketsAdmin() {
                       <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                         {dureeMin(x.re)}
                       </td>
+                      {!estActif() && (
                       <td className="px-3 py-2.5">
                         <Badge tone={x.rc <= x.re ? 'ok' : 'warn'} size="sm">
                           {dureeMin(x.rc)}
                         </Badge>
                       </td>
+                      )}
                       <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
                         {dureeMin(x.se)}
                       </td>
+                      {!estActif() && (
                       <td className="px-3 py-2.5">
                         <Badge tone={x.sc <= x.se ? 'ok' : 'warn'} size="sm">
                           {dureeMin(x.sc)}
                         </Badge>
                       </td>
+                      )}
+                      {!estActif() && (
                       <td className="px-3 py-2.5">
                         <span className="flex items-center gap-2">
                           <span className="relative block h-2 w-20 overflow-hidden rounded-full bg-g-100">
@@ -658,17 +672,20 @@ export default function TicketsAdmin() {
                           </span>
                         </span>
                       </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <HistoriqueSimule>
             <Callout ton="warn" className="mt-4" titre="4 % des tickets critiques ont dépassé l’engagement">
               Deux tickets sur cinquante-deux, tous les deux ouverts un samedi soir. L’astreinte a
               répondu en trente-huit et quarante-quatre minutes au lieu de trente. Les avoirs
               correspondants ont été calculés et appliqués automatiquement — les clients n’ont rien eu
               à réclamer, et n’ont pas eu à s’apercevoir du dépassement.
             </Callout>
+            </HistoriqueSimule>
           </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -692,8 +709,8 @@ export default function TicketsAdmin() {
                     d: 'Et uniquement dans ce cas. Elle reprend dès que le client répond, y compris partiellement.',
                   },
                   {
-                    r: 'Un dépassement déclenche un avoir automatique',
-                    d: 'Calculé et appliqué sans réclamation du client. C’est à nous de constater notre propre manquement.',
+                    r: 'Un dépassement ouvre droit à un avoir',
+                    d: 'Le client n’a pas à le réclamer : c’est à nous de constater notre propre manquement.',
                   },
                   {
                     r: 'Une escalade est toujours acceptée',
@@ -714,6 +731,7 @@ export default function TicketsAdmin() {
                 sousTitre="Une escalade n’est pas un échec : c’est le mécanisme prévu quand un ticket n’avance pas."
                 actions={<ArrowUpRight size={15} className="text-p-700" />}
               />
+              <HistoriqueSimule>
               <Timeline
                 evenements={[
                   {
@@ -746,10 +764,11 @@ export default function TicketsAdmin() {
                   },
                 ]}
               />
-              <Callout ton="violet" className="mt-4" titre="L’escalade automatique à 80 % du délai">
-                Quand un ticket atteint 80 % de son délai d’engagement sans première réponse, il est
-                escaladé automatiquement, sans intervention. C’est le garde-fou qui empêche un ticket de
-                passer à travers les mailles un dimanche soir.
+              </HistoriqueSimule>
+              <Callout ton="violet" className="mt-4" titre="L’escalade à 80 % du délai">
+                Un ticket qui atteint 80 % de son délai d’engagement sans première réponse doit être
+                escaladé sans attendre. La file est triée par risque d’engagement pour qu’il remonte en
+                tête : c’est le garde-fou contre un ticket qui passe à travers les mailles un dimanche soir.
               </Callout>
             </Card>
           </div>
@@ -861,7 +880,7 @@ export default function TicketsAdmin() {
                         detail,
                         'en_cours',
                         'Réponse envoyée',
-                        'Le client est notifié. L’horloge de première réponse est arrêtée.',
+                        'La réponse apparaît dans l’espace du client. L’horloge de première réponse est arrêtée.',
                       )
                     }
                   >
@@ -899,7 +918,7 @@ export default function TicketsAdmin() {
                     size="md"
                     icone={<ArrowUpRight size={12} />}
                     titre={`Escalader ${detail.numero}`}
-                    description="Escalader ne fait pas avancer le ticket tout seul : cela change qui le porte et, sur un ticket critique, réveille l’astreinte. À utiliser quand la compétence manque, pas quand le temps manque."
+                    description="Escalader ne fait pas avancer le ticket tout seul : cela change qui le porte et, sur un ticket critique, mobilise l’astreinte. À utiliser quand la compétence manque, pas quand le temps manque."
                     libelleValider="Escalader"
                     champs={[
                       {
@@ -925,7 +944,9 @@ export default function TicketsAdmin() {
                       ton: 'warn',
                       titre: `${detail.numero} escaladé`,
                       detail:
-                        v.niveau === 'n3'
+                        estActif()
+                          ? 'L’escalade est consignée dans les échanges du ticket. Personne n’est réveillé automatiquement : prévenez le niveau visé.'
+                          : v.niveau === 'n3'
                           ? 'L’astreinte est réveillée immédiatement, quelle que soit l’heure.'
                           : v.niveau === 'editeur'
                             ? 'Un dossier est ouvert chez l’éditeur amont, avec les journaux joints. Notre engagement continue de courir : le client n’a pas à subir le délai d’un tiers.'
@@ -995,7 +1016,9 @@ export default function TicketsAdmin() {
                 executer({
                   ton: 'ok',
                   titre: `${assignation.numero} assigné à ${intervenant}`,
-                  detail: notifierIntervenant
+                  detail: estActif()
+                    ? 'Le ticket apparaît dans sa file. Aucune notification n’est envoyée : prévenez-le directement.'
+                    : notifierIntervenant
                     ? 'L’intervenant est notifié et le ticket apparaît dans sa file.'
                     : 'Le ticket apparaît dans sa file, sans notification : il faut le lui dire de vive voix.',
                   appel: () =>
@@ -1046,17 +1069,26 @@ export default function TicketsAdmin() {
             </Field>
             <div className="space-y-3">
               <Switch
-                checked={notifierIntervenant}
+                checked={!estActif() && notifierIntervenant}
                 onChange={setNotifierIntervenant}
+                disabled={estActif()}
                 label="Notifier l’intervenant"
-                description="Courriel immédiat, plus un SMS si le ticket est critique."
+                description={
+                  estActif()
+                    ? 'Indisponible : l’assignation n’envoie pas encore de courriel ni de SMS.'
+                    : 'Courriel immédiat, plus un SMS si le ticket est critique.'
+                }
               />
               <Switch
-                checked={notifierResponsable || assignation.gravite === 'critique'}
+                checked={!estActif() && (notifierResponsable || assignation.gravite === 'critique')}
                 onChange={setNotifierResponsable}
-                disabled={assignation.gravite === 'critique'}
+                disabled={estActif() || assignation.gravite === 'critique'}
                 label="Notifier le responsable d’équipe"
-                description="Systématique sur un ticket critique : il doit savoir qui porte quoi à tout moment."
+                description={
+                  estActif()
+                    ? 'Indisponible : aucune notification n’est envoyée à l’assignation.'
+                    : 'Systématique sur un ticket critique : il doit savoir qui porte quoi à tout moment.'
+                }
               />
             </div>
             {assignation.gravite === 'critique' && (

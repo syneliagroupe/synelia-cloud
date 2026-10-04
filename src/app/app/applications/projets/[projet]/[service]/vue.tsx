@@ -50,6 +50,7 @@ import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { creerRessource, estActif, requete, supprimerRessource } from '@/lib/api/client'
+import { useParametresEntreeWeb } from '@/lib/web/dns-entree'
 import { useServicesProjet } from '@/lib/api/services-projet'
 
 /** Raccourci : la collection des services d'un projet, partout dans ce fichier. */
@@ -72,7 +73,10 @@ function ServiceIntrouvable() {
       <EmptyState
         titre="Ce service n’existe plus"
         phrase="Il a été supprimé, ou la démonstration a été réinitialisée. La fiche de son projet liste les services encore en place."
-        action={{ libelle: 'Voir tous les projets', href: '/app/applications/projets' }}
+        action={{
+          libelle: 'Voir tous les projets',
+          href: '/app/applications/projets',
+        }}
       />
     </div>
   )
@@ -247,7 +251,10 @@ export function VueService({ id, projetId }: { id: string; projetId?: string }) 
                   },
                   effetFinal: () => {
                     if (!estActif())
-                      services.modifier(service.id, { statut: 'running', derniereMaj: MAINTENANT })
+                      services.modifier(service.id, {
+                        statut: 'running',
+                        derniereMaj: MAINTENANT,
+                      })
                     rechargerServices()
                   },
                 }}
@@ -282,13 +289,7 @@ export function VueService({ id, projetId }: { id: string; projetId?: string }) 
 
 // ─── Aperçu ───────────────────────────────────────────────────────────
 
-function Apercu({
-  service,
-  domaines,
-}: {
-  service: ServiceProjet
-  domaines: DomaineApplicatif[]
-}) {
+function Apercu({ service, domaines }: { service: ServiceProjet; domaines: DomaineApplicatif[] }) {
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
       <div className="min-w-0 space-y-4">
@@ -364,7 +365,10 @@ function Apercu({
                 valeur: `${service.ressources.cpu} vCPU · ${service.ressources.ramMo / 1024} Go`,
               },
               { cle: 'Disque', valeur: `${service.ressources.diskGo} Go` },
-              { cle: 'Coût mensuel', valeur: `${money(service.coutMensuel)} hors taxes` },
+              {
+                cle: 'Coût mensuel',
+                valeur: `${money(service.coutMensuel)} hors taxes`,
+              },
             ]}
           />
         </Card>
@@ -482,7 +486,11 @@ function Connexion({ service }: { service: ServiceProjet }) {
 
   const utilisateurReel = identifiants?.utilisateur ?? base.utilisateur
   const motDePasseReel = identifiants?.motDePasse ?? base.motDePasse ?? ''
-  const uri = MOTEUR_URI[service.moteur!]({ ...base, utilisateur: utilisateurReel, motDePasse: motDePasseReel })
+  const uri = MOTEUR_URI[service.moteur!]({
+    ...base,
+    utilisateur: utilisateurReel,
+    motDePasse: motDePasseReel,
+  })
   const [expose, setExpose] = useState(service.exposeExterne?.actif ?? false)
 
   return (
@@ -567,7 +575,12 @@ function Connexion({ service }: { service: ServiceProjet }) {
                     titre="Autoriser une plage d’adresses"
                     description="Chaque plage ouverte élargit la surface d’attaque. Une application du même projet n’en a pas besoin : elle passe par le réseau privé."
                     champs={[
-                      { id: 'plage', label: 'Plage', placeholder: '102.176.9.0/24', obligatoire: true },
+                      {
+                        id: 'plage',
+                        label: 'Plage',
+                        placeholder: '102.176.9.0/24',
+                        obligatoire: true,
+                      },
                     ]}
                     libelleValider="Autoriser"
                     operation={(v) => ({
@@ -653,10 +666,30 @@ function Sauvegardes({ service }: { service: ServiceProjet }) {
   }
 
   const points = [
-    { date: '2026-08-19T01:04:00Z', taille: s.taille, type: 'Complète', etat: 'ok' as const },
-    { date: '2026-08-18T01:04:00Z', taille: '18,1 Go', type: 'Complète', etat: 'ok' as const },
-    { date: '2026-08-17T01:04:00Z', taille: '17,9 Go', type: 'Complète', etat: 'ok' as const },
-    { date: '2026-08-16T01:04:00Z', taille: '17,8 Go', type: 'Complète', etat: 'ok' as const },
+    {
+      date: '2026-08-19T01:04:00Z',
+      taille: s.taille,
+      type: 'Complète',
+      etat: 'ok' as const,
+    },
+    {
+      date: '2026-08-18T01:04:00Z',
+      taille: '18,1 Go',
+      type: 'Complète',
+      etat: 'ok' as const,
+    },
+    {
+      date: '2026-08-17T01:04:00Z',
+      taille: '17,9 Go',
+      type: 'Complète',
+      etat: 'ok' as const,
+    },
+    {
+      date: '2026-08-16T01:04:00Z',
+      taille: '17,8 Go',
+      type: 'Complète',
+      etat: 'ok' as const,
+    },
   ]
 
   return (
@@ -777,10 +810,19 @@ function Sauvegardes({ service }: { service: ServiceProjet }) {
             colonnes={1}
             items={[
               { cle: 'Plan', valeur: s.plan },
-              { cle: 'Planification', valeur: <span className="font-mono text-[12px]">{s.cron}</span> },
+              {
+                cle: 'Planification',
+                valeur: <span className="font-mono text-[12px]">{s.cron}</span>,
+              },
               { cle: 'Destination', valeur: s.destination },
-              { cle: 'Rétention', valeur: `${s.retentionJours} jours, immuable` },
-              { cle: 'Dernière exécution', valeur: `${dateHeure(s.dernier)} · ${s.taille}` },
+              {
+                cle: 'Rétention',
+                valeur: `${s.retentionJours} jours, immuable`,
+              },
+              {
+                cle: 'Dernière exécution',
+                valeur: `${dateHeure(s.dernier)} · ${s.taille}`,
+              },
             ]}
           />
         </Card>
@@ -798,11 +840,36 @@ function Sauvegardes({ service }: { service: ServiceProjet }) {
 function Executions({ service }: { service: ServiceProjet }) {
   const c = service.cron!
   const historique = [
-    { date: '2026-08-19T00:00:00Z', dureeS: c.dureeS, statut: c.statut, sortie: 'Traceback: KeyError « montant_ht » à la ligne 214' },
-    { date: '2026-08-18T00:00:00Z', dureeS: 1204, statut: 'ok' as const, sortie: '5 128 lignes traitées' },
-    { date: '2026-08-17T00:00:00Z', dureeS: 1187, statut: 'ok' as const, sortie: '4 902 lignes traitées' },
-    { date: '2026-08-16T00:00:00Z', dureeS: 1256, statut: 'ok' as const, sortie: '5 344 lignes traitées' },
-    { date: '2026-08-15T00:00:00Z', dureeS: 1198, statut: 'ok' as const, sortie: '5 011 lignes traitées' },
+    {
+      date: '2026-08-19T00:00:00Z',
+      dureeS: c.dureeS,
+      statut: c.statut,
+      sortie: 'Traceback: KeyError « montant_ht » à la ligne 214',
+    },
+    {
+      date: '2026-08-18T00:00:00Z',
+      dureeS: 1204,
+      statut: 'ok' as const,
+      sortie: '5 128 lignes traitées',
+    },
+    {
+      date: '2026-08-17T00:00:00Z',
+      dureeS: 1187,
+      statut: 'ok' as const,
+      sortie: '4 902 lignes traitées',
+    },
+    {
+      date: '2026-08-16T00:00:00Z',
+      dureeS: 1256,
+      statut: 'ok' as const,
+      sortie: '5 344 lignes traitées',
+    },
+    {
+      date: '2026-08-15T00:00:00Z',
+      dureeS: 1198,
+      statut: 'ok' as const,
+      sortie: '5 011 lignes traitées',
+    },
   ]
 
   return (
@@ -810,9 +877,9 @@ function Executions({ service }: { service: ServiceProjet }) {
       <div className="min-w-0 space-y-4">
         {c.statut === 'echec' && (
           <Callout ton="err" titre="La dernière exécution a échoué">
-            La tâche a tourné {duree(c.dureeS)} avant de s’arrêter en erreur. La prochaine
-            exécution reste planifiée : une tâche en échec n’est pas désactivée automatiquement, à
-            vous de décider.
+            La tâche a tourné {duree(c.dureeS)} avant de s’arrêter en erreur. La prochaine exécution
+            reste planifiée : une tâche en échec n’est pas désactivée automatiquement, à vous de
+            décider.
           </Callout>
         )}
         <Card>
@@ -822,10 +889,7 @@ function Executions({ service }: { service: ServiceProjet }) {
           />
           <div className="space-y-2">
             {historique.map((h) => (
-              <div
-                key={h.date}
-                className="rounded-[6px] border border-g-300 px-3 py-2.5"
-              >
+              <div key={h.date} className="rounded-[6px] border border-g-300 px-3 py-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <Badge tone={h.statut === 'ok' ? 'ok' : 'err'} dot size="sm">
@@ -867,7 +931,10 @@ function Executions({ service }: { service: ServiceProjet }) {
                 valeur: <span className="font-mono text-[11.5px]">{c.commande}</span>,
               },
               { cle: 'Prochaine exécution', valeur: dateHeure(c.prochaine) },
-              { cle: 'Fuseau', valeur: 'UTC — affiché en heure d’Abidjan (UTC+0)' },
+              {
+                cle: 'Fuseau',
+                valeur: 'UTC — affiché en heure d’Abidjan (UTC+0)',
+              },
             ]}
           />
         </Card>
@@ -959,9 +1026,21 @@ function FileAttente({ service }: { service: ServiceProjet }) {
           />
           <div className="space-y-2">
             {[
-              { id: 'msg-8841', erreur: 'Timeout sur svc-metier-db après 30 s', tentatives: 5 },
-              { id: 'msg-8839', erreur: 'Timeout sur svc-metier-db après 30 s', tentatives: 5 },
-              { id: 'msg-8802', erreur: 'Montant hors tolérance : écart de 1 240 FCFA', tentatives: 1 },
+              {
+                id: 'msg-8841',
+                erreur: 'Timeout sur svc-metier-db après 30 s',
+                tentatives: 5,
+              },
+              {
+                id: 'msg-8839',
+                erreur: 'Timeout sur svc-metier-db après 30 s',
+                tentatives: 5,
+              },
+              {
+                id: 'msg-8802',
+                erreur: 'Montant hors tolérance : écart de 1 240 FCFA',
+                tentatives: 1,
+              },
             ].map((m) => (
               <div
                 key={m.id}
@@ -1010,6 +1089,7 @@ function Domaines({
   const { autorise, refus } = useApp()
   const lesDomaines = useCollection<DomaineApplicatif>('domaines-applicatifs', DOMAINES_APPLICATIFS)
   const [ajout, setAjout] = useState(false)
+  const offerteIndispo = !!useParametresEntreeWeb().dnsEntreeA
   const genere = domaines.find((d) => d.origine === 'genere')
   const hoteOfferte = `${service.nom}-${service.id.slice(0, 6)}.apps.synelia.cloud`
 
@@ -1018,10 +1098,15 @@ function Domaines({
       <Callout ton="violet" titre="Une adresse offerte, et la vôtre quand vous voulez">
         {genere ? (
           <>
-            Ce service répond déjà sur{' '}
-            <span className="font-mono text-[12px]">{genere.hote}</span>, certificat compris. Brancher
-            votre domaine consiste à créer un enregistrement DNS vers notre adresse d’entrée, puis à
-            l’associer ici — l’adresse offerte continue de fonctionner.
+            Ce service répond déjà sur <span className="font-mono text-[12px]">{genere.hote}</span>,
+            certificat compris. Brancher votre domaine consiste à créer un enregistrement DNS vers
+            notre adresse d’entrée, puis à l’associer ici — l’adresse offerte continue de
+            fonctionner.
+          </>
+        ) : domaines.length > 0 ? (
+          <>
+            Ce service répond sur votre domaine. Brancher un autre nom consiste à créer un
+            enregistrement DNS vers notre adresse d’entrée, puis à l’associer ici.
           </>
         ) : (
           <>
@@ -1041,6 +1126,12 @@ function Domaines({
               <BoutonAction
                 libelle="Générer une adresse offerte"
                 icone={<Globe size={13} />}
+                desactive={offerteIndispo}
+                nomAccessible={
+                  offerteIndispo
+                    ? 'Générer une adresse offerte — indisponible sur cet environnement : branchez votre propre domaine'
+                    : undefined
+                }
                 operation={{
                   action: 'app.deploy',
                   titre: 'Adresse offerte générée',
@@ -1084,7 +1175,11 @@ function Domaines({
         {domaines.length === 0 ? (
           <EmptyState
             titre="Aucune adresse"
-            phrase="Le service tourne mais rien ne pointe vers lui. Générez une adresse offerte pour le joindre immédiatement."
+            phrase={
+              offerteIndispo
+                ? 'Le service tourne mais rien ne pointe vers lui. Branchez votre domaine pour le joindre depuis Internet.'
+                : 'Le service tourne mais rien ne pointe vers lui. Générez une adresse offerte pour le joindre immédiatement.'
+            }
             icone={<Globe size={22} />}
           />
         ) : (
@@ -1096,11 +1191,7 @@ function Domaines({
         )}
       </Card>
 
-      <TiroirDomaine
-        open={ajout}
-        onClose={() => setAjout(false)}
-        service={service}
-      />
+      <TiroirDomaine open={ajout} onClose={() => setAjout(false)} service={service} />
     </div>
   )
 }
@@ -1114,6 +1205,12 @@ export function LigneDomaine({
 }) {
   const maintenant = useMaintenant()
   const domaines = useCollection<DomaineApplicatif>('domaines-applicatifs', DOMAINES_APPLICATIFS)
+  const enEmission = d.certificat.etat === 'en_emission'
+  useEffect(() => {
+    if (!estActif() || !enEmission) return
+    const id = setInterval(() => domaines.recharger(), 5000)
+    return () => clearInterval(id)
+  }, [enEmission, domaines])
   return (
     <div className="rounded-[8px] border border-g-300 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1186,9 +1283,7 @@ export function LigneDomaine({
               <span className="text-g-500">Nom</span>
               <span className="font-semibold text-ink">{d.verification.enregistrement.nom}</span>
               <span className="text-g-500">Valeur</span>
-              <span className="font-semibold text-ink">
-                {d.verification.enregistrement.valeur}
-              </span>
+              <span className="font-semibold text-ink">{d.verification.enregistrement.valeur}</span>
             </div>
           </div>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -1222,6 +1317,33 @@ export function LigneDomaine({
           </div>
         </div>
       )}
+
+      <div className="mt-2.5 flex justify-end">
+        <BoutonAction
+          libelle="Retirer ce domaine"
+          icone={<Trash2 size={12} />}
+          operation={{
+            action: 'app.deploy',
+            ton: 'err',
+            titre: `Domaine ${d.hote} retiré`,
+            detail:
+              'La route et le certificat sont supprimés ; le service cesse de répondre sur ce nom.',
+            appel: () => supprimerRessource('/domaines-applicatifs', d.id, d.hote),
+            effet: () => domaines.supprimer(d.id),
+            effetFinal: () => domaines.recharger(),
+          }}
+          confirmation={{
+            ressource: d.hote,
+            titre: `Retirer ${d.hote} ?`,
+            pertes: [
+              'Le nom cesse de router vers ce service',
+              'Le certificat et la route d’entrée sont supprimés',
+              'L’enregistrement DNS chez votre bureau d’enregistrement reste à retirer',
+            ],
+            libelleAction: 'Retirer le domaine',
+          }}
+        />
+      </div>
 
       {d.redirections && d.redirections.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -1257,13 +1379,15 @@ function TiroirDomaine({
   const [port, setPort] = useState(service.portConteneur ?? 80)
   const [certificat, setCertificat] = useState('acme')
   const [redirection, setRedirection] = useState(true)
+  const dnsEntree = useParametresEntreeWeb()
+  const ipEntree = dnsEntree.dnsEntreeA ?? ZONE_APPLICATIVE.ingress[0].ip
 
   const brancher = () => {
     const id = domaines.identifiant('dom')
     const enregistrement = {
       type: 'A' as const,
       nom: hote,
-      valeur: ZONE_APPLICATIVE.ingress[0].ip,
+      valeur: ipEntree,
     }
     executer({
       action: 'app.deploy',
@@ -1411,8 +1535,10 @@ function TiroirDomaine({
                 <CopyField value={hote || 'api.mon-entreprise.ci'} className="mt-1" />
               </div>
               <div>
-                <MicroLabel>Valeur — adresse d’entrée {ZONE_APPLICATIVE.ingress[0].site}</MicroLabel>
-                <CopyField value={ZONE_APPLICATIVE.ingress[0].ip} className="mt-1" />
+                <MicroLabel>
+                  Valeur — adresse d’entrée {ZONE_APPLICATIVE.ingress[0].site}
+                </MicroLabel>
+                <CopyField value={ipEntree} className="mt-1" />
               </div>
             </div>
           </Card>
@@ -1468,7 +1594,9 @@ function Deploiements({ service }: { service: ServiceProjet }) {
                     <span className="font-mono text-[12.5px] font-semibold text-ink">
                       {d.version}
                     </span>
-                    <span className="block text-[11px] text-g-500">{relatif(d.startedAt, maintenant)}</span>
+                    <span className="block text-[11px] text-g-500">
+                      {relatif(d.startedAt, maintenant)}
+                    </span>
                   </td>
                   <td className="px-3 py-2.5">
                     <span className="font-mono text-[11.5px] text-g-700">{d.commit ?? '—'}</span>
@@ -1523,7 +1651,10 @@ function Deploiements({ service }: { service: ServiceProjet }) {
       </Card>
       <p className="text-[12px] text-g-500">
         L’historique immuable de tous les déploiements, tous projets confondus, est sur{' '}
-        <Link href="/app/applications/deploiements" className="font-semibold text-p-700 hover:text-m-600">
+        <Link
+          href="/app/applications/deploiements"
+          className="font-semibold text-p-700 hover:text-m-600"
+        >
           l’écran Déploiements
         </Link>
         .
@@ -1563,7 +1694,11 @@ function Variables({ service }: { service: ServiceProjet }) {
     service.type === 'base'
       ? [{ cle: 'POSTGRES_MAX_CONNECTIONS', valeur: '200', secret: false }]
       : [
-          { cle: 'PORT', valeur: String(service.portConteneur ?? 3000), secret: false },
+          {
+            cle: 'PORT',
+            valeur: String(service.portConteneur ?? 3000),
+            secret: false,
+          },
           { cle: 'LOG_LEVEL', valeur: 'info', secret: false },
         ]
 
@@ -1582,9 +1717,24 @@ function Variables({ service }: { service: ServiceProjet }) {
               titre="Ajouter une variable"
               description="Une variable propre au service écrase celle héritée du projet. Une variable marquée secrète n’est plus jamais réaffichée."
               champs={[
-                { id: 'cle', label: 'Clé', placeholder: 'FEATURE_FLAG_X', obligatoire: true },
-                { id: 'valeur', label: 'Valeur', placeholder: 'true', obligatoire: true },
-                { id: 'secret', label: 'Valeur secrète', type: 'switch', placeholder: 'Masquée après enregistrement' },
+                {
+                  id: 'cle',
+                  label: 'Clé',
+                  placeholder: 'FEATURE_FLAG_X',
+                  obligatoire: true,
+                },
+                {
+                  id: 'valeur',
+                  label: 'Valeur',
+                  placeholder: 'true',
+                  obligatoire: true,
+                },
+                {
+                  id: 'secret',
+                  label: 'Valeur secrète',
+                  type: 'switch',
+                  placeholder: 'Masquée après enregistrement',
+                },
               ]}
               libelleValider="Ajouter"
               operation={(v) => ({
@@ -1737,9 +1887,21 @@ function Supervision({ service }: { service: ServiceProjet }) {
           />
           <div className="space-y-2">
             {[
-              { nom: 'Centreon', phrase: 'État des sondes et historique des alertes', href: 'https://centreon.synelia.tech' },
-              { nom: 'Grafana', phrase: 'Métriques détaillées et tableaux de bord', href: 'https://grafana.synelia.dev01.ovh.smile.ci' },
-              { nom: 'VictoriaLogs', phrase: 'Recherche dans les journaux, toute la rétention', href: 'https://vlogs.synelia.cloud' },
+              {
+                nom: 'Centreon',
+                phrase: 'État des sondes et historique des alertes',
+                href: 'https://centreon.synelia.tech',
+              },
+              {
+                nom: 'Grafana',
+                phrase: 'Métriques détaillées et tableaux de bord',
+                href: 'https://grafana.synelia.dev01.ovh.smile.ci',
+              },
+              {
+                nom: 'VictoriaLogs',
+                phrase: 'Recherche dans les journaux, toute la rétention',
+                href: 'https://vlogs.synelia.cloud',
+              },
             ].map((o) => (
               <a
                 key={o.nom}
@@ -2074,7 +2236,12 @@ function Sieges({ service }: { service: ServiceProjet }) {
               titre="Attribuer un siège"
               description="Un siège attribué est facturé, qu’il soit utilisé ou non. La personne accède au service en SSO."
               champs={[
-                { id: 'membre', label: 'Adresse électronique', placeholder: 'prenom.nom@dba.africa', obligatoire: true },
+                {
+                  id: 'membre',
+                  label: 'Adresse électronique',
+                  placeholder: 'prenom.nom@dba.africa',
+                  obligatoire: true,
+                },
               ]}
               libelleValider="Attribuer"
               operation={(v) => ({
@@ -2098,12 +2265,35 @@ function Sieges({ service }: { service: ServiceProjet }) {
         />
         <ul className="divide-y divide-g-100">
           {[
-            { n: 'Léa Konan', e: 'l.konan@dba.africa', d: '2026-08-19T15:02:00Z', u: 'quotidien' },
-            { n: 'Fatou Diallo', e: 'f.diallo@dba.africa', d: '2026-08-19T14:41:00Z', u: 'quotidien' },
-            { n: 'Yao Kouassi', e: 'y.kouassi@dba.africa', d: '2026-08-18T09:12:00Z', u: 'hebdomadaire' },
-            { n: 'Aïcha Koné', e: 'a.kone@dba.africa', d: '2026-07-28T10:22:00Z', u: 'inactif depuis 3 semaines' },
+            {
+              n: 'Léa Konan',
+              e: 'l.konan@dba.africa',
+              d: '2026-08-19T15:02:00Z',
+              u: 'quotidien',
+            },
+            {
+              n: 'Fatou Diallo',
+              e: 'f.diallo@dba.africa',
+              d: '2026-08-19T14:41:00Z',
+              u: 'quotidien',
+            },
+            {
+              n: 'Yao Kouassi',
+              e: 'y.kouassi@dba.africa',
+              d: '2026-08-18T09:12:00Z',
+              u: 'hebdomadaire',
+            },
+            {
+              n: 'Aïcha Koné',
+              e: 'a.kone@dba.africa',
+              d: '2026-07-28T10:22:00Z',
+              u: 'inactif depuis 3 semaines',
+            },
           ].map((m) => (
-            <li key={m.e} className="flex flex-wrap items-center justify-between gap-2 py-2.5 first:pt-0">
+            <li
+              key={m.e}
+              className="flex flex-wrap items-center justify-between gap-2 py-2.5 first:pt-0"
+            >
               <span className="min-w-0">
                 <span className="block truncate text-[12.5px] font-semibold text-ink">{m.n}</span>
                 <span className="block truncate text-[11.5px] text-g-500">{m.e}</span>
@@ -2127,7 +2317,10 @@ function Sieges({ service }: { service: ServiceProjet }) {
                     effet: () =>
                       services.modifier(service.id, (x) => ({
                         sieges: x.sieges
-                          ? { ...x.sieges, attribues: Math.max(0, x.sieges.attribues - 1) }
+                          ? {
+                              ...x.sieges,
+                              attribues: Math.max(0, x.sieges.attribues - 1),
+                            }
                           : undefined,
                       })),
                   }}
@@ -2171,8 +2364,14 @@ function Versions({ service }: { service: ServiceProjet }) {
                   label: 'Fenêtre',
                   type: 'select',
                   options: [
-                    { value: 'dimanche', label: 'Prochaine fenêtre · dimanche 22h00' },
-                    { value: 'maintenant', label: 'Maintenant · coupure de quelques minutes' },
+                    {
+                      value: 'dimanche',
+                      label: 'Prochaine fenêtre · dimanche 22h00',
+                    },
+                    {
+                      value: 'maintenant',
+                      label: 'Maintenant · coupure de quelques minutes',
+                    },
                   ],
                 },
               ]}
@@ -2185,7 +2384,9 @@ function Versions({ service }: { service: ServiceProjet }) {
                       titre: `Mise à jour de ${modele.solution} lancée`,
                       job: { workflow: 'service.update', cible: service.nom },
                       effetFinal: () =>
-                        services.modifier(service.id, { derniereMaj: MAINTENANT }),
+                        services.modifier(service.id, {
+                          derniereMaj: MAINTENANT,
+                        }),
                     }
                   : {
                       titre: 'Mise à jour planifiée',
@@ -2198,10 +2399,22 @@ function Versions({ service }: { service: ServiceProjet }) {
         <KeyValueList
           items={[
             { cle: 'Solution', valeur: `${modele.solution} ${modele.version}` },
-            { cle: 'Chart déployé', valeur: <span className="font-mono text-[12px]">{modele.chart}</span> },
-            { cle: 'Dernière mise à jour', valeur: dateHeure(service.derniereMaj) },
-            { cle: 'Fenêtre de maintenance', valeur: 'Dimanche 22:00 – 02:00, annoncée 7 jours avant' },
-            { cle: 'Retour arrière', valeur: 'Disponible 7 jours après une mise à jour' },
+            {
+              cle: 'Chart déployé',
+              valeur: <span className="font-mono text-[12px]">{modele.chart}</span>,
+            },
+            {
+              cle: 'Dernière mise à jour',
+              valeur: dateHeure(service.derniereMaj),
+            },
+            {
+              cle: 'Fenêtre de maintenance',
+              valeur: 'Dimanche 22:00 – 02:00, annoncée 7 jours avant',
+            },
+            {
+              cle: 'Retour arrière',
+              valeur: 'Disponible 7 jours après une mise à jour',
+            },
           ]}
         />
       </Card>
@@ -2213,11 +2426,29 @@ function Versions({ service }: { service: ServiceProjet }) {
         />
         <ul className="divide-y divide-g-100">
           {[
-            { v: modele.version, d: service.derniereMaj, n: 'Version courante — correctifs de sécurité et corrections mineures.', a: true },
-            { v: '10.1.2', d: '2026-05-14T22:30:00Z', n: 'Montée de version mineure. Aucun changement de schéma.', a: false },
-            { v: '10.0.8', d: '2026-02-18T22:12:00Z', n: 'Correctif de sécurité, appliqué hors fenêtre après validation.', a: false },
+            {
+              v: modele.version,
+              d: service.derniereMaj,
+              n: 'Version courante — correctifs de sécurité et corrections mineures.',
+              a: true,
+            },
+            {
+              v: '10.1.2',
+              d: '2026-05-14T22:30:00Z',
+              n: 'Montée de version mineure. Aucun changement de schéma.',
+              a: false,
+            },
+            {
+              v: '10.0.8',
+              d: '2026-02-18T22:12:00Z',
+              n: 'Correctif de sécurité, appliqué hors fenêtre après validation.',
+              a: false,
+            },
           ].map((h) => (
-            <li key={h.v} className="flex flex-wrap items-start justify-between gap-2 py-2.5 first:pt-0">
+            <li
+              key={h.v}
+              className="flex flex-wrap items-start justify-between gap-2 py-2.5 first:pt-0"
+            >
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-[12.5px] font-semibold text-ink">{h.v}</span>
@@ -2238,13 +2469,18 @@ function Versions({ service }: { service: ServiceProjet }) {
                     action: 'app.rollback',
                     ton: 'warn',
                     titre: `Retour à la version ${h.v}`,
-                    detail: 'Les données créées depuis la mise à jour sont conservées ; le schéma revient en arrière.',
+                    detail:
+                      'Les données créées depuis la mise à jour sont conservées ; le schéma revient en arrière.',
                     sansApi:
                       'Indisponible : le retour à une version antérieure n’est pas encore exposé par l’API pour un service applicatif.',
                     job: {
                       type: 'modele.rollback',
                       label: `Retour arrière · ${service.nom} → ${h.v}`,
-                      etapes: ['Snapshot de l’état courant', 'Redéployer la version cible', 'Vérifier le démarrage'],
+                      etapes: [
+                        'Snapshot de l’état courant',
+                        'Redéployer la version cible',
+                        'Vérifier le démarrage',
+                      ],
                     },
                   }}
                   confirmation={{
@@ -2296,11 +2532,26 @@ function Reversibilite({ service }: { service: ServiceProjet }) {
         />
         <KeyValueList
           items={[
-            { cle: 'Format d’export', valeur: `Format natif ${modele.solution}, documenté` },
-            { cle: 'Contenu', valeur: modele.sauvegardeParDefaut.inclut.join(' · ') },
-            { cle: 'Dernier export testé', valeur: '12 juillet 2026 — réimport vérifié sur une instance vierge' },
-            { cle: 'Délai de mise à disposition', valeur: 'Moins de 24 h pour une instance de cette taille' },
-            { cle: 'Conservation après résiliation', valeur: '30 jours, puis suppression définitive avec attestation' },
+            {
+              cle: 'Format d’export',
+              valeur: `Format natif ${modele.solution}, documenté`,
+            },
+            {
+              cle: 'Contenu',
+              valeur: modele.sauvegardeParDefaut.inclut.join(' · '),
+            },
+            {
+              cle: 'Dernier export testé',
+              valeur: '12 juillet 2026 — réimport vérifié sur une instance vierge',
+            },
+            {
+              cle: 'Délai de mise à disposition',
+              valeur: 'Moins de 24 h pour une instance de cette taille',
+            },
+            {
+              cle: 'Conservation après résiliation',
+              valeur: '30 jours, puis suppression définitive avec attestation',
+            },
           ]}
         />
       </Card>

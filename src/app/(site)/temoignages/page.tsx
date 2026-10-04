@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { estActif } from '@/lib/api/client'
+import { RubriqueNonPubliee } from '@/components/site/rubrique-non-publiee'
 import { MapPin } from 'lucide-react'
 import { TEMOIGNAGES } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
@@ -17,10 +19,13 @@ import {
 export const metadata: Metadata = {
   title: 'Ce qu’en disent nos clients',
   description:
-    'Quatre organisations racontent leur migration : l’état des lieux avant, ce qui a été fait, et ce qui s’est mal passé en cours de route. Finance, mobilité, secteur public et santé, en Côte d’Ivoire.',
+    estActif()
+      ? 'Rubrique non publiée.'
+      : 'Quatre organisations racontent leur migration : l’état des lieux avant, ce qui a été fait, et ce qui s’est mal passé en cours de route. Finance, mobilité, secteur public et santé, en Côte d’Ivoire.',
 }
 
 export default function Temoignages() {
+  if (estActif()) return <RubriqueNonPubliee surtitre="Témoignages" titre="Ce qu’en disent nos clients" />
   return (
     <>
       <HeroCourt

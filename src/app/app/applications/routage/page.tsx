@@ -5,14 +5,13 @@ import { useState } from 'react'
 import { Plus, RefreshCw, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAINTENANT, dateCourte, relatif } from '@/lib/format'
-import type { DomaineApplicatif, ServiceProjet } from '@/lib/types'
+import type { DomaineApplicatif, Projet, ServiceProjet } from '@/lib/types'
 import { SITE_LABEL } from '@/lib/types'
 import {
   DOMAINES_APPLICATIFS,
+  PROJETS,
   SERVICES_PROJET,
   ZONE_APPLICATIVE,
-  projetById,
-  serviceProjetById,
 } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +25,7 @@ import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
 import { creerRessource, estActif, requete } from '@/lib/api/client'
+import { useParametresEntreeWeb } from '@/lib/web/dns-entree'
 
 const ETAT_VERIF = {
   ok: { ton: 'ok' as const, label: 'Vérifié' },
@@ -44,6 +44,12 @@ export default function Routage() {
   const maintenant = useMaintenant()
   const { autorise, refus } = useApp()
   const domaines = useCollection<DomaineApplicatif>('domaines-applicatifs', DOMAINES_APPLICATIFS)
+  const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
+  const lesProjets = useCollection<Projet>('projets', PROJETS)
+  const serviceProjetById = (id: string) => lesServices.items.find((s) => s.id === id)
+  const projetById = (id: string) => lesProjets.items.find((p) => p.id === id)
+  const dnsEntree = useParametresEntreeWeb()
+  const reel = estActif()
   const [ajout, setAjout] = useState(false)
 
   const aVerifier = domaines.items.filter((d) => d.verification && d.verification.etat !== 'ok')
@@ -157,7 +163,11 @@ export default function Routage() {
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Domaines & routage' }]}
         titre="Domaines & routage"
-        sousTitre="Chaque service déployé reçoit une adresse dans votre zone offerte. Pour utiliser votre propre domaine, vous créez un enregistrement DNS vers nos adresses d’entrée, puis vous l’associez à un service et à un port."
+        sousTitre={
+          reel
+            ? 'Pour exposer un service sur votre propre domaine, vous créez un enregistrement DNS vers l’entrée de la plateforme, puis vous l’associez à un service et à un port.'
+            : 'Chaque service déployé reçoit une adresse dans votre zone offerte. Pour utiliser votre propre domaine, vous créez un enregistrement DNS vers nos adresses d’entrée, puis vous l’associez à un service et à un port.'
+        }
         actions={
           <GatedAction autorise={autorise('app.deploy')} message={refus('app.deploy')}>
             <Button iconBefore={<Plus size={14} />} onClick={() => setAjout(true)}>
@@ -167,27 +177,32 @@ export default function Routage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className={cn('grid grid-cols-2 gap-3', !reel && 'lg:grid-cols-4')}>
         <StatTile libelle="Domaines routés" valeur={domaines.items.length} />
-        <StatTile
-          libelle="Adresses offertes"
-          valeur={generes.length}
-          detail={ZONE_APPLICATIVE.zone}
-        />
+        {!reel && (
+          <StatTile
+            libelle="Adresses offertes"
+            valeur={generes.length}
+            detail={ZONE_APPLICATIVE.zone}
+          />
+        )}
         <StatTile
           libelle="À vérifier"
           valeur={aVerifier.length}
           ton={aVerifier.length > 0 ? 'warn' : 'ok'}
           detail={aVerifier.length > 0 ? 'enregistrement DNS attendu' : 'tout est vérifié'}
         />
-        <StatTile
-          libelle="Quota de la zone"
-          valeur={`${ZONE_APPLICATIVE.quotaDomaines.utilises}/${ZONE_APPLICATIVE.quotaDomaines.total}`}
-          detail="sous-domaines"
-        />
+        {!reel && (
+          <StatTile
+            libelle="Quota de la zone"
+            valeur={`${ZONE_APPLICATIVE.quotaDomaines.utilises}/${ZONE_APPLICATIVE.quotaDomaines.total}`}
+            detail="sous-domaines"
+          />
+        )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className={cn('grid grid-cols-1 gap-4', !reel && 'lg:grid-cols-2')}>
+        {!reel && (
         <Card>
           <CardHeader
             titre="Votre zone offerte"
@@ -233,14 +248,31 @@ export default function Routage() {
             tout de suite, et votre domaine se branche ensuite sans redéploiement.
           </Callout>
         </Card>
+        )}
 
         <Card>
           <CardHeader
             titre="Adresses d’entrée"
-            sousTitre="Les valeurs à viser depuis votre DNS externe, par site physique."
+            sousTitre={reel ? 'Les valeurs à viser depuis votre DNS externe.' : 'Les valeurs à viser depuis votre DNS externe, par site physique.'}
           />
           <div className="space-y-3">
-            {ZONE_APPLICATIVE.ingress.map((i) => (
+            {reel && (
+              <div className="rounded-[8px] border border-g-300 p-3">
+                <div className="space-y-2">
+                  <div>
+                    <MicroLabel>Enregistrement A (IPv4)</MicroLabel>
+                    <CopyField value={dnsEntree.dnsEntreeA ?? '—'} className="mt-1" />
+                  </div>
+                  {dnsEntree.dnsEntreeWildcardCname && (
+                    <div>
+                      <MicroLabel>CNAME (sous-domaine)</MicroLabel>
+                      <CopyField value={dnsEntree.dnsEntreeWildcardCname} className="mt-1" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {(reel ? [] : ZONE_APPLICATIVE.ingress).map((i) => (
               <div key={i.site} className="rounded-[8px] border border-g-300 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[13px] font-bold text-ink">{SITE_LABEL[i.site]}</span>
@@ -263,7 +295,10 @@ export default function Routage() {
           </div>
           <p className="mt-3 text-[12px] leading-relaxed text-g-500">
             Un sous-domaine peut aussi pointer par CNAME vers{' '}
-            <span className="font-mono">{ZONE_APPLICATIVE.zone}</span>. Sur un apex — le domaine nu,
+            <span className="font-mono">
+              {reel ? (dnsEntree.dnsEntreeWildcardCname ?? '—') : ZONE_APPLICATIVE.zone}
+            </span>
+            . Sur un apex — le domaine nu,
             sans <span className="font-mono">www</span> — la norme DNS l’interdit : il faut un
             enregistrement A.
           </p>
@@ -468,14 +503,16 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
   const executer = useOperation()
   const domaines = useCollection<DomaineApplicatif>('domaines-applicatifs', DOMAINES_APPLICATIFS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
+  const lesProjets = useCollection<Projet>('projets', PROJETS)
   const [hote, setHote] = useState('')
-  const [serviceId, setServiceId] = useState(SERVICES_PROJET[0].id)
+  const [serviceId, setServiceId] = useState('')
   const [etape, setEtape] = useState<'saisie' | 'dns'>('saisie')
   const [chemin, setChemin] = useState('/')
   const [port, setPort] = useState<number | null>(null)
   const [certificat, setCertificat] = useState('acme')
   const [redirection, setRedirection] = useState(true)
 
+  const dnsEntree = useParametresEntreeWeb()
   const exposables = lesServices.items.filter(
     (s) => s.type === 'application' || s.type === 'statique',
   )
@@ -494,7 +531,7 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
             Fermer
           </Button>
           {etape === 'saisie' ? (
-            <Button onClick={() => setEtape('dns')} disabled={!hote.trim()}>
+            <Button onClick={() => setEtape('dns')} disabled={!hote.trim() || !service}>
               Continuer
             </Button>
           ) : (
@@ -505,14 +542,14 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                 executer({
                   action: 'app.deploy',
                   ton: 'info',
-                  titre: `${hote} branché sur ${service.nom}`,
+                  titre: `${hote} branché sur ${service?.nom}`,
                   detail: 'La vérification DNS démarre. L’adresse offerte du service continue de répondre.',
                   appel: () =>
                     creerRessource('/domaines-applicatifs', {
                       hote,
-                      serviceId,
+                      serviceId: service?.id,
                       chemin,
-                      portConteneur: port ?? service.portConteneur ?? 80,
+                      portConteneur: port ?? service?.portConteneur ?? 80,
                       https: redirection,
                     }),
                   effet: () =>
@@ -520,9 +557,9 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                       id,
                       hote,
                       origine: 'personnalise',
-                      serviceId,
+                      serviceId: service?.id ?? serviceId,
                       chemin,
-                      portConteneur: port ?? service.portConteneur ?? 80,
+                      portConteneur: port ?? service?.portConteneur ?? 80,
                       https: redirection,
                       certificat: { etat: certificat === 'acme' ? 'en_emission' : 'actif' },
                       verification: {
@@ -530,7 +567,7 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                         enregistrement: {
                           type: 'A',
                           nom: hote,
-                          valeur: ZONE_APPLICATIVE.ingress[0].ip,
+                          valeur: dnsEntree.dnsEntreeA ?? ZONE_APPLICATIVE.ingress[0].ip,
                         },
                       },
                     }),
@@ -556,7 +593,7 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
                         enregistrement: {
                           type: 'A',
                           nom: hote,
-                          valeur: ZONE_APPLICATIVE.ingress[0].ip,
+                          valeur: dnsEntree.dnsEntreeA ?? ZONE_APPLICATIVE.ingress[0].ip,
                         },
                         verifieLe: MAINTENANT,
                       },
@@ -598,9 +635,9 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
             label="Service visé"
             hint="Seuls les services exposés sur le web apparaissent : une base ou un worker n’ont pas d’adresse publique."
           >
-            <Select value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+            <Select value={service?.id ?? serviceId} onChange={(e) => setServiceId(e.target.value)}>
               {exposables.map((s) => {
-                const p = projetById(s.projetId)
+                const p = lesProjets.items.find((x) => x.id === s.projetId)
                 return (
                   <option key={s.id} value={s.id}>
                     {p?.nom} · {s.nom} · {s.environnement}
@@ -621,7 +658,7 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
             <Field label="Port du conteneur">
               <Input
                 type="number"
-                value={port ?? service.portConteneur ?? 80}
+                value={port ?? service?.portConteneur ?? 80}
                 onChange={(e) => setPort(Number(e.target.value))}
               />
             </Field>
@@ -665,10 +702,14 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
               </div>
               <div>
                 <MicroLabel>
-                  Valeur — entrée {ZONE_APPLICATIVE.ingress[0].site} (
-                  {SITE_LABEL[ZONE_APPLICATIVE.ingress[0].site]})
+                  {estActif()
+                    ? 'Valeur — entrée de la plateforme'
+                    : `Valeur — entrée ${ZONE_APPLICATIVE.ingress[0].site} (${SITE_LABEL[ZONE_APPLICATIVE.ingress[0].site]})`}
                 </MicroLabel>
-                <CopyField value={ZONE_APPLICATIVE.ingress[0].ip} className="mt-1" />
+                <CopyField
+                  value={dnsEntree.dnsEntreeA ?? ZONE_APPLICATIVE.ingress[0].ip}
+                  className="mt-1"
+                />
               </div>
             </div>
           </div>
@@ -691,7 +732,7 @@ function TiroirBranchement({ open, onClose }: { open: boolean; onClose: () => vo
               <li>
                 Le domaine apparaît sur{' '}
                 <span className="font-mono">
-                  {service.nom} · {service.environnement}
+                  {service?.nom} · {service?.environnement}
                 </span>
                 , à côté de son adresse offerte.
               </li>

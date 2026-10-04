@@ -195,8 +195,12 @@ export default function ListeCertificats() {
         />
         <StatTile
           libelle="Échéance la plus proche"
-          valeur={`${Math.min(...collection.items.map((c) => joursAvant(c.expire)))} j`}
-          ton="warn"
+          valeur={
+            collection.items.length
+              ? `${Math.min(...collection.items.map((c) => joursAvant(c.expire)))} j`
+              : '—'
+          }
+          ton={collection.items.length ? 'warn' : undefined}
         />
       </div>
 

@@ -19,6 +19,8 @@ import type {
   WebHosting,
 } from '../types'
 import { MAINTENANT } from '../format'
+import { PALIERS_HEBERGEMENT } from '../tarifs'
+import { estActif } from '../api/client'
 import { ORG_COURANTE } from './orgs'
 import { DOMAINES, ZONES_DNS } from './web'
 
@@ -632,10 +634,14 @@ export const CATALOGUE_PARTAGE = [
 export const TYPE_SITE_LABEL: Record<SiteWeb['type'], string> = {
   wordpress: 'WordPress',
   prestashop: 'PrestaShop',
-  php: 'PHP',
+  php: 'Application PHP',
   statique: 'Site statique',
   laravel: 'Laravel',
 }
+
+/** « WordPress 6.7 » ; un site PHP ou statique n'a pas de version applicative (le backend y met celle de PHP). */
+export const typeSiteAvecVersion = (s: Pick<SiteWeb, 'type' | 'version'>) =>
+  `${TYPE_SITE_LABEL[s.type]}${s.version && s.type !== 'php' && s.type !== 'statique' ? ` ${s.version}` : ''}`
 
 export const hebergementById = (id: string) => HEBERGEMENTS.find((h) => h.id === id)
 export const sitesDeLHebergement = (id: string) => SITES_WEB.filter((s) => s.hebergementId === id)
@@ -682,9 +688,12 @@ export interface EntreeWebCloud {
 }
 
 /** Jours restants avant une date, à la date figée de la démonstration. */
-export function joursAvant(iso: string, reference: string = MAINTENANT): number {
+export function joursAvant(iso: string, reference?: string): number {
   const jour = 86_400_000
-  return Math.round((new Date(iso).getTime() - new Date(reference).getTime()) / jour)
+  // En mode API les listes n'existent qu'après le chargement (jamais au rendu serveur) :
+  // l'heure réelle est sûre, et la date figée donnerait des échéances fausses.
+  const depuis = reference ?? (estActif() ? new Date().toISOString() : MAINTENANT)
+  return Math.round((new Date(iso).getTime() - new Date(depuis).getTime()) / jour)
 }
 
 function etatEntree(
@@ -794,22 +803,18 @@ export function abonnementDeLEntree(entree: EntreeWebCloud) {
 
   if (entree.hebergement) {
     const h = entree.hebergement
+    const maintenant = new Date()
+    const debutMois = new Date(Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth(), 1)).toISOString().slice(0, 10)
+    const finMois = new Date(Date.UTC(maintenant.getUTCFullYear(), maintenant.getUTCMonth() + 1, 1)).toISOString().slice(0, 10)
     return {
       offre: `Hébergement ${h.palier}`,
-      prixMensuel: PRIX_PALIER[h.palier] as number | undefined,
-      debut: '2026-08-01',
-      echeance: '2026-08-31',
-      joursRestants: joursAvant('2026-08-31'),
+      prixMensuel: PALIERS_HEBERGEMENT.find((p) => p.code === h.palier.toLowerCase())?.prixMois,
+      debut: debutMois,
+      echeance: finMois,
+      joursRestants: joursAvant(finMois),
       renouvellementAuto: true,
       frequence: 'Mensuelle',
     }
   }
   return null
-}
-
-/** Tarifs mensuels des paliers d'hébergement, en francs CFA. */
-export const PRIX_PALIER: Record<string, number> = {
-  Démarrage: 4500,
-  Pro: 12000,
-  Agence: 38000,
 }

@@ -2,8 +2,8 @@
  * Données de démonstration — univers « IA & Agents ».
  *
  * L'offre tient en une phrase : une passerelle unique, compatible avec l'API
- * OpenAI, posée devant des modèles que nous hébergeons à Abidjan et à
- * Grand-Bassam et devant des modèles de fournisseurs externes. Le portail ne
+ * OpenAI, posée devant des modèles que nous hébergeons à Abidjan et
+ * devant des modèles de fournisseurs externes. Le portail ne
  * refait pas d'interface de conversation : il distribue les accès, route,
  * plafonne, trace et facture.
  */
@@ -98,8 +98,8 @@ export const MODELES_IA: ModeleIA[] = [
     editeur: 'Alibaba Cloud',
     famille: 'texte',
     hebergement: 'souverain',
-    residence: 'Grand-Bassam — datacenter Synelia',
-    site: 'GBM',
+    residence: 'Abidjan — datacenter Synelia',
+    site: 'ABJ',
     parametres: '32 milliards',
     licence: 'Apache 2.0',
     contexteJetons: 128_000,
@@ -111,7 +111,7 @@ export const MODELES_IA: ModeleIA[] = [
     statut: 'disponible',
     usages: ['Raisonnement pas à pas', 'Mathématiques', 'Traduction'],
     description:
-      'Servi depuis Grand-Bassam : c’est le modèle de repli quand Abidjan est en maintenance, et le seul du parc à raisonner explicitement avant de répondre.',
+      'Servi depuis Abidjan : c’est le seul modèle du catalogue à raisonner explicitement avant de répondre.',
   },
   {
     id: 'm-codestral',
@@ -199,7 +199,7 @@ export const MODELES_IA: ModeleIA[] = [
     statut: 'disponible',
     usages: ['Comptes rendus de réunion', 'Centres d’appel', 'Sous-titrage'],
     description:
-      'Transcription audio facturée à la minute traitée, pas au jeton. Poids ouverts servis sur nos GPU : les enregistrements d’appels ne quittent pas Abidjan.',
+      'Transcription audio facturée à la minute traitée, pas au jeton. Poids ouverts servis sur nos serveurs : les enregistrements d’appels ne quittent pas Abidjan.',
   },
   {
     id: 'm-pixtral',
@@ -599,7 +599,7 @@ export const MATRICE_RESIDENCE = [
     souverain: true,
     ue: false,
     horsUe: false,
-    note: 'Traitement à Abidjan ou Grand-Bassam exclusivement, journalisation intégrale conservée cinq ans.',
+    note: 'Traitement à Abidjan exclusivement, journalisation intégrale conservée cinq ans.',
   },
 ]
 
@@ -742,7 +742,7 @@ export const CONSOMMATION_PAR_CLE = [
 
 /**
  * Ce que coûterait le même trafic si tout passait par un fournisseur externe.
- * Chiffre utile avant d'arbitrer : l'écart paie largement les GPU réservés.
+ * Chiffre utile avant d'arbitrer : l'écart paie largement l'hébergement local.
  */
 export const COMPARAISON_SOUVERAIN = {
   reelFcfa: 182_930,
@@ -803,7 +803,7 @@ export const EVENEMENTS_IA: EvenementSupervision[] = [
     ts: '2026-08-18T22:10:00Z',
     gravite: 'mineure',
     ressource: 'llama-3.3-70b-instruct',
-    message: 'File d’attente au-delà de 400 ms pendant 6 minutes — repli automatique vers Qwen3 32B (GBM)',
+    message: 'File d’attente au-delà de 400 ms pendant 6 minutes — repli automatique vers Qwen3 32B',
     site: 'ABJ',
   },
   {
@@ -826,7 +826,7 @@ export const EVENEMENTS_IA: EvenementSupervision[] = [
 export const JOURNAL_PASSERELLE: LigneLog[] = [
   { ts: '2026-08-19T15:19:41Z', niveau: 'INFO', source: 'gateway', message: 'POST /v1/chat/completions · sk-syn-a7f2 · mistral-small-3.2-24b · 1 284 jetons · 214 ms · 200' },
   { ts: '2026-08-19T15:19:38Z', niveau: 'INFO', source: 'guardrail', message: 'pii · 3 entités masquées (téléphone, IBAN) · sk-syn-a7f2' },
-  { ts: '2026-08-19T15:19:12Z', niveau: 'WARN', source: 'router', message: 'llama-3.3-70b-instruct saturé (file 480 ms) — repli vers qwen3-32b · GBM' },
+  { ts: '2026-08-19T15:19:12Z', niveau: 'WARN', source: 'router', message: 'llama-3.3-70b-instruct saturé (file 480 ms) — repli vers qwen3-32b' },
   { ts: '2026-08-19T15:18:55Z', niveau: 'INFO', source: 'gateway', message: 'POST /v1/embeddings · sk-syn-3c91 · bge-m3 · 96 fragments · 41 ms · 200' },
   { ts: '2026-08-19T15:18:31Z', niveau: 'ERROR', source: 'guardrail', message: 'secret · requête refusée 422 · chaîne de connexion détectée · sk-syn-b048' },
   { ts: '2026-08-19T15:18:02Z', niveau: 'WARN', source: 'quota', message: 'sk-syn-b048 à 98,6 % du quota mensuel — alerte envoyée, appel laissé passer' },
@@ -1484,7 +1484,7 @@ export const CANAUX_AGENT: CanalAgent[] = [
     latenceMs: 2_100,
     contexteOmnicanal: true,
     agents: ['ag-support'],
-    note: 'Transcription et synthèse tournent sur nos GPU d’Abidjan : un message vocal de client ne sort pas du territoire.',
+    note: 'Transcription et synthèse tournent sur nos serveurs d’Abidjan : un message vocal de client ne sort pas du territoire.',
   },
   {
     id: 'cx-ivr',
@@ -1717,7 +1717,7 @@ export const FLUX_ORCHESTRATION: FluxOrchestration[] = [
         id: 'e-synthese',
         type: 'agent',
         nom: 'Synthèse de la réponse',
-        source: 'vLLM · Llama 3.3 70B sur GPU local',
+        source: 'vLLM · Llama 3.3 70B sur serveur local',
         detail: 'Fusionne les sorties de la branche empruntée',
         executions24h: 1_710,
         latenceMs: 1_400,
@@ -1778,7 +1778,7 @@ export const FLUX_ORCHESTRATION: FluxOrchestration[] = [
         id: 'v-transcription',
         type: 'outil',
         nom: 'Transcription du tour',
-        source: 'Whisper · GPU local, biais lexical OCI',
+        source: 'Whisper · serveur local, biais lexical OCI',
         detail: 'Mise en flux, diarisation et réduction de bruit',
         executions24h: 590,
         latenceMs: 380,
@@ -2019,7 +2019,7 @@ export const FLUX_ORCHESTRATION: FluxOrchestration[] = [
             type: 'outil',
             nom: 'Vectorisation',
             source: 'BGE-M3 · 1 024 dimensions',
-            detail: 'Multilingue, servi sur GPU local',
+            detail: 'Multilingue, servi sur serveur local',
             executions24h: 0,
             latenceMs: 320,
             coutPourMille: 45,
@@ -2117,7 +2117,7 @@ export const PIECES_FLUX = [
     categorie: 'Intelligence',
     entrees: [
       { type: 'agent' as const, nom: 'Agent', detail: 'Un agent publié, avec sa consigne et ses outils' },
-      { type: 'agent' as const, nom: 'Appel de modèle', detail: 'Un modèle seul, sur GPU local ou en externe' },
+      { type: 'agent' as const, nom: 'Appel de modèle', detail: 'Un modèle seul, sur serveur local ou en externe' },
       { type: 'connaissance' as const, nom: 'Recherche de connaissances', detail: 'Fragments Qdrant, filtrés par habilitation puis reclassés' },
     ],
   },

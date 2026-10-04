@@ -6,10 +6,12 @@ import { num, pct } from '@/lib/format'
 import {
   CATEGORIE_OUTIL_LABEL,
   TYPE_CANAL_LABEL,
+  type AgentIA,
   type CanalAgent,
   type OutilAgent,
 } from '@/lib/types'
 import { AGENTS_IA, CANAUX_AGENT, OUTILS_AGENT, ROUTEUR_OMNICANAL } from '@/lib/mock'
+import { useCollection } from '@/components/app/atelier'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/display'
@@ -44,7 +46,7 @@ const CONTRAINTE: Partial<Record<CanalAgent['type'], string>> = {
 }
 
 function VueCanal({ canal }: { canal: CanalAgent }) {
-  const agents = AGENTS_IA.filter((a) => canal.agents.includes(a.id))
+  const agents = useCollection<AgentIA>('agents-ia', AGENTS_IA).items.filter((a) => canal.agents.includes(a.id))
   return (
     <div className="space-y-5">
       <PageHeader
@@ -181,7 +183,7 @@ function VueCanal({ canal }: { canal: CanalAgent }) {
 }
 
 function VueOutil({ outil }: { outil: OutilAgent }) {
-  const agents = AGENTS_IA.filter((a) => a.outils.includes(outil.id))
+  const agents = useCollection<AgentIA>('agents-ia', AGENTS_IA).items.filter((a) => (a.outils ?? []).includes(outil.id))
 
   return (
     <div className="space-y-5">

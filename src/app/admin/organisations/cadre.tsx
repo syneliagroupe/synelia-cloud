@@ -5,7 +5,7 @@ import { libellePlan } from '@/lib/mock/commerce'
 import type { Organisation } from '@/lib/types'
 import { CadreSection } from '@/components/app/cadre-section'
 import { useCollection } from '@/components/app/atelier'
-import { money } from '@/lib/format'
+import { money, nomPays } from '@/lib/format'
 
 /**
  * Panneau de sélection de l'univers Clients.
@@ -26,7 +26,7 @@ export function CadreOrganisations({ children }: { children: React.ReactNode }) 
     nom: o.nom,
     // Sans « /mois » : la colonne est étroite et le suffixe suffit à faire
     // tronquer le secteur, qui est l'information de repérage la plus utile.
-    sousTitre: `${o.secteur ?? o.pays} · ${money(o.caMensuel ?? 0)}`,
+    sousTitre: `${o.secteur ?? nomPays(o.pays)} · ${money(o.caMensuel ?? 0)}`,
     etat:
       o.statut === 'active'
         ? libellePlan(o.tenantPlan)

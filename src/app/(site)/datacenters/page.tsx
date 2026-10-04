@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Cpu, Database, Network, Snowflake, Zap } from 'lucide-react'
 import { num, pct } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
 import { BACKENDS, DATACENTERS, ESPACES } from '@/lib/mock'
 import { lirePublicServeur } from '@/lib/api/public-serveur'
 import { fusionnerDatacenters, type DatacenterPublic } from '@/lib/api/vitrine'
@@ -15,20 +16,106 @@ import {
   SiteSection,
 } from '@/components/site/blocs'
 
-export const metadata: Metadata = {
-  title: 'Nos datacenters à Abidjan et Grand-Bassam',
-  description:
-    'Fiche par site : localisation, alimentation, refroidissement, connectivité, sécurité physique, certifications. Latence inter-site mesurée de 4 à 6 ms.',
+export const metadata: Metadata = estActif()
+  ? {
+      title: 'Nos datacenters',
+      description: 'Fiche par site : localisation, alimentation, certifications et capacité installée.',
+    }
+  : {
+      title: 'Nos datacenters à Abidjan et Grand-Bassam',
+      description:
+        'Fiche par site : localisation, alimentation, refroidissement, connectivité, sécurité physique, certifications. Latence inter-site mesurée de 4 à 6 ms.',
+    }
+
+interface CapaciteSite {
+  site: string
+  vcpu: number
+  ramGo: number
+  stockageTo: number
+  chargePct: number
+  hotes: number
+  socles: string[]
+}
+
+// Mode API : uniquement ce que le back-office déclare (sites, capacité des socles).
+function DatacentersReels({ sites, capacite }: { sites: DatacenterPublic[]; capacite: CapaciteSite[] }) {
+  return (
+    <>
+      <HeroCourt
+        surtitre="Datacenters"
+        titre={sites.length > 1 ? 'Nos sites' : 'Notre site'}
+        chapeau="Localisation, alimentation, certifications et capacité installée, tels que déclarés par l’exploitation de la plateforme."
+      />
+      {sites.map((d, idx) => {
+        const c = capacite.find((x) => x.site === d.site)
+        return (
+          <SiteSection key={d.code} fond={idx % 2 === 0 ? 'clair' : 'blanc'}>
+            <Container>
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <MicroLabel className="text-m-600">Site {d.site}</MicroLabel>
+                  <h2 className="mt-2 text-[26px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[32px]">
+                    {d.nom}
+                  </h2>
+                  <p className="mt-1.5 text-[14px] text-g-700">{d.ville}, Côte d’Ivoire</p>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {d.certifications?.map((x) => (
+                    <Badge key={x} tone="violet" size="sm">
+                      {x}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {d.capacite && <StatTile libelle="Puissance installée" valeur={d.capacite} />}
+                {d.energie && (
+                  <StatTile
+                    libelle="Alimentation"
+                    valeur={d.energie}
+                    detail={d.redondance ? `redondance ${d.redondance}` : undefined}
+                  />
+                )}
+                {c && (
+                  <>
+                    <StatTile
+                      libelle="Capacité vCPU"
+                      valeur={num(c.vcpu)}
+                      detail={`${num(c.hotes)} hôte${c.hotes > 1 ? 's' : ''} · ${c.socles.join(', ')}`}
+                    />
+                    <StatTile
+                      libelle="Taux d’occupation"
+                      valeur={pct(c.chargePct)}
+                      ton={c.chargePct > 75 ? 'warn' : 'ok'}
+                      detail={`${num(c.ramGo)} Go de mémoire · ${num(c.stockageTo, c.stockageTo < 10 ? 2 : 0)} To de stockage`}
+                    />
+                  </>
+                )}
+              </div>
+            </Container>
+          </SiteSection>
+        )
+      })}
+      <AppelFinal
+        titre={sites.length > 1 ? 'Visiter les sites' : 'Visiter le site'}
+        chapeau="Les visites sont possibles sur rendez-vous, pour les clients et prospects engagés dans un processus de sélection."
+        primaire={{ libelle: 'Demander une visite', href: '/entreprises#contact' }}
+        secondaire={{ libelle: 'Lire notre position sur la souveraineté', href: '/souverainete' }}
+      />
+    </>
+  )
 }
 
 export default async function Datacenters() {
   // En mode API, nom, ville, certifications, puissance et alimentation
   // suivent `GET /public/datacenters` (rapproché par site) ; le reste de la
   // fiche — que le backend ne publie pas — reste local.
-  const datacenters = fusionnerDatacenters(
-    await lirePublicServeur<DatacenterPublic[]>('/public/datacenters'),
-    DATACENTERS,
-  )
+  const distants = await lirePublicServeur<DatacenterPublic[]>('/public/datacenters')
+  if (distants && distants.length > 0) {
+    const capacite = (await lirePublicServeur<CapaciteSite[]>('/public/capacite')) ?? []
+    return <DatacentersReels sites={distants} capacite={capacite} />
+  }
+  const datacenters = fusionnerDatacenters(distants, DATACENTERS)
   return (
     <>
       <HeroCourt

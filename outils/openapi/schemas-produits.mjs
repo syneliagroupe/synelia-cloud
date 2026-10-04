@@ -5,6 +5,7 @@
 
 import {
   DEVISES,
+  MOTEURS_MANAGES,
   MOTEURS_PROJET,
   MOYENS_PAIEMENT,
   ROLES,
@@ -891,6 +892,8 @@ const web = {
           ftps: booleen(),
           ssh: booleen(),
           portSsh: entier(),
+          portSftp: entier('Port public SFTP (edge dev01 → conteneur).'),
+          hoteTransfert: chaine('Hôte SFTP côté client (souvent l’IP edge du lab).'),
         },
         ['ftp', 'sftp', 'ftps', 'ssh', 'portSsh'],
       ),
@@ -945,7 +948,15 @@ const web = {
   ),
 
   ReglagesAcces: objet(
-    { ftp: booleen(), sftp: booleen(), ftps: booleen(), ssh: booleen(), portSsh: entier() },
+    {
+      ftp: booleen(),
+      sftp: booleen(),
+      ftps: booleen(),
+      ssh: booleen(),
+      portSsh: entier(),
+      portSftp: entier('Port public SFTP (edge dev01 → conteneur).'),
+      hoteTransfert: chaine('Hôte SFTP côté client (souvent l’IP edge du lab).'),
+    },
     [],
     'Protocoles de transfert ouverts sur le serveur, activables séparément.',
   ),
@@ -1000,7 +1011,7 @@ const web = {
       id: chaine(),
       hebergementId: chaine(),
       nom: chaine(),
-      moteur: liste(['mariadb', 'postgresql']),
+      moteur: liste(MOTEURS_MANAGES),
       version: chaine(),
       tailleMo: nombre(),
       jeuCaracteres: chaine(),
@@ -1020,7 +1031,7 @@ const web = {
       id: chaine(),
       hebergementId: chaine(),
       serveur: chaine(),
-      moteur: liste(['mariadb', 'postgresql', 'redis']),
+      moteur: liste(MOTEURS_MANAGES),
       version: chaine(),
       actif: booleen('Un moteur non activé est proposé, pas facturé.'),
       hoteInterne: chaine(
@@ -1912,6 +1923,7 @@ const ops = {
 
   Impaye: objet(
     {
+      id: chaine(),
       org: chaine(),
       orgId: chaine(),
       facture: chaine(),

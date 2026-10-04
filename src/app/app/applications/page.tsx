@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import {
-  AlertTriangle,
   Boxes,
   Activity,
   GitBranch,
@@ -27,8 +26,8 @@ import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
-import { StatutServiceBadge } from '@/components/business/projets'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 import { useLectureDegradable } from '@/lib/api/degradable'
 import { useMaintenant } from '@/components/app/contexte'
 
@@ -70,43 +69,10 @@ export default function AccueilApplications() {
   const sauvegardes = lesServices.items.filter((s) => s.sauvegarde)
   const enEchec = lesServices.items.filter((s) => s.statut === 'failed')
   const degrades = lesServices.items.filter((s) => s.statut === 'degraded')
-  const deploiementsRates = lesDeploiements.items.filter((d) => d.statut === 'failed')
   const domainesAVerifier = lesDomaines.items.filter(
     (d) => d.verification && d.verification.etat !== 'ok',
   )
   const secrets = lesProjets.items.flatMap((p) => p.variables.filter((v) => v.secret))
-
-  // Ce qui demande une décision, rassemblé une fois — la même liste qu'ouvre
-  // chaque section, mais vue de haut.
-  const aSurveiller = [
-    ...enEchec.map((s) => ({
-      quoi: `${s.nom} — en échec`,
-      detail: `${s.environnement} · le service ne répond plus depuis ${relatif(s.derniereMaj, maintenant)}.`,
-      href: `/app/applications/projets/${s.projetId}/${s.id}`,
-      rang: 0,
-    })),
-    ...deploiementsRates.map((d) => ({
-      quoi: `Déploiement refusé — ${appById(d.appId)?.nom ?? d.appId} ${d.version}`,
-      detail:
-        d.findings.some((f) => f.severite === 'eleve')
-          ? 'Arrêté à l’analyse DevSecOps : une vulnérabilité critique bloque la mise en production.'
-          : 'Le pipeline s’est arrêté avant la mise en ligne. Le diagnostic est dans le détail.',
-      href: '/app/applications/deploiements',
-      rang: 1,
-    })),
-    ...degrades.map((s) => ({
-      quoi: `${s.nom} — dégradé`,
-      detail: `${s.environnement} · le service répond, mais hors de ses seuils.`,
-      href: `/app/applications/observabilite/${s.projetId}`,
-      rang: 2,
-    })),
-    ...domainesAVerifier.map((d) => ({
-      quoi: `${d.hote} — vérification DNS ${d.verification!.etat === 'echec' ? 'en échec' : 'en attente'}`,
-      detail: 'Tant que l’enregistrement n’est pas vu, le certificat n’est pas émis.',
-      href: '/app/applications/routage',
-      rang: 3,
-    })),
-  ].sort((a, b) => a.rang - b.rang)
 
   const sections = [
     {
@@ -167,32 +133,11 @@ export default function AccueilApplications() {
         titre="Applications"
         sousTitre="Vos projets applicatifs et tout ce qui tourne dedans. Chaque section pose une question différente sur le même objet — le projet — et le panneau de gauche sert à le choisir une fois pour toutes."
         actions={
-          <ButtonLink href="/app/applications/projets/nouveau" iconBefore={<GitBranch size={14} />}>
+          <ButtonLink href="/app/applications/nouveau" iconBefore={<GitBranch size={14} />}>
             Nouveau projet
           </ButtonLink>
         }
       />
-
-      {aSurveiller.length > 0 && (
-        <Callout
-          ton={enEchec.length > 0 || deploiementsRates.length > 0 ? 'err' : 'warn'}
-          titre={`${aSurveiller.length} point${aSurveiller.length > 1 ? 's' : ''} à surveiller`}
-        >
-          <ul className="mt-1 space-y-1.5">
-            {aSurveiller.map((a) => (
-              <li key={a.quoi} className="flex items-start gap-2">
-                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warn" />
-                <span>
-                  <Link href={a.href} className="font-semibold underline">
-                    {a.quoi}
-                  </Link>
-                  <span className="ml-1.5 text-g-700">{a.detail}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Callout>
-      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
@@ -363,36 +308,6 @@ export default function AccueilApplications() {
                 </li>
               ))}
           </ul>
-
-          <CardHeader
-            className="mt-4 border-t border-g-100 pt-4"
-            titre="Services à surveiller"
-            sousTitre="Ceux qui ne sont ni en marche ni arrêtés volontairement."
-          />
-          {enEchec.length + degrades.length === 0 ? (
-            <p className="text-[13px] text-g-700">
-              Tous les services sont dans leur état attendu.
-            </p>
-          ) : (
-            <ul className="divide-y divide-g-100">
-              {[...enEchec, ...degrades].map((s) => (
-                <li key={s.id} className="py-2 first:pt-0">
-                  <Link
-                    href={`/app/applications/projets/${s.projetId}/${s.id}`}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-mono text-[12px] font-semibold text-ink">
-                        {s.nom}
-                      </span>
-                      <span className="block text-[11px] text-g-500">{s.environnement}</span>
-                    </span>
-                    <StatutServiceBadge statut={s.statut} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
         </Card>
       </div>
 
@@ -401,7 +316,7 @@ export default function AccueilApplications() {
           Chaque déploiement reçoit une adresse sur{' '}
           <span className="font-mono text-[12px]">{ZONE_APPLICATIVE.wildcard}</span>, certificat
           compris. Vous branchez votre propre nom quand vous êtes prêt, sans redéployer —{' '}
-          {ZONE_APPLICATIVE.quotaDomaines.utilises} sur {ZONE_APPLICATIVE.quotaDomaines.total}{' '}
+          {estActif() ? lesDomaines.items.length : ZONE_APPLICATIVE.quotaDomaines.utilises} sur {ZONE_APPLICATIVE.quotaDomaines.total}{' '}
           domaines personnalisés sont utilisés.
         </Callout>
         <Callout ton="info" titre="Ce que cet univers ne fait pas">

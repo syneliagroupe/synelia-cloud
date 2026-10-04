@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { num, pct } from '@/lib/format'
-import { CLASSE_DONNEES_LABEL } from '@/lib/types'
+import { CLASSE_DONNEES_LABEL, LIEUX_HEBERGEMENT, type ModeleIA } from '@/lib/types'
 import { GARDE_FOUS, MATRICE_RESIDENCE, MODELES_IA, REGLES_ROUTAGE, modeleParSlug } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink, IconButton } from '@/components/ui/button'
@@ -12,6 +12,8 @@ import { Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
+import { AvisDemoApi } from '../../avis-demo'
 
 const LIBELLE_ACTION = {
   bloquer: 'Bloque la requête',
@@ -32,6 +34,7 @@ export default function ResidenceDonnees() {
     Object.fromEntries(GARDE_FOUS.map((g) => [g.id, g.actif])),
   )
 
+  const modeles = useCollection<ModeleIA>('modeles-ia', MODELES_IA).items
   const peutModifier = autorise('ia.routing.update')
   const requetes24h = REGLES_ROUTAGE.reduce((a, r) => a + r.requetes24h, 0)
   const replis24h = REGLES_ROUTAGE.reduce((a, r) => a + r.replisDeclenches24h, 0)
@@ -49,6 +52,12 @@ export default function ResidenceDonnees() {
         titre="Résidence des données"
         sousTitre="Où chaque classe de données a le droit d’être traitée. Cette politique prime sur les règles de routage : une règle qui la contredirait est refusée à l’enregistrement."
       />
+
+      <AvisDemoApi>
+        Les compteurs ci-dessous sont des exemples. Le tableau de résidence, lui, est la politique de
+        la plateforme : chaque clé d’accès porte une résidence maximale que la passerelle fait
+        respecter à chaque appel.
+      </AvisDemoApi>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile libelle="Requêtes routées 24 h" valeur={num(requetes24h)} />
@@ -77,7 +86,7 @@ export default function ResidenceDonnees() {
             <div className="border-b border-g-100 px-4 py-3">
               <CardHeader
                 titre="Où chaque classe de données a le droit d’être traitée"
-                sousTitre="Politique validée le 12 mai 2026. Elle prime sur les règles de routage : une règle qui la contredirait est refusée à l’enregistrement."
+                sousTitre="Un croisement entre la classe de la requête et la juridiction du modèle appelé."
                 className="mb-0"
               />
             </div>
@@ -123,7 +132,7 @@ export default function ResidenceDonnees() {
                 sousTitre="Ce que la politique autorise, modèle par modèle."
               />
               <div className="space-y-1.5">
-                {MODELES_IA.filter((m) => m.statut !== 'retire').map((m) => (
+                {modeles.filter((m) => m.statut !== 'retire').map((m) => (
                   <div
                     key={m.id}
                     className="flex flex-wrap items-center justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
@@ -143,10 +152,10 @@ export default function ResidenceDonnees() {
 
             <div className="space-y-4">
               <Callout ton="ok" titre="Ce que « souverain » veut dire ici">
-                Le calcul a lieu sur des GPU que nous exploitons, dans nos salles d’Abidjan et de
-                Grand-Bassam, sous droit ivoirien. Les poids des modèles sont ouverts et téléchargés
-                une fois : aucun appel sortant n’est nécessaire pour servir une requête. Ce n’est pas
-                le cas des modèles externes, quelle que soit leur juridiction.
+                Le calcul a lieu sur des serveurs que nous exploitons, à {LIEUX_HEBERGEMENT}, sous droit
+                ivoirien. Les poids des modèles sont ouverts et téléchargés une fois : aucun appel
+                sortant n’est nécessaire pour servir une requête. Ce n’est pas le cas des modèles
+                externes, quelle que soit leur juridiction.
               </Callout>
               <Callout
                 ton="info"

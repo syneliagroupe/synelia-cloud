@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { Globe } from 'lucide-react'
+import { SITES } from '@/lib/types'
+import { estActif } from '@/lib/api/client'
 import { Logo } from '@/components/brand/logo'
 
 const COLONNES = [
@@ -32,10 +34,14 @@ const COLONNES = [
   {
     titre: 'Société',
     liens: [
-      { nom: 'Notre histoire', href: '/histoire' },
-      { nom: 'L’équipe', href: '/equipe' },
-      { nom: 'Témoignages', href: '/temoignages' },
-      { nom: 'Écosystème', href: '/communaute' },
+      ...(estActif()
+        ? []
+        : [
+            { nom: 'Notre histoire', href: '/histoire' },
+            { nom: 'L’équipe', href: '/equipe' },
+            { nom: 'Témoignages', href: '/temoignages' },
+            { nom: 'Écosystème', href: '/communaute' },
+          ]),
       { nom: 'Entreprises', href: '/entreprises' },
       { nom: 'Souveraineté', href: '/souverainete' },
       { nom: 'Datacenters', href: '/datacenters' },
@@ -44,13 +50,14 @@ const COLONNES = [
   {
     titre: 'Ressources',
     liens: [
-      { nom: 'Livres blancs & guides', href: '/ressources' },
+      ...(estActif() ? [] : [{ nom: 'Livres blancs & guides', href: '/ressources' }]),
       { nom: 'Documentation', href: '/docs' },
       { nom: 'État des services', href: '/statut' },
       { nom: 'Tarifs', href: '/tarifs' },
       { nom: 'Simulateur', href: '/simulateur' },
       { nom: 'Espace client', href: '/app' },
-      { nom: 'Espace super admin', href: '/admin' },
+      // L'espace d'administration n'est pas une page publique : lien réservé à la démonstration.
+      ...(estActif() ? [] : [{ nom: 'Espace super admin', href: '/admin' }]),
     ],
   },
   {
@@ -72,8 +79,9 @@ export function SiteFooter() {
           <div>
             <Logo />
             <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-g-500">
-              Plateforme de gestion de cloud multi-tenant opérée par Synelia Group Afrique. Deux
-              sites en Côte d’Ivoire, une équipe à Abidjan, une supervision 24/7.
+              Plateforme de gestion de cloud multi-tenant opérée par Synelia Group Afrique.{' '}
+              {SITES.length > 1 ? 'Deux sites en Côte d’Ivoire' : 'Un site en Côte d’Ivoire'}, une équipe à
+              Abidjan, une supervision 24/7.
             </p>
             <p className="mt-3 text-[12px] text-g-500">
               <a href="mailto:avs@synelia.tech" className="font-semibold text-p-700 hover:underline">
@@ -112,23 +120,19 @@ export function SiteFooter() {
 
         <div className="mt-10 flex flex-col gap-4 border-t border-g-300 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[12px] leading-relaxed text-g-500">
-            © 2026 Synelia Group Afrique · Cocody, Abidjan, Côte d’Ivoire · Données hébergées à
-            Abidjan (Synertech Vallon) et Grand-Bassam (VITIB) · TVA 18 % · Prix en FCFA (XOF)
+            © 2026 Synelia Group Afrique · Cocody, Abidjan, Côte d’Ivoire · Données hébergées à{' '}
+            {SITES.length > 1 ? 'Abidjan (Synertech Vallon) et Grand-Bassam (VITIB)' : 'Abidjan'} · TVA 18 % · Prix en FCFA (XOF)
             <br />
             <span className="text-g-500">
-              Maquette de démonstration — organisations, ressources, factures et incidents entièrement fictifs.
+              {SITES.length > 1
+                ? 'Maquette de démonstration — organisations, ressources, factures et incidents entièrement fictifs.'
+                : 'Prix, site et état des services : données en direct de la plateforme.'}
             </span>
           </p>
-          <div className="flex shrink-0 items-center gap-2 rounded-[6px] border border-g-300 bg-white px-2.5 py-1.5">
+          {/* Une seule langue : un sélecteur qui proposerait « English » sans rien traduire serait inerte. */}
+          <div className="flex shrink-0 items-center gap-2 rounded-[6px] border border-g-300 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-g-700">
             <Globe size={13} className="text-g-500" />
-            <select
-              aria-label="Langue"
-              defaultValue="fr"
-              className="cursor-pointer bg-transparent text-[12px] font-semibold text-g-700 outline-none"
-            >
-              <option value="fr">Français</option>
-              <option value="en">English</option>
-            </select>
+            Français
           </div>
         </div>
       </div>

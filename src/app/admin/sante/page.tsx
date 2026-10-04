@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { AlertTriangle, Megaphone, RefreshCw, Send } from 'lucide-react'
 import { cn, seededSeries } from '@/lib/utils'
-import { dateHeure, duree, num, pct, relatif } from '@/lib/format'
+import { dateHeure, duree, num, pct, relatif, toHumain } from '@/lib/format'
 import {
   ALERTES_PLATEFORME,
   BACKENDS,
@@ -13,6 +13,7 @@ import {
 } from '@/lib/mock'
 import {
   BACKEND_LABEL,
+  SITES,
   SITE_COURT,
   type Backend,
   type Incident,
@@ -28,6 +29,7 @@ import { Modal } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { HealthBadge, QuotaBar, StatTile } from '@/components/composition/metrics'
 import { Timeline } from '@/components/composition/flow'
+import { EmptyState } from '@/components/composition/states'
 import { EventList, GrilleSparkCharts, LiensSortie } from '@/components/business/observabilite'
 import { BackendGauge } from '@/components/business/infra'
 import { JobTracker } from '@/components/business/paas'
@@ -36,6 +38,14 @@ import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { creerRessource, estActif, modifierRessource, requete } from '@/lib/api/client'
 import { useLectureDegradable } from '@/lib/api/degradable'
+
+// L’API publie la catégorie sous forme de clé technique ; l’écran la dit en français.
+const CATEGORIE_SERVICE: Record<string, string> = {
+  compute: 'Calcul',
+  storage: 'Stockage',
+  network: 'Réseau',
+  manages: 'Services managés',
+}
 
 const ONGLETS = [
   { id: 'services', label: 'État des services' },
@@ -102,7 +112,7 @@ export default function SantePlateforme() {
   const publierCommunication = () => {
     const texte = texteCommunication || 'Mise à jour publiée depuis le portail.'
     const sites =
-      sitesTouches === 'tous' ? ['ABJ', 'GBM'] : [sitesTouches]
+      sitesTouches === 'tous' ? [...SITES] : [sitesTouches]
     // Le type choisi dans la modale fait aussi changer l’état de l’incident :
     // une résolution le clôt (avec sa date de fin), une maintenance le passe
     // sous surveillance. Une simple information ne touche pas à l’état.
@@ -170,8 +180,20 @@ export default function SantePlateforme() {
     setCommunication(null)
   }
 
+  // En mode API seuls les sites réellement publiés par le backend sont des colonnes.
+  const SITES_ETATS = (['ABJ', 'GBM'] as const).filter(
+    (x) => !estActif() || servicesEtats.some((s) => x in s.etats),
+  )
+  const etatsSaisis = (v: Record<string, unknown>) =>
+    Object.fromEntries(
+      SITES_ETATS.map((x) => [x, String(v[x.toLowerCase()])]),
+    ) as StatutService['etats']
   const nonOperationnel = (s: (typeof servicesEtats)[number]) =>
-    (['ABJ', 'GBM'] as const).some((x) => s.etats[x] !== 'operationnel')
+    SITES_ETATS.some((x) => s.etats[x] !== 'operationnel')
+  const disponibilite =
+    servicesEtats.length > 0
+      ? servicesEtats.reduce((t, s) => t + s.uptime90j, 0) / servicesEtats.length
+      : 0
   const degrades = servicesEtats.filter(nonOperationnel)
   const incidentsOuverts = incidents.items.filter((i) => i.statut !== 'resolu')
   const jobsEchec = jobs.items.filter((j) => j.statut === 'failed')
@@ -206,9 +228,11 @@ export default function SantePlateforme() {
                 ? 'Tous les services opérationnels'
                 : `${degrades.length} service dégradé`}
             </Badge>
-            <Badge tone="neutral" size="sm">
-              Données à {dateHeure('2026-08-19T15:20:00Z')}
-            </Badge>
+            {!estActif() && (
+              <Badge tone="neutral" size="sm">
+                Données à {dateHeure('2026-08-19T15:20:00Z')}
+              </Badge>
+            )}
           </>
         }
       />
@@ -256,11 +280,11 @@ export default function SantePlateforme() {
           ton={jobsEchec.length > 0 ? 'err' : 'ok'}
         />
         <StatTile
-          libelle="Disponibilité 30 j"
-          valeur={pct(99.96, 2)}
+          libelle={estActif() ? 'Disponibilité 90 j' : 'Disponibilité 30 j'}
+          valeur={pct(estActif() ? disponibilite : 99.96, 2)}
           ton="ok"
-          detail="Mesurée hors plateforme"
-          serie={seededSeries('dispo-30j', 30, 99.7, 100)}
+          detail={estActif() ? 'Calculée depuis les incidents' : 'Mesurée hors plateforme'}
+          serie={estActif() ? undefined : seededSeries('dispo-30j', 30, 99.7, 100)}
         />
       </div>
 
@@ -281,7 +305,13 @@ export default function SantePlateforme() {
               <table className="w-full min-w-max border-collapse">
                 <thead>
                   <tr className="border-b border-g-300 bg-g-050">
-                    {['Service', 'Catégorie', 'Abidjan', 'Grand-Bassam', 'Disponibilité 90 j', ''].map(
+                    {[
+                      'Service',
+                      'Catégorie',
+                      ...SITES_ETATS.map((x) => (x === 'ABJ' ? 'Abidjan' : 'Grand-Bassam')),
+                      'Disponibilité 90 j',
+                      '',
+                    ].map(
                       (h) => (
                         <th key={h} className="type-micro px-3 py-2 text-left font-semibold text-g-500">
                           {h}
@@ -294,19 +324,12 @@ export default function SantePlateforme() {
                   {servicesEtats.map((s) => (
                     <tr key={s.nom} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2.5 text-[12.5px] font-semibold text-ink">{s.nom}</td>
-                      <td className="px-3 py-2.5 text-[11.5px] text-g-500">{s.categorie}</td>
-                      <td className="px-3 py-2.5">
-                        <HealthBadge
-                          etat={s.etats.ABJ === 'panne' ? 'erreur' : s.etats.ABJ}
-                          size="sm"
-                        />
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <HealthBadge
-                          etat={s.etats.GBM === 'panne' ? 'erreur' : s.etats.GBM}
-                          size="sm"
-                        />
-                      </td>
+                      <td className="px-3 py-2.5 text-[11.5px] text-g-500">{CATEGORIE_SERVICE[s.categorie] ?? s.categorie}</td>
+                      {SITES_ETATS.map((x) => (
+                        <td key={x} className="px-3 py-2.5">
+                          <HealthBadge etat={s.etats[x] === 'panne' ? 'erreur' : s.etats[x]} size="sm" />
+                        </td>
+                      ))}
                       <td className="px-3 py-2.5">
                         <span
                           className={cn(
@@ -338,44 +361,40 @@ export default function SantePlateforme() {
                                 { value: 'maintenance', label: 'Maintenance' },
                               ],
                             },
-                            {
-                              id: 'gbm',
-                              label: 'Grand-Bassam',
-                              type: 'select',
-                              demi: true,
-                              options: [
-                                { value: 'operationnel', label: 'Opérationnel' },
-                                { value: 'degrade', label: 'Dégradé' },
-                                { value: 'panne', label: 'Panne' },
-                                { value: 'maintenance', label: 'Maintenance' },
-                              ],
-                            },
+                            ...(SITES_ETATS.includes('GBM')
+                              ? [
+                                  {
+                                    id: 'gbm',
+                                    label: 'Grand-Bassam',
+                                    type: 'select' as const,
+                                    demi: true,
+                                    options: [
+                                      { value: 'operationnel', label: 'Opérationnel' },
+                                      { value: 'degrade', label: 'Dégradé' },
+                                      { value: 'panne', label: 'Panne' },
+                                      { value: 'maintenance', label: 'Maintenance' },
+                                    ],
+                                  },
+                                ]
+                              : []),
                           ]}
-                          valeursDepart={{ abj: s.etats.ABJ, gbm: s.etats.GBM }}
+                          valeursDepart={{ abj: s.etats.ABJ, gbm: s.etats.GBM ?? '' }}
                           libelleValider="Publier l’état"
                           operation={(v) => {
                             const prochains = servicesEtats.map((x) =>
                               x.nom === s.nom
                                 ? {
                                     ...x,
-                                    etats: {
-                                      ABJ: String(v.abj),
-                                      GBM: String(v.gbm),
-                                    } as StatutService['etats'],
+                                    etats: etatsSaisis(v),
                                   }
                                 : x,
                             )
                             return {
                               titre: `État de ${s.nom} publié`,
-                              detail: `Abidjan : ${v.abj} · Grand-Bassam : ${v.gbm}.`,
+                              detail: `Abidjan : ${v.abj}${v.gbm ? ` · Grand-Bassam : ${v.gbm}` : ''}.`,
                               appel: () => pousserEtats(prochains),
                               effet: () =>
-                                statutsServices.modifier(s.nom, {
-                                  etats: {
-                                    ABJ: String(v.abj),
-                                    GBM: String(v.gbm),
-                                  } as StatutService['etats'],
-                                }),
+                                statutsServices.modifier(s.nom, { etats: etatsSaisis(v) }),
                               effetFinal: () => statutsServices.recharger(),
                             }
                           }}
@@ -403,6 +422,8 @@ export default function SantePlateforme() {
             </div>
           </Card>
 
+          {!estActif() && (
+            <>
           <GrilleSparkCharts
             seed="plateforme-sante"
             metriques={[
@@ -425,11 +446,19 @@ export default function SantePlateforme() {
             de nos réseaux. Se mesurer depuis sa propre infrastructure revient à ne pas voir les
             pannes de connectivité, qui sont précisément celles que le client subit.
           </Callout>
+            </>
+          )}
         </div>
       )}
 
       {onglet === 'incidents' && (
         <div className="space-y-4">
+          {incidents.items.length === 0 && (
+            <EmptyState
+              titre="Aucun incident"
+              phrase="Aucun incident n’a été déclaré. Un incident publié ici apparaît aussi sur la page de statut."
+            />
+          )}
           {incidents.items.map((i) => (
             <Card
               key={i.id}
@@ -633,7 +662,7 @@ export default function SantePlateforme() {
                       </td>
                       <td className="px-3 py-2.5">
                         <span className="tnum text-[11.5px] text-g-700">
-                          {num(b.capacite.stockageTo)} To
+                          {toHumain(b.capacite.stockageTo)}
                           <span className="ml-1.5 font-semibold text-ink">
                             {pct(b.usage.stockagePct)}
                           </span>
@@ -879,17 +908,25 @@ export default function SantePlateforme() {
               titre="Alertes de plateforme"
               sousTitre="Toutes sévérités, tous socles, toutes organisations."
             />
-            <EventList
-              evenements={ALERTES_PLATEFORME}
-              max={8}
-              lienSortie="Ouvrir Centreon"
-              hrefSortie="https://centreon.synelia.cloud/monitoring/resources"
-            />
+            {estActif() ? (
+              <EmptyState
+                titre="Alertes dans Centreon"
+                phrase="Les alertes ne sont pas encore relayées dans cette console : consultez-les dans Centreon ou Grafana."
+              />
+            ) : (
+              <EventList
+                evenements={ALERTES_PLATEFORME}
+                max={8}
+                lienSortie="Ouvrir Centreon"
+                hrefSortie="https://centreon.synelia.tech/monitoring/resources"
+              />
+            )}
             <div className="mt-4 border-t border-g-100 pt-4">
               <LiensSortie centreon grafana logs />
             </div>
           </Card>
 
+          {!estActif() && (
           <Card>
             <CardHeader
               titre="Bruit d’alerte"
@@ -985,6 +1022,7 @@ export default function SantePlateforme() {
               </span>
             </Callout>
           </Card>
+          )}
         </div>
       )}
 
@@ -1054,8 +1092,8 @@ export default function SantePlateforme() {
           <Field label="Sites concernés">
             <Select value={sitesTouches} onChange={(e) => setSitesTouches(e.target.value)}>
               <option value="ABJ">Abidjan · ABJ-1</option>
-              <option value="GBM">Grand-Bassam · GBM-1</option>
-              <option value="tous">Les deux sites</option>
+              {SITES.includes('GBM') && <option value="GBM">Grand-Bassam · GBM-1</option>}
+              {SITES.length > 1 && <option value="tous">Les deux sites</option>}
             </Select>
           </Field>
           <Field

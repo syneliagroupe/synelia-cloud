@@ -5,7 +5,7 @@ import { ExternalLink, GitCompare, RotateCcw, Upload } from 'lucide-react'
 import { cn, seededSeries, surfaceMarque } from '@/lib/utils'
 import { MAINTENANT, dateCourte, num, relatif } from '@/lib/format'
 import { SITE_LABEL } from '@/lib/types'
-import { SITES_WEB, TYPE_SITE_LABEL, hebergementById, nomServi } from '@/lib/mock'
+import { SITES_WEB, TYPE_SITE_LABEL, typeSiteAvecVersion, hebergementById, nomServi } from '@/lib/mock'
 import type { SiteWeb } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -53,17 +53,17 @@ export function VueApplication({ id }: { id: string }) {
           { label: s.hote },
         ]}
         titre={
-          <span className="flex items-center gap-2.5">
+          <span className="flex min-w-0 items-center gap-2.5">
             <span
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] text-[11px] font-bold"
               style={{ background: surface.fond, color: surface.texte }}
             >
               {TYPE_SITE_LABEL[s.type].slice(0, 2).toUpperCase()}
             </span>
-            <span className="break-words font-mono">{s.hote}</span>
+            <span className="min-w-0 break-words font-mono">{s.hote}</span>
           </span>
         }
-        sousTitre={`${TYPE_SITE_LABEL[s.type]}${s.version ? ` ${s.version}` : ''} installé dans ${s.racine}${h ? `, sur ${h.serveur.nom}` : ''}. Le contenu s’édite dans l’application.`}
+        sousTitre={`${typeSiteAvecVersion(s)} installé dans ${s.racine}${h ? `, sur ${h.serveur.nom}` : ''}. Le contenu s’édite dans l’application.`}
         meta={
           <>
             <Badge tone={s.statut === 'en_ligne' ? 'ok' : 'neutral'} dot>
@@ -77,7 +77,14 @@ export function VueApplication({ id }: { id: string }) {
         actions={
           <>
             {h && (
-              <ButtonLink href={`/app/web/hebergement/${h.id}`} variant="secondary">
+              <ButtonLink
+                href={
+                  h.domaine ?? h.domaineProvisoire
+                    ? `/app/web/sites/${encodeURIComponent(h.domaine ?? h.domaineProvisoire!)}/serveur`
+                    : '/app/web/sites'
+                }
+                variant="secondary"
+              >
                 Le serveur
               </ButtonLink>
             )}
@@ -99,8 +106,9 @@ export function VueApplication({ id }: { id: string }) {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile
               libelle="Visites du mois"
-              valeur={num(s.visitesMois)}
-              serie={seededSeries(s.id, 14, 200, 1600)}
+              valeur={estActif() ? '—' : num(s.visitesMois)}
+              serie={estActif() ? undefined : seededSeries(s.id, 14, 200, 1600)}
+              detail={estActif() ? 'aucune mesure d’audience collectée' : undefined}
             />
             <StatTile
               libelle="Espace occupé"

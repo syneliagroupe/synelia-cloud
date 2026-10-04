@@ -68,6 +68,7 @@ export function VueMessagerie({ id }: { id: string }) {
     }
     requete<{ url: string }>(`/web/emails/${encodeURIComponent(m.id)}/ouverture`, {
       methode: 'POST',
+      corps: {},
     }).then(
       (r) => window.open(r.url, '_blank', 'noopener'),
       (e: unknown) =>

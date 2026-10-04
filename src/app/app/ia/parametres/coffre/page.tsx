@@ -16,11 +16,26 @@ import { QuotaBar, StatTile } from '@/components/composition/metrics'
 import { LogPeek } from '@/components/business/observabilite'
 import { JOURNAL_PASSERELLE } from '@/lib/mock/ia'
 import { useApp, useEspace } from '@/components/app/contexte'
+import { estActif } from '@/lib/api/client'
 
 const TON_STATUT = { active: 'ok', suspendue: 'warn', revoquee: 'neutral' } as const
 const LIBELLE_STATUT = { active: 'Active', suspendue: 'Suspendue', revoquee: 'Révoquée' } as const
 
+// En mode API, un seul fournisseur amont : la clé OpenRouter de la passerelle LiteLLM.
+const COFFRE_API = [
+  {
+    fournisseur: 'OpenRouter',
+    empreinte: 'jamais affichée',
+    portee: 'Passerelle LiteLLM — tous les modèles externes',
+    ajoutee: '',
+    rotation: '',
+    statut: 'valide' as const,
+  },
+]
+
 export default function CoffreCles() {
+  const api = estActif()
+  const coffre = api ? COFFRE_API : COFFRE_CLES_FOURNISSEURS
   return (
     <div className="space-y-5">
       <PageHeader
@@ -36,8 +51,8 @@ export default function CoffreCles() {
 
       <Card>
         <CardHeader
-          titre="Coffre-fort des clés fournisseurs"
-          sousTitre="Les clés des éditeurs étrangers sont détenues par Synelia, chiffrées au repos, et ne sont jamais exposées à vos applications : vous appelez la passerelle avec votre propre clé, elle appelle le fournisseur avec la sienne."
+          titre="Clés détenues par Synelia"
+          sousTitre="Une entrée par fournisseur amont."
           actions={
             <Badge tone="violet" size="sm">
               <Lock size={10} className="mr-1 inline" aria-hidden />
@@ -58,13 +73,13 @@ export default function CoffreCles() {
               </tr>
             </thead>
             <tbody>
-              {COFFRE_CLES_FOURNISSEURS.map((c) => (
+              {coffre.map((c) => (
                 <tr key={c.fournisseur} className="border-b border-g-100 last:border-0">
                   <td className="px-3 py-3 text-[13px] font-semibold text-ink">{c.fournisseur}</td>
                   <td className="px-3 py-3 font-mono text-[12px] text-g-500">{c.empreinte}</td>
                   <td className="px-3 py-3 text-[12px] text-g-700">{c.portee}</td>
-                  <td className="px-3 py-3 text-[12px] text-g-500">{dateCourte(c.ajoutee)}</td>
-                  <td className="px-3 py-3 text-[12px] text-g-500">{dateCourte(c.rotation)}</td>
+                  <td className="px-3 py-3 text-[12px] text-g-500">{c.ajoutee ? dateCourte(c.ajoutee) : '—'}</td>
+                  <td className="px-3 py-3 text-[12px] text-g-500">{c.rotation ? dateCourte(c.rotation) : '—'}</td>
                   <td className="px-3 py-3">
                     <Badge tone={c.statut === 'valide' ? 'ok' : 'warn'} dot size="sm">
                       {c.statut === 'valide' ? 'Valide' : 'À renouveler'}
@@ -76,9 +91,9 @@ export default function CoffreCles() {
           </table>
         </div>
         <Callout ton="info" className="mt-4" titre="Ces clés sont les nôtres, pas les vôtres">
-          Les contrats cadres sont mutualisés : pas de compte à ouvrir chez chaque éditeur, pas de
+          {api ? 'Les modèles externes passent tous par un seul compte OpenRouter' : 'Les contrats cadres sont mutualisés'} : pas de compte à ouvrir chez chaque éditeur, pas de
           secret supplémentaire à garder. En échange, vous ne voyez pas ces clés et leur rotation
-          dépend de nous. Les échéances de septembre et d’août sont suivies par l’exploitation.
+          dépend de nous.{api ? '' : ' Les échéances de septembre et d’août sont suivies par l’exploitation.'}
         </Callout>
       </Card>
     </div>

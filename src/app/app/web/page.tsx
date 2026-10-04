@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import {
-  AlertTriangle,
   Database,
   FolderOpen,
   Globe,
@@ -90,38 +89,13 @@ export default function AccueilWebCloud() {
     ? drivesCol.items
     : drivesCol.items.filter((d) => perimetreDrives.has(d.id))
   const certificats = certificatsCol.items
-  const plans = estActif() ? sauvegardesCol.items : sauvegardesWebDeLOrg()
+  // Un plan dont l'hébergement n'existe plus (supprimé côté backend) n'a plus rien à sauvegarder.
+  const plans = estActif()
+    ? sauvegardesCol.items.filter((p) => miens.has(p.hebergementId))
+    : sauvegardesWebDeLOrg()
 
   const boites = messageries.reduce((a, m) => a + m.boites.length, 0)
   const majEnAttente = sites.reduce((a, s) => a + (s.majEnAttente ?? 0), 0)
-
-  // Ce qui demande une décision, rassemblé une fois pour toutes.
-  const aSurveiller = [
-    ...entrees
-      .filter((e) => e.domaine && !e.domaine.renouvellementAuto)
-      .map((e) => ({
-        quoi: `${e.nom} — renouvellement manuel`,
-        detail: `Échéance dans ${joursAvant(e.domaine!.expiration)} jours. À l’échéance, le nom retourne au registre.`,
-        href: `/app/web/domaines/${encodeURIComponent(e.id)}`,
-        jours: joursAvant(e.domaine!.expiration),
-      })),
-    ...certificats.filter((c) => !c.renouvellementAuto && c.etat === 'actif').map((c) => ({
-      quoi: `${c.hote} — certificat non renouvelé`,
-      detail: `Expire dans ${joursAvant(c.expire)} jours et le renouvellement automatique est coupé.`,
-      href: `/app/web/ssl/${c.id}`,
-      jours: joursAvant(c.expire),
-    })),
-    ...(majEnAttente > 0
-      ? [
-          {
-            quoi: `${majEnAttente} mises à jour d’application en attente`,
-            detail: 'Cœur ou extensions. Chaque mise à jour est précédée d’une sauvegarde.',
-            href: '/app/web/applications',
-            jours: 999,
-          },
-        ]
-      : []),
-  ].sort((a, b) => a.jours - b.jours)
 
   const sections = [
     {
@@ -132,25 +106,18 @@ export default function AccueilWebCloud() {
       detail: `${heberges.length} avec hébergement`,
     },
     {
-      nom: 'Hébergement Web',
+      nom: 'Hébergements',
       href: '/app/web/hebergement',
       icone: <Server size={16} />,
       valeur: heberges.length,
-      detail: `${sites.length} sites installés`,
+      detail: `${sites.length} applications installées`,
     },
     {
-      nom: 'Bases de données',
-      href: '/app/web/bases',
-      icone: <Database size={16} />,
-      valeur: moteurs.filter((m) => m.actif).length,
-      detail: `${moteurs.length - moteurs.filter((m) => m.actif).length} à activer`,
-    },
-    {
-      nom: 'Messagerie',
+      nom: 'Emails',
       href: '/app/web/emails',
       icone: <Mail size={16} />,
       valeur: boites,
-      detail: `sur ${messageries.filter((m) => m.actif).length} domaines`,
+      detail: `sur ${messageries.filter((m) => m.actif).length} domaine${messageries.filter((m) => m.actif).length > 1 ? 's' : ''}`,
     },
     {
       nom: 'Drive',
@@ -159,27 +126,6 @@ export default function AccueilWebCloud() {
       valeur: drives.filter((d) => d.actif).reduce((a, d) => a + d.sieges.attribues, 0),
       detail: 'sièges attribués',
     },
-    {
-      nom: 'Applications',
-      href: '/app/web/applications',
-      icone: <Globe size={16} />,
-      valeur: sites.length,
-      detail: `${sites.filter((s) => s.statut === 'en_ligne').length} en ligne`,
-    },
-    {
-      nom: 'SSL',
-      href: '/app/web/ssl',
-      icone: <ShieldCheck size={16} />,
-      valeur: certificats.filter((c) => c.etat === 'actif').length,
-      detail: `${certificats.filter((c) => c.etat === 'en_emission').length} en émission`,
-    },
-    {
-      nom: 'Sauvegardes',
-      href: '/app/web/backup',
-      icone: <HardDrive size={16} />,
-      valeur: plans.length,
-      detail: `${plans.reduce((a, p) => a + p.espaceOccupeGo, 0).toFixed(0)} Go conservés`,
-    },
   ]
 
   return (
@@ -187,7 +133,7 @@ export default function AccueilWebCloud() {
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Web Cloud' }]}
         titre="Web Cloud"
-        sousTitre="Vos noms de domaine et ce qui tourne dessus : hébergement mutualisé, bases, messagerie, drive, applications, certificats et sauvegardes. Chaque section a sa liste dans le panneau de gauche."
+        sousTitre="Domaines, hébergements, messagerie et drive. Chaque section liste ses ressources dans le panneau de gauche."
       />
 
       <Card>
@@ -197,34 +143,13 @@ export default function AccueilWebCloud() {
             Nouveau domaine
           </ButtonLink>
           <ButtonLink href="/app/web/hebergement" variant="secondary" iconBefore={<Server size={13} />}>
-            Nouvel hébergement
+            Hébergements
           </ButtonLink>
-          <ButtonLink href="/app/web/applications" variant="secondary">
-            Installer une application
+          <ButtonLink href="/app/web/emails" variant="secondary" iconBefore={<Mail size={13} />}>
+            Messagerie
           </ButtonLink>
         </div>
       </Card>
-
-      {aSurveiller.length > 0 && (
-        <Callout
-          ton="warn"
-          titre={`${aSurveiller.length} point${aSurveiller.length > 1 ? 's' : ''} à surveiller`}
-        >
-          <ul className="mt-1 space-y-1.5">
-            {aSurveiller.map((a) => (
-              <li key={a.quoi} className="flex items-start gap-2">
-                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warn" />
-                <span>
-                  <Link href={a.href} className="font-semibold underline">
-                    {a.quoi}
-                  </Link>
-                  <span className="ml-1.5 text-g-700">{a.detail}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Callout>
-      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
@@ -242,8 +167,7 @@ export default function AccueilWebCloud() {
         <StatTile
           libelle="Espace sauvegardé"
           valeur={`${plans.reduce((a, p) => a + p.espaceOccupeGo, 0).toFixed(0)} Go`}
-          detail="immuable, hors site"
-          ton="ok"
+          detail={`${plans.length} plan${plans.length > 1 ? 's' : ''} de sauvegarde`}
         />
       </div>
 
@@ -278,14 +202,20 @@ export default function AccueilWebCloud() {
             sousTitre="Un domaine est attaché à un serveur et à un seul. Tout ce qui est installé dessus partage son processeur, sa mémoire et son disque."
           />
           <div className="space-y-4">
+            {heberges.length === 0 && (
+              <p className="py-6 text-center text-[13px] text-g-500">
+                Aucun serveur pour l’instant : attachez un hébergement à l’un de vos domaines.
+              </p>
+            )}
             {heberges.map((h) => {
               const sitesDuServeur = sites.filter((s) => s.hebergementId === h.id)
+              const hrefServeur = `/app/web/hebergement/${h.id}`
               return (
                 <div key={h.id} className="rounded-[8px] border border-g-300 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0">
                       <Link
-                        href={`/app/web/hebergement/${h.id}`}
+                        href={hrefServeur}
                         className="block truncate font-mono text-[13px] font-bold text-ink hover:text-p-700"
                       >
                         {h.domaine ?? h.domaineProvisoire}
@@ -305,8 +235,8 @@ export default function AccueilWebCloud() {
                         libelle="Processeur"
                         utilise={h.serveur.chargeCpuPct}
                         total={100}
+                        unite="%"
                         compact
-                        formateur={(v) => `${v} %`}
                       />
                     )}
                     {h.serveur.ramUtiliseePct != null && (
@@ -314,8 +244,8 @@ export default function AccueilWebCloud() {
                         libelle="Mémoire"
                         utilise={h.serveur.ramUtiliseePct}
                         total={100}
+                        unite="%"
                         compact
-                        formateur={(v) => `${v} %`}
                       />
                     )}
                     <QuotaBar
@@ -323,7 +253,7 @@ export default function AccueilWebCloud() {
                       utilise={h.espaceUtiliseGo}
                       total={h.espaceTotalGo}
                       compact
-                      formateur={(v) => `${v.toFixed(0)} Go`}
+                      formateur={(v) => `${v.toFixed(1)} Go`}
                     />
                   </div>
                 </div>
@@ -335,8 +265,11 @@ export default function AccueilWebCloud() {
         <Card>
           <CardHeader
             titre="Dernières sauvegardes"
-            sousTitre="Immuables : ni nous ni vous ne pouvons les altérer avant la fin de leur rétention."
+            sousTitre="Dernière exécution de chaque plan de sauvegarde."
           />
+          {plans.length === 0 && (
+            <p className="py-4 text-center text-[13px] text-g-500">Aucun plan de sauvegarde.</p>
+          )}
           <ul className="divide-y divide-g-100">
             {plans.map((p) => {
               const d = p.executions[0]
@@ -356,11 +289,11 @@ export default function AccueilWebCloud() {
                     </span>
                     <Badge
                       tone={
-                        d?.statut === 'ok' ? 'ok' : d?.statut === 'partielle' ? 'warn' : 'err'
+                        !d ? 'neutral' : d.statut === 'ok' ? 'ok' : d.statut === 'partielle' ? 'warn' : 'err'
                       }
                       size="sm"
                     >
-                      {d?.statut === 'ok' ? 'OK' : d?.statut === 'partielle' ? 'Partielle' : '—'}
+                      {!d ? 'Aucune' : d.statut === 'ok' ? 'OK' : d.statut === 'partielle' ? 'Partielle' : 'Échec'}
                     </Badge>
                   </Link>
                 </li>
@@ -373,6 +306,9 @@ export default function AccueilWebCloud() {
             titre="Certificats les plus proches"
             sousTitre="Échéance technique, tous hôtes confondus."
           />
+          {certificats.length === 0 && (
+            <p className="py-4 text-center text-[13px] text-g-500">Aucun certificat.</p>
+          )}
           <ul className="divide-y divide-g-100">
             {[...certificats]
               .sort((a, b) => joursAvant(a.expire) - joursAvant(b.expire))

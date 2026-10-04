@@ -72,6 +72,18 @@ export function groupBy<T, K extends string>(
   )
 }
 
+const SERIES_FICTIVES = new WeakSet<number[]>()
+
+/** Vrai pour une série fabriquée par `seededSeries`/`trendSeries`, jamais mesurée. */
+export function estSerieFictive(serie: number[]): boolean {
+  return SERIES_FICTIVES.has(serie)
+}
+
+/** Vrai quand l’API réelle est branchée : les données fictives ne doivent alors pas s’afficher. */
+export function modeApiActif(): boolean {
+  return !!process.env.NEXT_PUBLIC_API_URL
+}
+
 /** Générateur pseudo-aléatoire déterministe — évite toute divergence SSR/client. */
 export function seededSeries(seed: string, count: number, min = 20, max = 90): number[] {
   let state = 0
@@ -84,6 +96,7 @@ export function seededSeries(seed: string, count: number, min = 20, max = 90): n
     const ratio = (state % 10000) / 10000
     out.push(Math.round((min + ratio * (max - min)) * 10) / 10)
   }
+  SERIES_FICTIVES.add(out)
   return out
 }
 
@@ -96,10 +109,12 @@ export function trendSeries(
   jitter = 6,
 ): number[] {
   const noise = seededSeries(seed, count, -jitter, jitter)
-  return noise.map((n, i) => {
+  const serie = noise.map((n, i) => {
     const base = from + ((to - from) * i) / Math.max(1, count - 1)
     return Math.max(0, Math.round((base + n) * 10) / 10)
   })
+  SERIES_FICTIVES.add(serie)
+  return serie
 }
 
 /** Retourne la valeur bornée entre min et max. */

@@ -552,7 +552,7 @@ export const ARTICLES_KB = [
   { id: 'kb-2', titre: 'Pointer un domaine vers votre serveur', theme: 'Domaines & DNS', duree: '5 min', extrait: "Les enregistrements A, AAAA et CNAME à créer, et comment vérifier la propagation." },
   { id: 'kb-3', titre: 'Payer une facture par Orange Money', theme: 'Facturation', duree: '3 min', extrait: "Le parcours complet, du code USSD à la confirmation dans le portail." },
   { id: 'kb-4', titre: 'Restaurer un fichier depuis une sauvegarde', theme: 'Sauvegarde', duree: '6 min', extrait: "Utiliser l'assistant de restauration granulaire pour récupérer un seul document." },
-  { id: 'kb-5', titre: 'Configurer la fédération SSO avec votre annuaire', theme: 'Identité', duree: '12 min', extrait: "OIDC ou SAML : les métadonnées à échanger et le mapping des groupes." },
+  { id: 'kb-5', titre: 'Créer une clé d’API et l’utiliser', theme: 'Identité', duree: '4 min', extrait: "Choisir la portée, copier la clé (affichée une seule fois), l'envoyer en en-tête Bearer." },
   { id: 'kb-6', titre: 'Déployer une application depuis un dépôt Git', theme: 'Applications', duree: '10 min', extrait: "Connecter GitHub ou GitLab, choisir la branche, lire l'analyse automatique du dépôt." },
   { id: 'kb-7', titre: 'Comprendre le rapport de conformité 3-2-1', theme: 'Conformité', duree: '7 min', extrait: "Trois copies, deux supports, une hors site : ce que chaque pastille signifie." },
   { id: 'kb-8', titre: 'Ouvrir un service managé en SSO', theme: 'Services managés', duree: '2 min', extrait: "Pourquoi le bouton Ouvrir vous fait quitter le portail, et ce qui se passe alors." },
@@ -562,7 +562,13 @@ export const ARTICLES_KB = [
 
 export const offreById = (id: string) => OFFRES.find((o) => o.id === id)
 /** Résout le code d'une offre en son nom affichable — jamais le slug brut à l'écran. */
-export const libellePlan = (plan?: string) => OFFRES.find((o) => o.code === plan)?.nom ?? plan ?? '—'
+export const libellePlan = (plan?: string) => {
+  const nom = OFFRES.find((o) => o.code === plan)?.nom
+  if (nom || !plan) return nom ?? '—'
+  // Slug d'une offre absente de la graine (mode API) : « espace-pro » → « Espace pro ».
+  const lisible = plan.replace(/[-_]+/g, ' ')
+  return lisible.charAt(0).toUpperCase() + lisible.slice(1)
+}
 export const factureById = (id: string) => FACTURES.find((f) => f.id === id)
 export const ticketById = (id: string) =>
   TICKETS_PLATEFORME.find((t) => t.id === id || t.numero.toLowerCase() === id.toLowerCase())

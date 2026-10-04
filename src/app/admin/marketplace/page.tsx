@@ -76,7 +76,11 @@ export default function MarketplaceAdmin() {
 
   const certifies = CATALOGUE.filter((c) => estCertifie(c.slug))
   const aCertifier = CATALOGUE.filter((c) => !estCertifie(c.slug))
-  const enRetard = parc.items.filter((i) => i.derniereMaj < '2026-05-01')
+  const seuilRetard = estActif()
+    ? new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)
+    : '2026-05-01'
+  const enRetardMaj = (i: InstanceParc) => Boolean(i.derniereMaj) && i.derniereMaj < seuilRetard
+  const enRetard = parc.items.filter(enRetardMaj)
   const degrades = parc.items.filter((i) => i.sante !== 'ok')
   const campagnesActives = campagnes.items.filter((c) => c.statut === 'en_cours')
 
@@ -160,14 +164,14 @@ export default function MarketplaceAdmin() {
               {certifies.length} certifiées
             </Badge>
             <Badge tone="neutral" size="sm">
-              {parc.items.length} instances exploitées
+              {parc.items.length} instance{parc.items.length > 1 ? 's' : ''} exploitée{parc.items.length > 1 ? 's' : ''}
             </Badge>
           </>
         }
       />
 
       {enRetard.length > 0 && (
-        <Callout ton="warn" titre={`${enRetard.length} instances ont plus de trois mois de retard de version`}>
+        <Callout ton="warn" titre={`${enRetard.length} instance${enRetard.length > 1 ? 's ont' : ' a'} plus de trois mois de retard de version`}>
           {enRetard
             .slice(0, 3)
             .map((i) => `${i.serviceNom} chez ${i.orgNom} (${i.version})`)
@@ -308,6 +312,7 @@ export default function MarketplaceAdmin() {
         <Card padding={false}>
           <div className="p-4">
             <DataTable<InstanceParc>
+              chargement={parc.chargement}
               lignes={parc.items}
               exportable
               parPage={12}
@@ -413,25 +418,25 @@ export default function MarketplaceAdmin() {
                 {
                   id: 'sauvegarde',
                   entete: 'Dernière sauvegarde',
-                  cle: (i) => i.derniereSauvegarde,
+                  cle: (i) => i.derniereSauvegarde ?? '',
                   rendu: (i) => (
                     <span className="text-[11.5px] text-g-500">
-                      {relatif(i.derniereSauvegarde, maintenant)}
+                      {i.derniereSauvegarde ? relatif(i.derniereSauvegarde, maintenant) : 'Aucune'}
                     </span>
                   ),
                 },
                 {
                   id: 'maj',
                   entete: 'Dernière mise à jour',
-                  cle: (i) => i.derniereMaj,
+                  cle: (i) => i.derniereMaj ?? '',
                   rendu: (i) => (
                     <span
                       className={cn(
                         'text-[11.5px]',
-                        i.derniereMaj < '2026-05-01' ? 'font-semibold text-warn' : 'text-g-500',
+                        enRetardMaj(i) ? 'font-semibold text-warn' : 'text-g-500',
                       )}
                     >
-                      {dateCourte(i.derniereMaj)}
+                      {i.derniereMaj ? dateCourte(i.derniereMaj) : '—'}
                     </span>
                   ),
                 },
@@ -456,7 +461,7 @@ export default function MarketplaceAdmin() {
                       >
                         Organisation
                       </ButtonLink>
-                      {i.derniereMaj < '2026-05-01' && (
+                      {enRetardMaj(i) && (
                         <BoutonFormulaire
                           libelle="Planifier la mise à jour"
                           action="catalog.edit"
@@ -563,6 +568,11 @@ export default function MarketplaceAdmin() {
             plus n’est touché.
           </Callout>
 
+          {campagnes.items.length === 0 && (
+            <p className="rounded-[8px] border border-dashed border-g-300 px-4 py-6 text-center text-[12px] text-g-500">
+              Aucune campagne. Planifiez une mise à jour depuis le parc d’instances : elle apparaîtra ici, prête à être lancée.
+            </p>
+          )}
           {campagnes.items.map((c) => {
             const solution = CATALOGUE.find((x) => x.slug === c.catalogSlug)
             // En mode API le backend renvoie des campagnes sans `vagues`
@@ -813,7 +823,7 @@ export default function MarketplaceAdmin() {
               <table className="w-full min-w-max border-collapse">
                 <thead>
                   <tr className="border-b border-g-300 bg-g-050">
-                    {['#', 'Capacité', 'Écran du portail', 'Couverture du parc'].map((h) => (
+                    {['#', 'Capacité', 'Écran du portail', 'Couverture du catalogue'].map((h) => (
                       <th key={h} className="type-micro px-3 py-2 text-left font-semibold text-g-500">
                         {h}
                       </th>

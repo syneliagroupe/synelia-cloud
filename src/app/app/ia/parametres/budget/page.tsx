@@ -23,6 +23,7 @@ import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/
 import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { QuotaBar, StackedBar, StatTile } from '@/components/composition/metrics'
 import { PermissionDenied } from '@/components/composition/states'
+import { AvisDemoApi } from '../../avis-demo'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonFormulaire } from '@/components/app/actions'
@@ -116,6 +117,10 @@ export default function BudgetEtAlertes() {
         titre="Budget, alertes et quotas"
         sousTitre="Le plafond porte sur l’ensemble de l’organisation ; chaque clé et chaque direction garde en plus le sien. C’est le seul de ces réglages qui coupe réellement le service — les autres se contentent d’alerter."
       />
+
+      <AvisDemoApi>
+        Le plafond d’organisation, les quotas par direction et les alertes ci-dessous sont un jeu d’exemple. Ce qui est réel : le quota et le plafond de dépense de chaque clé, sous « Passerelle & clés ».
+      </AvisDemoApi>
 
       <Card>
         <CardHeader

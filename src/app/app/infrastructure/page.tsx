@@ -2,8 +2,19 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, ArrowRight, Plus } from 'lucide-react'
-import { num, pct, toHumain } from '@/lib/format'
+import { useRef } from 'react'
+import {
+  ArrowRight,
+  Box,
+  Cloud,
+  Database,
+  HardDrive,
+  Layers,
+  Plus,
+  Server,
+  Shield,
+} from 'lucide-react'
+import { num, toHumain } from '@/lib/format'
 import { ApiError, estActif } from '@/lib/api/client'
 import type {
   Bucket,
@@ -32,8 +43,8 @@ import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction } from '@/components/ui/display'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { QuotaBar, StatTile } from '@/components/composition/metrics'
-import { DegradedState } from '@/components/composition/states'
-import { useApp } from '@/components/app/contexte'
+import { DegradedState, EmptyState } from '@/components/composition/states'
+import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 
 /**
@@ -45,8 +56,10 @@ import { useCollection } from '@/components/app/atelier'
  * partent de ce choix.
  */
 export default function AccueilInfrastructure() {
-  const { espaceId, setEspaceId, autorise, refus } = useApp()
+  const { setEspaceId, autorise, refus } = useApp()
+  const espaceCourant = useEspace()
   const router = useRouter()
+  const parcRef = useRef<HTMLDivElement>(null)
   // Espaces Cloud, machines, clusters, répartiteurs, volumes, bases et plans de
   // reprise ont chacun un vrai backend (`/espaces`, `/vms`, `/kubernetes`,
   // `/load-balancers`, `/volumes`, `/bases`, `/pra`) : `useCollection` en sert
@@ -78,11 +91,11 @@ export default function AccueilInfrastructure() {
   // Somme des quotas/usages réels des Espaces, pour la tuile de stockage :
   // `SYNTHESE_CLIENT` était un agrégat figé, faux dès la première création.
   const quotaStockageTo = Math.round(espaces.reduce((a, e) => a + e.quota.stockageTo, 0) * 10) / 10
-  const usageStockageTo = Math.round(espaces.reduce((a, e) => a + e.usage.stockageTo, 0) * 10) / 10
+  const usageStockageTo = Math.round(espaces.reduce((a, e) => a + e.usage.stockageTo, 0) * 1000) / 1000
 
   // `useCollection` retombe silencieusement sur la graine pour tout échec —
   // sauf le `424` (intégration amont muette), qu'il faut nommer plutôt que de
-  // laisser les quotas et la liste « à surveiller » mentir avec des chiffres
+  // laisser les quotas mentir avec des chiffres
   // qu'on ne sait plus dater. Le même motif que sur le tableau de bord client.
   const erreurEspaces = espacesCol.erreur
   const espacesDegrade =
@@ -90,40 +103,60 @@ export default function AccueilInfrastructure() {
       ? { integration: erreurEspaces.integration, dateDonnees: erreurEspaces.dateDonnees }
       : null
 
+  // `espaceId` du contexte peut être l'Espace par défaut de la maquette au premier
+  // passage en mode API : `espaceCourant` est celui que les sections utiliseront.
+  const espaceValide = espaces.some((e) => e.id === espaceCourant.id)
+
   const ouvrir = (id: string) => {
     setEspaceId(id)
     router.push(`/app/espaces/${id}`)
   }
 
-  // Ce qui demande une décision, rassemblé une fois : un quota qu'on va buter,
-  // une machine qu'aucun plan ne sauvegarde, un plan de reprise jamais joué.
-  const aSurveiller = [
-    ...espaces
-      .map((e) => ({
-        e,
-        ratio: Math.max(
-          e.usage.vcpu / e.quota.vcpu,
-          e.usage.ramGo / e.quota.ramGo,
-          e.usage.stockageTo / e.quota.stockageTo,
-        ),
-      }))
-      .filter(({ ratio }) => ratio >= 0.85)
-      .map(({ e, ratio }) => ({
-        quoi: `${e.code} — quota à ${pct(ratio * 100)}`,
-        detail:
-          'À ce niveau, une création de machine peut être refusée. L’extension s’applique à chaud.',
-        href: `/app/espaces/${e.id}`,
-      })),
-    ...vms.filter((v) => !v.backupPlanId).map((v) => ({
-      quoi: `${v.nom} — aucun plan de sauvegarde`,
-      detail: 'La machine tourne, mais rien n’en garde de copie restaurable.',
-      href: `/app/vms/${v.id}`,
-    })),
-    ...drPlans.filter((p) => p.exercices.length === 0).map((p) => ({
-      quoi: `${p.nom} — jamais testé`,
-      detail: 'Un plan de reprise qu’on n’a jamais joué est une intention, pas une garantie.',
-      href: `/app/pra/${p.id}`,
-    })),
+  const defilerParc = () => parcRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  const commander = [
+    {
+      libelle: 'Machine virtuelle',
+      href: '/app/vms/new',
+      icone: Server,
+      permission: 'vm.create_delete' as const,
+    },
+    {
+      libelle: 'Cluster Kubernetes',
+      href: '/app/kubernetes/new',
+      icone: Layers,
+      permission: 'espace.create' as const,
+    },
+    {
+      libelle: 'Volume bloc',
+      href: '/app/stockage',
+      icone: HardDrive,
+      permission: 'network.manage' as const,
+    },
+    {
+      libelle: 'Bucket S3',
+      href: '/app/objet',
+      icone: Box,
+      permission: 'network.manage' as const,
+    },
+    {
+      libelle: 'Base managée',
+      href: '/app/bases',
+      icone: Database,
+      permission: 'network.manage' as const,
+    },
+    {
+      libelle: 'Load balancer',
+      href: '/app/reseau/lb',
+      icone: Cloud,
+      permission: 'lb.create' as const,
+    },
+    {
+      libelle: 'Plan de sauvegarde',
+      href: '/app/sauvegarde',
+      icone: Shield,
+      permission: 'backup.plan.write' as const,
+    },
   ]
 
   return (
@@ -141,40 +174,75 @@ export default function AccueilInfrastructure() {
         }
       />
 
-      <Card>
-        <CardHeader titre="Accès rapide" sousTitre="Créer une ressource dans l’Espace Cloud courant." />
-        <div className="flex flex-wrap gap-2">
-          <ButtonLink href="/app/vms/new" iconBefore={<Plus size={13} />}>
-            Nouvelle machine
-          </ButtonLink>
-          <ButtonLink href="/app/kubernetes/new" variant="secondary">
-            Nouveau cluster
-          </ButtonLink>
-          <ButtonLink href="/app/stockage" variant="secondary">
-            Nouveau volume
-          </ButtonLink>
-        </div>
-      </Card>
+      {espaces.length === 0 ? (
+        <EmptyState
+          titre="Aucun Espace Cloud"
+          phrase="Toute ressource d’infrastructure vit dans un Espace Cloud : quotas, réseau, site. Commencez par en créer un, puis les sections Machines, Réseau et Stockage s’activent dans son contexte."
+          action={{ libelle: 'Créer un Espace Cloud', href: '/app/espaces/new' }}
+        />
+      ) : (
+        <>
+          <Callout ton="info" titre="Contexte pour les commandes">
+            Les créations ci-dessous s’appliquent à l’Espace{' '}
+            <Link href={`/app/espaces/${espaceCourant.id}`} className="font-semibold underline">
+              {espaceCourant.code}
+            </Link>
+            {espaceValide ? (
+              <>
+                {' '}
+                — le même que vous retrouverez dans le panneau de gauche dès que vous ouvrez une
+                section (Machines, Réseau…).
+              </>
+            ) : (
+              <>
+                {' '}
+                (sélection mémorisée) ne figure plus dans votre parc.{' '}
+                <button type="button" onClick={defilerParc} className="font-semibold underline">
+                  Choisissez un Espace ci-dessous
+                </button>{' '}
+                avant de commander.
+              </>
+            )}
+          </Callout>
 
-      {aSurveiller.length > 0 && (
-        <Callout
-          ton="warn"
-          titre={`${aSurveiller.length} point${aSurveiller.length > 1 ? 's' : ''} à surveiller`}
-        >
-          <ul className="mt-1 space-y-1.5">
-            {aSurveiller.map((a) => (
-              <li key={a.quoi} className="flex items-start gap-2">
-                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warn" />
-                <span>
-                  <Link href={a.href} className="font-semibold underline">
-                    {a.quoi}
-                  </Link>{' '}
-                  — {a.detail}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Callout>
+          <Card>
+            <CardHeader
+              titre="Commander"
+              sousTitre={
+                espaceValide
+                  ? `Raccourcis de création dans ${espaceCourant.code}. Les listes détaillées restent dans chaque section.`
+                  : 'Choisissez d’abord un Espace dans le parc ci-dessous — les commandes sont désactivées tant que le contexte n’est pas valide.'
+              }
+            />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {commander.map(({ libelle, href, icone: Icone, permission }) => (
+                <GatedAction key={href} autorise={autorise(permission)} message={refus(permission)}>
+                  {espaceValide ? (
+                    <ButtonLink
+                      href={href}
+                      variant="secondary"
+                      fullWidth
+                      iconBefore={<Icone size={14} />}
+                      className="justify-start"
+                    >
+                      {libelle}
+                    </ButtonLink>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      disabled
+                      iconBefore={<Icone size={14} />}
+                      className="justify-start"
+                    >
+                      {libelle}
+                    </Button>
+                  )}
+                </GatedAction>
+              ))}
+            </div>
+          </Card>
+        </>
       )}
 
       {espacesDegrade && (
@@ -199,25 +267,24 @@ export default function AccueilInfrastructure() {
         <StatTile
           libelle="Clusters Kubernetes"
           valeur={clusters.length}
-          detail={`${lb.length} répartiteur(s) de charge`}
+          detail={`${lb.length} load balancer(s)`}
         />
         <StatTile
           libelle="Stockage consommé"
-          valeur={`${usageStockageTo}/${quotaStockageTo}`}
-          unite="To"
-          ton="warn"
-          detail="Premier facteur limitant"
+          valeur={toHumain(usageStockageTo)}
+          ton={quotaStockageTo > 0 && usageStockageTo / quotaStockageTo >= 0.85 ? 'warn' : 'ok'}
+          detail={`sur ${toHumain(quotaStockageTo)} souscrits`}
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div ref={parcRef} id="parc-espaces" className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {espaces.map((e) => {
           const machines = vms.filter((v) => v.espaceId === e.id)
           const clustersEspace = clusters.filter((c) => c.espaceId === e.id)
           const repartiteurs = lb.filter((l) => l.espaceId === e.id)
           const volumesEspace = volumes.filter((v) => v.espaceId === e.id)
           const basesEspace = bases.filter((b) => b.espaceId === e.id)
-          const courant = e.id === espaceId
+          const courant = e.id === espaceCourant.id
 
           return (
             <Card key={e.id}>
@@ -256,7 +323,7 @@ export default function AccueilInfrastructure() {
                 {[
                   ['Machines', machines.length],
                   ['Clusters', clustersEspace.length],
-                  ['Répartiteurs', repartiteurs.length],
+                  ['Load balancers', repartiteurs.length],
                   ['Volumes', volumesEspace.length],
                   ['Bases managées', basesEspace.length],
                   ['Projets', e.projets],
@@ -311,7 +378,7 @@ export default function AccueilInfrastructure() {
         </Card>
 
         <Callout ton="violet" titre="Le choix d’Espace vaut pour toutes les sections">
-          Une machine, un cluster, un répartiteur, un volume appartiennent à un Espace Cloud : son
+          Une machine, un cluster, un load balancer, un volume appartiennent à un Espace Cloud : son
           quota, sa plage réseau, son site. Cet accueil est la seule vue qui les traverse tous.
         </Callout>
       </div>

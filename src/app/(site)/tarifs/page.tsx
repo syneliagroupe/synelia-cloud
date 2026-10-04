@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { money, TVA_PCT } from '@/lib/format'
 import { FAMILLES_TARIFS } from '@/lib/mock'
 import { usePublic } from '@/lib/api/public'
+import { estActif } from '@/lib/api/client'
 import { famillesDepuisTarifs, type TarifsPublics } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
@@ -44,9 +45,30 @@ const FAQ_TARIFS = [
   {
     question: 'Le mobile money est-il vraiment accepté ?',
     reponse:
-      'Oui, au même niveau que la carte bancaire et le virement : Orange Money, MTN MoMo et Wave. Le règlement est rapproché automatiquement de la facture concernée, et un porte-monnaie prépayé est disponible pour les organisations qui préfèrent provisionner à l’avance. Ce n’est pas une option reléguée en bas de liste — c’est le moyen de paiement le plus utilisé par nos clients.',
+      'Oui, au même niveau que la carte bancaire et le virement : Orange Money, MTN MoMo et Wave. Le règlement est rapproché automatiquement de la facture concernée, et un porte-monnaie prépayé est disponible pour les organisations qui préfèrent provisionner à l’avance. Ce n’est pas une option reléguée en bas de liste.',
   },
 ]
+
+/**
+ * En mode API, la grille publiée n'a ni « Cloud Pro à 85 000 », ni quota de
+ * trafic chiffré, ni second site : la FAQ ne cite que ce que la plateforme
+ * publie (`/public/tarifs` : prorata au jour, base HT).
+ */
+const FAQ_TARIFS_API = FAQ_TARIFS.filter((f) => !f.question.startsWith('Le trafic sortant')).map((f) =>
+  f.question.startsWith('Comment fonctionne le prorata')
+    ? {
+        ...f,
+        reponse:
+          'Les prix de la grille sont mensuels et hors taxes ; la consommation est proratisée au jour (mois de 30 jours). Une ressource créée ou supprimée en cours de mois n’est facturée que pour les jours où elle a existé, et la facturation pleine démarre au 1er du mois suivant.',
+      }
+    : f.question.startsWith('Existe-t-il des remises')
+      ? {
+          ...f,
+          reponse:
+            'La grille publiée n’affiche aucune remise. Pour un volume important ou un engagement pluriannuel, demandez un devis : les conditions négociées y sont écrites.',
+        }
+      : f,
+)
 
 export default function Tarifs() {
   const [periode, setPeriode] = useState<'mensuel' | 'annuel'>('mensuel')
@@ -94,19 +116,22 @@ export default function Tarifs() {
       <SiteSection>
         <Container>
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <SegmentedControl
-                value={periode}
-                onChange={setPeriode}
-                options={[
-                  { value: 'mensuel', label: 'Mensuel' },
-                  { value: 'annuel', label: 'Annuel (−15 %)' },
-                ]}
-              />
-              {periode === 'annuel' && (
-                <Badge tone="ok">15 % d’économie · engagement de douze mois</Badge>
-              )}
-            </div>
+            {/* Aucune remise annuelle n'existe dans la facturation réelle : le sélecteur est propre à la maquette. */}
+            {!estActif() && (
+              <div className="flex items-center gap-3">
+                <SegmentedControl
+                  value={periode}
+                  onChange={setPeriode}
+                  options={[
+                    { value: 'mensuel', label: 'Mensuel' },
+                    { value: 'annuel', label: 'Annuel (−15 %)' },
+                  ]}
+                />
+                {periode === 'annuel' && (
+                  <Badge tone="ok">15 % d’économie · engagement de douze mois</Badge>
+                )}
+              </div>
+            )}
             <p className="text-[13px] text-g-500">
               Prix hors taxes · TVA {TVA_PCT} % · facturation au prorata journalier
             </p>
@@ -238,7 +263,7 @@ export default function Tarifs() {
       <SiteSection fond="clair">
         <Container taille="md">
           <h2 className="type-h2 text-center">Questions tarifaires</h2>
-          <Accordeon items={FAQ_TARIFS} className="mt-6" />
+          <Accordeon items={estActif() ? FAQ_TARIFS_API : FAQ_TARIFS} className="mt-6" />
         </Container>
       </SiteSection>
 

@@ -5,7 +5,7 @@ import { Database, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { num, relatif } from '@/lib/format'
 import {
-  MOTEUR_WEB_LABEL,
+  MOTEUR_WEB_LABEL, moteurWebAvecVersion,
   MOTEUR_WEB_TEINTE,
   SERVEURS_BASES,
   serveursBasesDeLOrg,
@@ -87,7 +87,7 @@ export default function ListeBases() {
                         href={`/app/web/bases/${m.id}`}
                         className="block truncate text-[14px] font-bold text-ink hover:text-p-700"
                       >
-                        {MOTEUR_WEB_LABEL[m.moteur]} {m.version}
+                        {moteurWebAvecVersion(m.moteur, m.version)}
                       </Link>
                       <span className="block font-mono text-[11px] text-g-500">{m.serveur}</span>
                     </span>

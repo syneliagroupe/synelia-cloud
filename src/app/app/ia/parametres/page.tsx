@@ -5,6 +5,10 @@ import { BUDGET_IA, CLES_IA, GARDE_FOUS, REGLES_ROUTAGE } from '@/lib/mock'
 import { Card, CardHeader, Callout, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { EmptyState } from '@/components/composition/states'
+import { useEspace } from '@/components/app/contexte'
+import { useCollection } from '@/components/app/atelier'
+import type { CleIA } from '@/lib/types'
+import { AvisDemoApi } from '../avis-demo'
 
 /** Ce qui prime sur quoi, dans l'ordre où la passerelle l'applique. */
 const CHAINE = [
@@ -31,6 +35,9 @@ const CHAINE = [
 ]
 
 export default function ParametresIA() {
+  const espace = useEspace()
+  const clesCol = useCollection<CleIA>('cles-ia', CLES_IA)
+  const cles = clesCol.items.filter((c) => c.espaceId === espace.id)
   const actives = REGLES_ROUTAGE.filter((r) => r.actif)
   const gardesActifs = GARDE_FOUS.filter((g) => g.actif)
   const replis = REGLES_ROUTAGE.reduce((a, r) => a + r.replisDeclenches24h, 0)
@@ -48,11 +55,16 @@ export default function ParametresIA() {
         sousTitre="Six réglages qui s’appliquent à toutes les clés de l’organisation, quel que soit l’agent ou le flux qui appelle. Ce sont eux qui empêchent — une consigne d’agent, elle, ne fait qu’orienter. Choisissez un réglage dans le panneau."
       />
 
+      <AvisDemoApi>
+        Seules les clés d’accès sont réelles. Les règles de routage, les garde-fous, le coffre et le
+        budget d’organisation sont des jeux d’exemple que la passerelle n’applique pas encore.
+      </AvisDemoApi>
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           libelle="Clés d’accès"
-          valeur={CLES_IA.length}
-          detail={`${CLES_IA.filter((c) => c.statut === 'active').length} actives`}
+          valeur={cles.length}
+          detail={`${cles.filter((c) => c.statut === 'active').length} actives`}
         />
         <StatTile
           libelle="Règles de routage"

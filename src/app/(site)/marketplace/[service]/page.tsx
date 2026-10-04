@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { ArrowRight, Check, FileDown, MonitorPlay, Repeat, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money } from '@/lib/format'
-import { CATEGORIE_LABEL } from '@/lib/types'
+import { CATEGORIE_LABEL, SITES } from '@/lib/types'
 import { CATALOGUE, CONTRAT_INTEGRATION } from '@/lib/mock'
 import { lirePublicServeur } from '@/lib/api/public-serveur'
 import { fusionnerFicheCatalogue, type FicheCataloguePublique } from '@/lib/api/vitrine'
@@ -41,7 +41,7 @@ export async function generateMetadata({
 
 const PRECISIONS: Record<number, (nom: string, oss: string) => string> = {
   1: (_n, oss) =>
-    `Instance ${oss} isolée en mode dédié, ou compte sur instance partagée en mode mutualisé. Vous choisissez le site — Abidjan ou Grand-Bassam — à la souscription.`,
+    `Instance ${oss} isolée en mode dédié, ou compte sur instance partagée en mode mutualisé. ${SITES.length > 1 ? 'Vous choisissez le site — Abidjan ou Grand-Bassam — à la souscription.' : 'Elle est hébergée à Abidjan.'}`,
   2: () =>
     'Palier, sièges et quotas modifiables à chaud, sans interruption de service, avec application immédiate du prorata journalier.',
   3: () =>
@@ -70,9 +70,9 @@ export default async function FicheServicePublique({
   if (!s) notFound()
 
   const prixEntree = s.paliers.reduce<{ valeur: number; unite: string } | null>((acc, p) => {
-    const v = p.prixSiege ?? p.prixMois
+    const v = p.prixSiege || p.prixMois
     if (v === undefined) return acc
-    const unite = p.prixSiege !== undefined ? '/siège/mois' : '/mois'
+    const unite = p.prixSiege ? '/siège/mois' : '/mois'
     if (!acc || v < acc.valeur) return { valeur: v, unite }
     return acc
   }, null)
@@ -265,9 +265,9 @@ export default async function FicheServicePublique({
                 </div>
                 <p className="mt-1 text-[12px] text-g-500">{p.specs}</p>
                 <p className="tnum mt-4 text-[24px] font-bold leading-none [font-family:var(--font-display)] text-p-700">
-                  {money(p.prixSiege ?? p.prixMois ?? 0)}
+                  {money(p.prixSiege || p.prixMois || 0)}
                   <span className="block text-[11px] font-semibold text-g-500">
-                    {p.prixSiege !== undefined ? 'par siège et par mois' : 'par mois'}
+                    {p.prixSiege ? 'par siège et par mois' : 'par mois'}
                   </span>
                 </p>
                 <ul className="mt-4 flex-1 space-y-1.5 border-t border-g-100 pt-4">

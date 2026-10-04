@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { Archive, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { money, moneyPerMonth, num, pct } from '@/lib/format'
-import { OFFRES, SOUSCRIPTIONS } from '@/lib/mock'
+import { dateHeure, money, moneyPerMonth, num, pct, slaLibelle } from '@/lib/format'
+import { OFFRES } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { GatedAction, Tabs } from '@/components/ui/display'
@@ -16,8 +16,9 @@ import { DataTable } from '@/components/composition/data-table'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
-import { creerRessource, modifierRessource, requete } from '@/lib/api/client'
-import type { Offer } from '@/lib/types'
+import { useLectureDegradable } from '@/lib/api/degradable'
+import { creerRessource, estActif, modifierRessource, requete } from '@/lib/api/client'
+import type { AuditEvent, Offer } from '@/lib/types'
 
 const ONGLETS = [
   { id: 'offres', label: 'Offres' },
@@ -42,10 +43,17 @@ const AIDE_FAMILLE: Record<Offer['categorie'], string> = {
 
 const LIBELLE_CATEGORIE: Record<Offer['categorie'], string> = {
   espace_cloud: 'Espace Cloud',
-  image_vm: 'Image de machine',
+  image_vm: 'Machine virtuelle',
   k8s: 'Kubernetes',
   stack: 'Pile applicative',
   web: 'Hébergement web',
+}
+
+const LIBELLE_CHANGEMENT: Record<string, string> = {
+  'offre.creation': 'Création',
+  'offre.modification': 'Modification',
+  'offre.publication': 'Publication',
+  'offre.suppression': 'Suppression',
 }
 
 /** Brouillon de saisie du tiroir — l'offre telle qu'elle est en train d'être écrite. */
@@ -76,6 +84,11 @@ const BROUILLON_VIDE: Brouillon = {
 export default function Catalogue() {
   const { autorise, refus } = useApp()
   const offres = useCollection<Offer>('offres', OFFRES)
+  const { donnees: journalOffres } = useLectureDegradable<{ donnees: AuditEvent[] }>(
+    '/admin/audit',
+    { action: 'offre.', parPage: '20' },
+  )
+  const api = estActif()
   const executer = useOperation()
   const [onglet, setOnglet] = useState('offres')
   const [famille, setFamille] = useState<Offer['categorie'] | 'toutes'>('toutes')
@@ -97,7 +110,7 @@ export default function Catalogue() {
       specs: o.specs,
       caracteristiques: o.caracteristiques.join('\n'),
       prix: o.prix,
-      sla: o.sla ?? '',
+      sla: o.sla ? slaLibelle(o.sla) : '',
       populaire: Boolean(o.populaire),
       surDevis: Boolean(o.surDevis),
     })
@@ -112,7 +125,7 @@ export default function Catalogue() {
   const enregistrer = () => {
     const champs = {
       nom: brouillon.nom.trim(),
-      code: brouillon.code.trim().toUpperCase(),
+      code: edition ? edition.code : brouillon.code.trim().toUpperCase(),
       categorie: brouillon.categorie,
       specs: brouillon.specs.trim(),
       caracteristiques: brouillon.caracteristiques
@@ -222,7 +235,7 @@ export default function Catalogue() {
         <StatTile
           libelle="Offres sur devis"
           valeur={offres.items.filter((o) => o.surDevis).length}
-          detail="Périmètre à qualifier"
+          detail="Sans prix public affiché"
         />
         <StatTile
           libelle="Revenu récurrent"
@@ -285,6 +298,7 @@ export default function Catalogue() {
           <div className="p-4">
             <DataTable<Offer>
               key={famille}
+              chargement={offres.chargement}
               lignes={
                 famille === 'toutes'
                   ? offres.items
@@ -362,7 +376,7 @@ export default function Catalogue() {
                   cle: (o) => o.sla ?? '',
                   masquable: true,
                   rendu: (o) => (
-                    <span className="text-[12px] text-g-700">{o.sla ?? '—'}</span>
+                    <span className="text-[12px] text-g-700">{o.sla ? slaLibelle(o.sla) : '—'}</span>
                   ),
                 },
                 {
@@ -596,12 +610,19 @@ export default function Catalogue() {
                     )
                   })}
               </div>
-              <Callout ton="info" className="mt-4" titre="L’offre que nous mettons en avant n’est pas la plus vendue">
-                Les clients choisissent majoritairement l’offre juste en dessous de celle que nous
-                marquons « populaire ». C’est une information utile : soit notre recommandation est
-                mal calibrée, soit le palier supérieur porte une fonctionnalité que peu de gens
-                utilisent réellement.
-              </Callout>
+              {souscriptionsTotal === 0 && (
+                <p className="rounded-[8px] border border-dashed border-g-300 px-4 py-6 text-center text-[12px] text-g-500">
+                  Aucune souscription active.
+                </p>
+              )}
+              {!api && (
+                <Callout ton="info" className="mt-4" titre="L’offre que nous mettons en avant n’est pas la plus vendue">
+                  Les clients choisissent majoritairement l’offre juste en dessous de celle que nous
+                  marquons « populaire ». C’est une information utile : soit notre recommandation est
+                  mal calibrée, soit le palier supérieur porte une fonctionnalité que peu de gens
+                  utilisent réellement.
+                </Callout>
+              )}
             </Card>
           </div>
         </div>
@@ -659,25 +680,53 @@ export default function Catalogue() {
               titre="Historique des changements de catalogue"
               sousTitre="Chaque publication, dépréciation et modification de prix est datée et attribuée."
             />
-            <div className="space-y-1.5">
-              {[
-                { q: '12 août 2026', qui: 'Jean-Vincent Kassi', d: 'Publication de l’offre Cloud Souverain — placement exclusivement libre et local' },
-                { q: '4 août 2026', qui: 'Aïcha Bamba', d: 'Publication de l’offre Cloud Hybride — absorption d’une capacité VMware existante' },
-                { q: '28 juillet 2026', qui: 'Jean-Vincent Kassi', d: 'Dépréciation de Cloud Start 2024 — 4 souscriptions maintenues au prix garanti' },
-                { q: '11 juillet 2026', qui: 'Marc Ouattara', d: 'Ajustement du prix public de Cloud Pro — de 96 000 à 85 000 FCFA par mois' },
-                { q: '2 juillet 2026', qui: 'Aïcha Bamba', d: 'Ajout de l’engagement 99,95 % sur les offres Espace Cloud' },
-              ].map((x) => (
-                <div
-                  key={x.q}
-                  className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
-                >
-                  <span className="min-w-0 text-[12px] text-ink">{x.d}</span>
-                  <span className="shrink-0 text-[11px] text-g-500">
-                    {x.qui} · {x.q}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {api ? (
+              <div className="space-y-1.5">
+                {(journalOffres?.donnees ?? []).map((e) => {
+                  const offre = offres.items.find(
+                    (o) => o.code === e.target || `offre:${o.id}` === e.target,
+                  )
+                  return (
+                    <div
+                      key={e.id}
+                      className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
+                    >
+                      <span className="min-w-0 text-[12px] text-ink">
+                        {LIBELLE_CHANGEMENT[e.action] ?? e.action} — {offre?.nom ?? e.target}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-g-500">
+                        {e.actor.nom} · {dateHeure(e.ts)}
+                      </span>
+                    </div>
+                  )
+                })}
+                {(journalOffres?.donnees ?? []).length === 0 && (
+                  <p className="rounded-[8px] border border-dashed border-g-300 px-4 py-10 text-center text-[13px] text-g-500">
+                    Aucun changement de catalogue enregistré.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {[
+                  { q: '12 août 2026', qui: 'Jean-Vincent Kassi', d: 'Publication de l’offre Cloud Souverain — placement exclusivement libre et local' },
+                  { q: '4 août 2026', qui: 'Aïcha Bamba', d: 'Publication de l’offre Cloud Hybride — absorption d’une capacité VMware existante' },
+                  { q: '28 juillet 2026', qui: 'Jean-Vincent Kassi', d: 'Dépréciation de Cloud Start 2024 — 4 souscriptions maintenues au prix garanti' },
+                  { q: '11 juillet 2026', qui: 'Marc Ouattara', d: 'Ajustement du prix public de Cloud Pro — de 96 000 à 85 000 FCFA par mois' },
+                  { q: '2 juillet 2026', qui: 'Aïcha Bamba', d: 'Ajout de l’engagement 99,95 % sur les offres Espace Cloud' },
+                ].map((x) => (
+                  <div
+                    key={x.q}
+                    className="flex flex-wrap items-baseline justify-between gap-2 border-b border-g-100 pb-1.5 last:border-0"
+                  >
+                    <span className="min-w-0 text-[12px] text-ink">{x.d}</span>
+                    <span className="shrink-0 text-[11px] text-g-500">
+                      {x.qui} · {x.q}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
       )}
@@ -796,9 +845,8 @@ export default function Catalogue() {
           </div>
           {brouillon.surDevis && (
             <Callout ton="info" titre="Une offre sur devis n’affiche pas de prix">
-              Les trois prix restent saisissables une fois la case décochée, mais ils ne sont ni
-              publiés sur la vitrine, ni utilisés par le simulateur : le client passe par une prise de
-              contact.
+              Le prix saisi est conservé, mais il n’est ni publié sur la vitrine, ni utilisé par le
+              simulateur : le client passe par une prise de contact.
             </Callout>
           )}
           <Callout ton="warn" titre="Publier engage un prix">

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { KeyRound, Plus, ShieldCheck, UserMinus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { dateHeure, MAINTENANT, relatif } from '@/lib/format'
+import { dateHeure, relatif } from '@/lib/format'
 import type { MembreEquipe } from '@/lib/mock'
 import { EQUIPE_SYNELIA, TICKETS_PLATEFORME } from '@/lib/mock'
 import { MATRICE_RBAC, ROLES_SUPER_ADMIN, can } from '@/lib/rbac'
@@ -15,6 +15,7 @@ import { Field, Input, Select, Switch } from '@/components/ui/field'
 import { ConfirmDialog, Drawer, Modal } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
+import { EmptyState } from '@/components/composition/states'
 import { RoleMatrix } from '@/components/business/rbac-canvas'
 import { useApp, useMaintenant } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
@@ -101,6 +102,10 @@ const POLITIQUE = [
   },
 ]
 
+/** Un super admin a l’accès plateforme complet : il est privilégié par définition, que l’indicateur soit posé ou non. */
+const estPrivilegie = (m: { privilegie: boolean; role: Role }) =>
+  m.privilegie || m.role === 'super_admin'
+
 export default function Equipe() {
   const maintenant = useMaintenant()
   // Le journal vit dans l'atelier : les actions faites pendant la session s'y
@@ -132,7 +137,7 @@ export default function Equipe() {
   const detail = equipe.items.find((m) => m.id === detailId) ?? null
   const retrait = equipe.items.find((m) => m.id === retraitId) ?? null
 
-  const privilegies = equipe.items.filter((m) => m.privilegie)
+  const privilegies = equipe.items.filter((m) => estPrivilegie(m))
   const elevationsActives = equipe.items.filter((m) => m.elevation?.active)
   const equipes = [...new Set(equipe.items.map((m) => m.equipe))]
 
@@ -164,7 +169,7 @@ export default function Equipe() {
           email: courrielFinal,
           role: roleNouveau,
           equipe: equipeChoisie,
-          dernierAcces: MAINTENANT,
+          dernierAcces: maintenant,
           privilegie: privilegieNouveau,
         }),
       effetFinal: () => equipe.recharger(),
@@ -194,10 +199,10 @@ export default function Equipe() {
         meta={
           <>
             <Badge tone="neutral" size="sm">
-              {equipe.items.length} membres
+              {equipe.items.length} membre{equipe.items.length > 1 ? 's' : ''}
             </Badge>
             <Badge tone="violet" size="sm">
-              {privilegies.length} comptes privilégiés
+              {privilegies.length} compte{privilegies.length > 1 ? 's' : ''} privilégié{privilegies.length > 1 ? 's' : ''}
             </Badge>
             {elevationsActives.length > 0 && (
               <Badge tone="warn" dot size="sm">
@@ -235,12 +240,14 @@ export default function Equipe() {
           valeur={elevationsActives.length}
           ton={elevationsActives.length > 0 ? 'warn' : 'ok'}
         />
-        <StatTile
-          libelle="Deuxième facteur"
-          valeur="100 %"
-          ton="ok"
-          detail="Obligatoire, sans exception"
-        />
+        {!estActif() && (
+          <StatTile
+            libelle="Deuxième facteur"
+            valeur="100 %"
+            ton="ok"
+            detail="Obligatoire, sans exception"
+          />
+        )}
       </div>
 
       <Tabs tabs={ONGLETS} active={onglet} onChange={setOnglet} />
@@ -277,14 +284,14 @@ export default function Equipe() {
                             </span>
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{m.equipe}</td>
+                        <td className="px-3 py-2.5 text-[11.5px] text-g-700">{m.equipe || '—'}</td>
                         <td className="px-3 py-2.5">
-                          <Badge tone={m.privilegie ? 'violet' : 'neutral'} size="sm">
+                          <Badge tone={estPrivilegie(m) ? 'violet' : 'neutral'} size="sm">
                             {ROLE_LABEL[m.role] ?? m.role}
                           </Badge>
                         </td>
                         <td className="px-3 py-2.5">
-                          {m.privilegie ? (
+                          {estPrivilegie(m) ? (
                             <Badge tone="violet" dot size="sm">
                               Oui
                             </Badge>
@@ -361,9 +368,9 @@ export default function Equipe() {
                         <Badge tone="neutral" size="sm">
                           {membres.length} membre{membres.length > 1 ? 's' : ''}
                         </Badge>
-                        {membres.some((m) => m.privilegie) && (
+                        {membres.some((m) => estPrivilegie(m)) && (
                           <Badge tone="violet" size="sm">
-                            {membres.filter((m) => m.privilegie).length} privilégié
+                            {membres.filter((m) => estPrivilegie(m)).length} privilégié
                           </Badge>
                         )}
                       </span>
@@ -379,6 +386,11 @@ export default function Equipe() {
                 sousTitre="Sur les ressources des clients. Ces lignes figurent aussi dans le journal de chaque organisation."
               />
               <div className="space-y-1.5">
+                {!AUDIT.some((a) => equipe.items.some((m) => m.nom === a.actor.nom)) && (
+                  <p className="py-3 text-center text-[12px] text-g-500">
+                    Aucune action de l’équipe sur les ressources des clients pour l’instant.
+                  </p>
+                )}
                 {AUDIT.filter((a) => equipe.items.some((m) => m.nom === a.actor.nom))
                   .slice(0, 6)
                   .map((a) => (
@@ -474,8 +486,8 @@ export default function Equipe() {
                     d: 'Réservé à l’administrateur de plateforme. Un opérateur qui pourrait changer un prix pourrait aussi consentir une remise non validée.',
                   },
                   {
-                    r: 'Agréer ou retirer un partenaire',
-                    d: 'Réservé à l’administrateur. Un agrément engage contractuellement l’entreprise.',
+                    r: 'Inviter ou retirer un membre de l’équipe Synelia',
+                    d: 'Réservé à l’administrateur de plateforme. Donner un accès au back-office engage l’entreprise.',
                   },
                   {
                     r: 'Suspendre une organisation',
@@ -511,6 +523,13 @@ export default function Equipe() {
               titre="Rotation d’astreinte"
               sousTitre="Une personne d’astreinte par semaine, plus un second niveau joignable. L’astreinte est rémunérée et compensée en repos : une astreinte non payée est une astreinte non tenue."
             />
+            {estActif() ? (
+              <EmptyState
+                titre="Aucune astreinte configurée"
+                phrase="Aucune rotation n’est enregistrée : la planification d’astreinte n’est pas encore servie par l’API."
+              />
+            ) : (
+              <>
             <div className="overflow-x-auto rounded-[8px] border border-g-300">
               <table className="w-full min-w-max border-collapse">
                 <thead>
@@ -577,6 +596,8 @@ export default function Equipe() {
               concernaient la même alerte mal calibrée. Une astreinte trop sollicitée finit par ne plus
               répondre, ou par démissionner.
             </Callout>
+              </>
+            )}
           </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -616,6 +637,7 @@ export default function Equipe() {
               </div>
             </Card>
 
+            {!estActif() && (
             <Card>
               <CardHeader
                 titre="Sollicitations récentes"
@@ -673,6 +695,7 @@ export default function Equipe() {
                 de dépassement de 20 minutes.
               </Callout>
             </Card>
+            )}
           </div>
         </div>
       )}
@@ -714,7 +737,7 @@ export default function Equipe() {
             <Card>
               <CardHeader
                 titre="Révision des comptes privilégiés"
-                sousTitre="Dernière revue trimestrielle : 4 juin 2026."
+                sousTitre={estActif() ? undefined : 'Dernière revue trimestrielle : 4 juin 2026.'}
               />
               <div className="space-y-2">
                 {privilegies.map((m) => (
@@ -733,7 +756,7 @@ export default function Equipe() {
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
                       <Badge tone={m.revuLe ? 'ok' : 'neutral'} size="sm">
-                        {m.revuLe ? `Revu le ${dateHeure(m.revuLe).split(' à ')[0]}` : 'Confirmé en juin'}
+                        {m.revuLe ? `Revu le ${dateHeure(m.revuLe).split(' à ')[0]}` : (estActif() ? 'Non revu' : 'Confirmé en juin')}
                       </Badge>
                       <BoutonFormulaire
                         libelle="Réexaminer"
@@ -773,12 +796,12 @@ export default function Equipe() {
                           appel: () =>
                             modifierRessource('/admin/equipe', m.id, {
                               privilegie: v.issue !== 'retire',
-                              revuLe: MAINTENANT,
+                              revuLe: maintenant,
                             }),
                           effet: () =>
                             equipe.modifier(m.id, {
                               privilegie: v.issue !== 'retire',
-                              revuLe: MAINTENANT,
+                              revuLe: maintenant,
                             }),
                           effetFinal: () => equipe.recharger(),
                         })}
@@ -787,11 +810,13 @@ export default function Equipe() {
                   </div>
                 ))}
               </div>
+              {!estActif() && (
               <Callout ton="violet" className="mt-4" titre="Deux comptes privilégiés retirés en juin">
                 Deux personnes qui avaient obtenu un accès privilégié pour un projet ponctuel l’avaient
                 conservé six mois après la fin du projet. C’est exactement ce que la revue trimestrielle
                 sert à trouver : le privilège ne se retire jamais tout seul.
               </Callout>
+              )}
             </Card>
 
             <Card>
@@ -842,10 +867,10 @@ export default function Equipe() {
                 <p className="text-[14px] font-bold text-ink">{detail.nom}</p>
                 <p className="text-[12px] text-g-500">{detail.email}</p>
                 <div className="mt-1 flex flex-wrap gap-1.5">
-                  <Badge tone={detail.privilegie ? 'violet' : 'neutral'} size="sm">
+                  <Badge tone={estPrivilegie(detail) ? 'violet' : 'neutral'} size="sm">
                     {ROLE_LABEL[detail.role] ?? detail.role}
                   </Badge>
-                  {detail.privilegie && (
+                  {estPrivilegie(detail) && (
                     <Badge tone="violet" dot size="sm">
                       Compte privilégié
                     </Badge>
@@ -859,7 +884,7 @@ export default function Equipe() {
               items={[
                 { cle: 'Équipe', valeur: detail.equipe },
                 { cle: 'Rôle', valeur: ROLE_LABEL[detail.role] ?? detail.role },
-                { cle: 'Compte privilégié', valeur: detail.privilegie ? 'Oui' : 'Non' },
+                { cle: 'Compte privilégié', valeur: estPrivilegie(detail) ? 'Oui' : 'Non' },
                 { cle: 'Dernier accès', valeur: `${dateHeure(detail.dernierAcces)} (${relatif(detail.dernierAcces, maintenant)})` },
                 { cle: 'Deuxième facteur', valeur: 'Actif — obligatoire' },
                 {
@@ -1029,7 +1054,7 @@ export default function Equipe() {
                           active: true,
                           justification: String(v.motif),
                           jusqua: new Date(
-                            new Date(MAINTENANT).getTime() + Number(v.dureeMin) * 60000,
+                            new Date(maintenant).getTime() + Number(v.dureeMin) * 60000,
                           )
                             .toISOString()
                             .replace('.000', ''),
@@ -1049,12 +1074,12 @@ export default function Equipe() {
                   detail: 'La personne devra se reconnecter, deuxième facteur compris, sur tous ses appareils.',
                   // Pas d’appel : la révocation de sessions vit côté client
                   // (`DELETE /securite/sessions`), pas côté équipe.
-                  effet: () => equipe.modifier(detail.id, { dernierAcces: MAINTENANT }),
+                  effet: () => equipe.modifier(detail.id, { dernierAcces: maintenant }),
                   sansApi:
                     'Fermeture indisponible d’ici : la révocation des sessions se fait depuis l’espace de la personne.',
                 }}
               />
-              {!detail.privilegie && (
+              {!estPrivilegie(detail) && (
                 <BoutonAction
                   libelle="Élever en compte privilégié"
                   variant="ghost"
@@ -1067,9 +1092,9 @@ export default function Equipe() {
                     appel: () =>
                       modifierRessource('/admin/equipe', detail.id, {
                         privilegie: true,
-                        revuLe: MAINTENANT,
+                        revuLe: maintenant,
                       }),
-                    effet: () => equipe.modifier(detail.id, { privilegie: true, revuLe: MAINTENANT }),
+                    effet: () => equipe.modifier(detail.id, { privilegie: true, revuLe: maintenant }),
                     effetFinal: () => equipe.recharger(),
                   }}
                 />

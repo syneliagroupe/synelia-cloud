@@ -92,7 +92,7 @@ export default function Support() {
   const maintenant = useMaintenant()
   const { autorise, refus, pousser, organisations, organisationId } = useApp()
   const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
-  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
+  const nomOrg = orgActive?.nom ?? (estActif() ? '' : ORG_COURANTE.nom)
   const [onglet, setOnglet] = useState('tickets')
   const [nouveau, setNouveau] = useState(false)
   const [sujet, setSujet] = useState('')

@@ -81,7 +81,7 @@ export default function Membres() {
   const maintenant = useMaintenant()
   const { autorise, refus, role: roleCourant, organisations, organisationId } = useApp()
   const orgActive = organisations.find((o) => o.id === organisationId) ?? organisations[0]
-  const nomOrg = orgActive?.nom ?? ORG_COURANTE.nom
+  const nomOrg = orgActive?.nom ?? (estActif() ? '' : ORG_COURANTE.nom)
   const executer = useOperation()
   const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
   const invitations = useCollection<Invitation>('invitations', INVITATIONS)
@@ -161,7 +161,7 @@ export default function Membres() {
               {nomOrg}
             </Badge>
             <Badge tone="neutral" size="sm">
-              {lignes.length} membres
+              {lignes.length} membre{lignes.length > 1 ? 's' : ''}
             </Badge>
           </>
         }
@@ -186,7 +186,7 @@ export default function Membres() {
         <StatTile
           libelle="Deuxième facteur"
           valeur={lignes.length - sansMfa}
-          detail={`sur ${lignes.length} membres`}
+          detail={`sur ${lignes.length} membre${lignes.length > 1 ? 's' : ''}`}
           ton={sansMfa === 0 ? 'ok' : 'warn'}
         />
         <StatTile

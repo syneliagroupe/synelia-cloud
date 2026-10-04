@@ -39,7 +39,12 @@ export function CadreEspace({ children }: { children: React.ReactNode }) {
       id: e.id,
       nom: e.code,
       sousTitre: `${e.offreNom} · ${SITE_COURT[e.site]}`,
-      etat: e.statut === 'active' ? pct(remplissage * 100) : 'Suspendu',
+      etat:
+        e.statut === 'active'
+          ? pct(remplissage * 100)
+          : e.statut === 'provisioning'
+            ? 'Création…'
+            : 'Suspendu',
       ton: (e.statut !== 'active'
         ? 'neutral'
         : remplissage >= 0.9

@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { AlertTriangle, Check, FileDown, ScrollText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { pct } from '@/lib/format'
+import { estActif } from '@/lib/api/client'
+import { lirePublicServeur } from '@/lib/api/public-serveur'
 import { CATALOGUE, NIVEAUX_SOUVERAINETE, TRAJECTOIRE_SORTIE } from '@/lib/mock'
 import { MATRICE_RBAC, ROLES_ORDRE } from '@/lib/rbac'
 import { ROLE_LABEL } from '@/lib/types'
@@ -23,7 +25,27 @@ export const metadata: Metadata = {
     'Les trois niveaux de souveraineté et la position exacte de Synelia sur chacun, y compris ce qui n’est pas encore atteint. Trajectoire de sortie des backends propriétaires documentée.',
 }
 
-export default function Souverainete() {
+interface SouveraineteApi {
+  niveaux: { niveau: string; titre: string; description: string; atteint: boolean }[]
+  trajectoireSortie: { backend: string; part: string; cible: string; avancement: number }[]
+}
+
+export default async function Souverainete() {
+  const api = estActif() ? await lirePublicServeur<SouveraineteApi>('/public/souverainete') : null
+  const niveaux = api
+    ? api.niveaux.map((n) => ({
+        niveau: n.niveau,
+        question: n.titre,
+        statut: n.atteint ? ('ok' as const) : ('warn' as const),
+        position: n.atteint ? 'Atteinte' : 'En transition',
+        detail: n.description,
+        ancre: ({ Données: 'donnees', Logiciels: 'logiciel', Compétences: 'operations' } as Record<string, string>)[n.niveau],
+      }))
+    : NIVEAUX_SOUVERAINETE.map((n) => ({ ...n, ancre: undefined as string | undefined }))
+  // En mode API, sans réponse du backend il n'y a pas de trajectoire à publier : on n'invente pas celle de la maquette.
+  const trajectoire = api ? api.trajectoireSortie : estActif() ? [] : TRAJECTOIRE_SORTIE
+  const avecTrajectoire = trajectoire.length > 0
+  const atteints = niveaux.filter((n) => n.statut === 'ok').length
   return (
     <>
       <HeroCourt
@@ -32,7 +54,11 @@ export default function Souverainete() {
           <>
             Trois niveaux.
             <br />
-            <span className="text-m-600">Deux atteints, un en transition.</span>
+            <span className="text-m-600">
+              {atteints === niveaux.length
+                ? 'Tous atteints.'
+                : `${atteints} atteint${atteints > 1 ? 's' : ''}, ${niveaux.length - atteints} en transition.`}
+            </span>
           </>
         }
         chapeau="« Cloud souverain » ne veut rien dire tant qu’on ne précise pas de quelle souveraineté on parle. Il y en a trois : celle des données, celle des opérations, celle du logiciel. Voici notre position sur chacune — y compris là où nous ne sommes pas encore arrivés."
@@ -41,10 +67,10 @@ export default function Souverainete() {
       <SiteSection>
         <Container>
           <div className="space-y-5">
-            {NIVEAUX_SOUVERAINETE.map((n, i) => (
+            {niveaux.map((n, i) => (
               <div
                 key={n.niveau}
-                id={i === 0 ? 'donnees' : i === 1 ? 'operations' : 'logiciel'}
+                id={n.ancre ?? (i === 0 ? 'donnees' : i === 1 ? 'operations' : 'logiciel')}
                 className={cn(
                   'rounded-[14px] border-2 bg-white p-6',
                   n.statut === 'ok' ? 'border-ok/25' : 'border-warn/25',
@@ -69,7 +95,7 @@ export default function Souverainete() {
         </Container>
       </SiteSection>
 
-      {/* Trajectoire de sortie */}
+      {avecTrajectoire && (
       <SiteSection fond="clair">
         <Container>
           <SectionTitle
@@ -103,7 +129,7 @@ export default function Souverainete() {
               actions={<Badge tone="violet">Mise à jour trimestrielle</Badge>}
             />
             <div className="space-y-4">
-              {TRAJECTOIRE_SORTIE.map((t) => (
+              {trajectoire.map((t) => (
                 <div key={t.backend}>
                   <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
                     <span className="text-[13px] font-semibold text-ink">
@@ -132,6 +158,7 @@ export default function Souverainete() {
               ))}
             </div>
 
+            {!api && (
             <Callout ton="warn" className="mt-5" titre="Ce que cela implique pour vous, concrètement">
               Si la souveraineté logicielle est une exigence contractuelle de votre côté, souscrivez
               l’offre <span className="font-semibold">Cloud Souverain</span> : elle garantit
@@ -141,6 +168,7 @@ export default function Souverainete() {
               <span className="font-semibold">Cloud Hybride</span> absorbe cette capacité et
               contractualise sa sortie progressive.
             </Callout>
+            )}
 
             <div className="mt-4 flex flex-wrap gap-2">
               <ButtonLink href="/offres/espace-cloud" variant="secondary" size="sm">
@@ -153,6 +181,7 @@ export default function Souverainete() {
           </Card>
         </Container>
       </SiteSection>
+      )}
 
       {/* Qui peut y accéder */}
       <SiteSection id="acces">
@@ -160,7 +189,7 @@ export default function Souverainete() {
           <SectionTitle
             surtitre="Contrôle d’accès"
             titre="Qui peut accéder à vos données, et comment on le prouve"
-            chapeau="Un modèle de droits explicite, publié, avec onze rôles. Et un journal d’audit qui enregistre non seulement les actions réussies, mais aussi les refus."
+            chapeau="Un modèle de droits explicite, publié, avec dix rôles. Et un journal d’audit qui enregistre non seulement les actions réussies, mais aussi les refus."
           />
 
           <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -168,7 +197,7 @@ export default function Souverainete() {
               <span className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-p-100 text-p-700">
                 <ScrollText size={17} />
               </span>
-              <h3 className="mt-3 type-h3">Onze rôles, une matrice publiée</h3>
+              <h3 className="mt-3 type-h3">Dix rôles, une matrice publiée</h3>
               <p className="mt-2 text-[13px] leading-relaxed text-g-700">
                 {MATRICE_RBAC.length} actions × {ROLES_ORDRE.length} rôles, avec trois niveaux :
                 autorisé, lecture seule, interdit. La matrice est visible dans votre espace client et

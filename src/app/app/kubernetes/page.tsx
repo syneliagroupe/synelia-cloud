@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 import { num } from '@/lib/format'
-import { SITE_COURT, type K8sCluster } from '@/lib/types'
+import { SITE_COURT, SITES, type K8sCluster } from '@/lib/types'
 import { K8S_CLUSTERS } from '@/lib/mock'
 import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { HealthBadge, StatTile } from '@/components/composition/metrics'
 import { DataTable, type Colonne } from '@/components/composition/data-table'
 import { useApp, useEspace } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
+import { actionChangerEspace, phraseVideEspace } from '@/lib/infra-espace-vide'
 
 export default function ListeClusters() {
   const espace = useEspace()
@@ -164,17 +165,14 @@ export default function ListeClusters() {
       </div>
 
       <DataTable
-        lignes={tous}
+        lignes={clusters}
         colonnes={colonnes}
         placeholderRecherche="Rechercher un cluster…"
         filtres={[
           {
             id: 'site',
             libelle: 'Site',
-            options: [
-              { value: 'ABJ', label: 'Abidjan' },
-              { value: 'GBM', label: 'Grand-Bassam' },
-            ],
+            options: SITES.map((s) => ({ value: s, label: SITE_COURT[s] })),
           },
           {
             id: 'mode',
@@ -189,9 +187,12 @@ export default function ListeClusters() {
         href={(c) => `/app/kubernetes/${c.id}`}
         vide={{
           titre: 'Aucun cluster Kubernetes',
-          phrase:
-            'Un cluster managé consomme le quota vCPU et mémoire de votre Espace Cloud pour ses nœuds workers ; le control plane est facturé à part et exploité par nos équipes.',
+          phrase: phraseVideEspace(
+            espace.code,
+            'Un cluster managé consomme le quota vCPU et mémoire de l’Espace pour ses nœuds workers ; le control plane est exploité par nos équipes.',
+          ),
           action: { libelle: 'Créer un cluster', href: '/app/kubernetes/new' },
+          actionSecondaire: actionChangerEspace,
         }}
       />
 

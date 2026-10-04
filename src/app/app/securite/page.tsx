@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Download, FileCheck2, Fingerprint, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { MAINTENANT, dateHeure, pct, relatif } from '@/lib/format'
+import { MAINTENANT, dateHeure, num, pct, relatif } from '@/lib/format'
 import { CONFORMITE, MEMBERSHIPS, ORG_COURANTE, USERS, userById } from '@/lib/mock'
 import { ROLE_LABEL, type ConformiteLigne, type Membership, type Role } from '@/lib/types'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -138,7 +138,7 @@ export default function Securite() {
   const { donnees: journalDistant } = useLectureDegradable<{ donnees: AuditEvent[] }>('/audit', {
     parPage: '200',
   })
-  const AUDIT = journalDistant?.donnees ?? journalLocal
+  const AUDIT = journalDistant?.donnees ?? (estActif() ? [] : journalLocal)
 
   const { autorise, refus, perm, pousser, organisations, organisationId } = useApp()
   const executer = useOperation()
@@ -166,7 +166,7 @@ export default function Securite() {
     ouverte: x.ouverte ?? x.debut ?? MAINTENANT,
   }))
   const horsDuPays = sessionsNorm.filter((x) => x.lieuConnu && !x.lieu.includes('Côte d’Ivoire'))
-  const nomOrg = organisations.find((o) => o.id === organisationId)?.nom ?? ORG_COURANTE.nom
+  const nomOrg = organisations.find((o) => o.id === organisationId)?.nom ?? (estActif() ? '' : ORG_COURANTE.nom)
   const [onglet, setOnglet] = useState('audit')
   const [detail, setDetail] = useState<string | null>(null)
   /** Politique d'organisation — les réglages non désactivables restent fixes. */
@@ -255,8 +255,8 @@ export default function Securite() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           libelle="Événements 30 jours"
-          valeur={AUDIT.length * 84}
-          detail={api ? 'Démonstration — pas encore une lecture réelle' : 'Toutes actions, tous membres'}
+          valeur={api ? '—' : num(AUDIT.length * 84)}
+          detail={api ? 'Compteur pas encore branché sur le journal réel' : 'Toutes actions, tous membres'}
         />
         <StatTile
           libelle="Actions refusées"
@@ -272,7 +272,7 @@ export default function Securite() {
               : '—'
           }
           ton={USERS_ORG.every((u) => u.mfaEnabled) ? 'ok' : 'warn'}
-          detail={`${USERS_ORG.filter((u) => !u.mfaEnabled).length} membre(s) sans deuxième facteur`}
+          detail={`${USERS_ORG.filter((u) => !u.mfaEnabled).length > 1 ? 'membres sans' : 'membre sans'} deuxième facteur`}
         />
         <StatTile
           libelle="Règle 3-2-1 respectée"
@@ -872,7 +872,7 @@ export default function Securite() {
                 <span>
                   Les ressources non conformes n’ont pas de copie hors site, ou n’ont qu’un seul
                   support. En cas d’incendie dans la salle où elles se trouvent, elles sont perdues.
-                  Une copie hors site vers Grand-Bassam s’ajoute depuis le plan de sauvegarde, et
+                  Une copie hors site s’ajoute depuis le plan de sauvegarde, et
                   coûte le prix du stockage — soit une fraction de ce que coûterait la perte.
                 </span>
               </span>

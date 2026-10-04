@@ -150,7 +150,7 @@ export default function Connaissances() {
           { label: 'Connaissances' },
         ]}
         titre="Bases de connaissances"
-        sousTitre="Une base indexe vos documents pour que vos agents les retrouvent par le sens, pas par mot-clé. Nous lisons la source là où elle vit et n’en gardons que les vecteurs. Choisissez une base dans le panneau pour l’ouvrir."
+        sousTitre="Une base indexe vos documents pour que vos agents les retrouvent par le sens, pas par mot-clé. Une base conserve les vecteurs de vos documents. Choisissez une base dans le panneau pour l’ouvrir."
         actions={boutonCreation}
       />
 
@@ -188,6 +188,14 @@ export default function Connaissances() {
         </>
       )}
 
+      {estActif() ? (
+        <Callout ton="info" titre="Comment alimenter une base">
+          Les connecteurs automatiques (Drive, S3, git, SharePoint…) ne sont pas encore branchés. Pour
+          l’instant, un document s’ajoute depuis la fiche de la base en collant son texte, ou par
+          l’API (texte, fichier encodé en base64 ou adresse web). Une base ne lit donc pas sa source
+          d’elle-même : l’index vieillit tant qu’on n’y pousse pas la nouvelle version.
+        </Callout>
+      ) : (
       <Card>
         <CardHeader
           titre="Connecteurs d’ingestion"
@@ -215,6 +223,7 @@ export default function Connaissances() {
           vivante partout où c’est possible, même au prix d’une configuration d’accès.
         </Callout>
       </Card>
+      )}
     </div>
   )
 }

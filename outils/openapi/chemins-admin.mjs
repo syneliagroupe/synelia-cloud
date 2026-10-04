@@ -189,6 +189,14 @@ const infrastructure = fusion(
       }),
     },
     '/admin/placements': {
+      get: op({
+        tag: T_INFRA,
+        portee: A,
+        id: 'listerPlacements',
+        resume: 'Lister les règles de placement des espaces',
+        ok: tableau(ref('Placement')),
+        rbac: 'capacity.manage',
+      }),
       put: op({
         tag: T_INFRA,
         portee: A,
@@ -598,6 +606,14 @@ const exploitation = fusion(
       }),
     },
     '/admin/statut/services': {
+      get: op({
+        tag: T_EXPLOIT,
+        portee: A,
+        id: 'listerStatutServices',
+        resume: 'Lister l’état publié des services',
+        ok: tableau(ref('StatutService')),
+        rbac: 'capacity.manage',
+      }),
       put: op({
         tag: T_EXPLOIT,
         portee: A,

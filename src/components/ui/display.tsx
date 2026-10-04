@@ -159,11 +159,13 @@ export function Tabs({
 }) {
   return (
     <div className={cn('no-scrollbar overflow-x-auto border-b border-g-300', className)}>
-      <div className="flex min-w-max gap-0.5">
+      <div role="tablist" className="flex min-w-max gap-0.5">
         {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
+            role="tab"
+            aria-selected={active === t.id}
             onClick={() => onChange(t.id)}
             className={cn(
               'relative flex items-center gap-2 whitespace-nowrap px-3.5 py-2.5 text-[13px] font-semibold transition-colors',

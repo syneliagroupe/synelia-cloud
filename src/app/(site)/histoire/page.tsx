@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { estActif } from '@/lib/api/client'
+import { RubriqueNonPubliee } from '@/components/site/rubrique-non-publiee'
 import { AlertTriangle } from 'lucide-react'
 import { CHANTIERS_OUVERTS, HISTOIRE, VALEURS } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -15,10 +17,13 @@ import {
 export const metadata: Metadata = {
   title: 'Notre histoire',
   description:
-    'Pourquoi Synelia a construit ses propres datacenters : un client privé de son ERP pendant trois jours, un support à 5 000 km, et rien d’autre à offrir que de la patience. De 2016 au portail unique, dix ans en sept jalons.',
+    estActif()
+      ? 'Rubrique non publiée.'
+      : 'Pourquoi Synelia a construit ses propres datacenters : un client privé de son ERP pendant trois jours, un support à 5 000 km, et rien d’autre à offrir que de la patience. De 2016 au portail unique, dix ans en sept jalons.',
 }
 
 export default function Histoire() {
+  if (estActif()) return <RubriqueNonPubliee surtitre="Notre histoire" titre="Notre histoire" />
   return (
     <>
       <HeroCourt

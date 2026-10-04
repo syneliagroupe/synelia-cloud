@@ -127,11 +127,15 @@ export default function Smtp() {
   const domainesConnus = estActif()
     ? lesDomaines.items
     : DOMAINES.filter((d) => d.orgId === ORG_COURANTE.id)
+  // Domaine réel de l'organisation pour les exemples : « dba.africa » en dur
+  // serait celui d'un autre client.
+  const domaineRef = domainesConnus[0]?.nom ?? 'exemple.ci'
   const [onglet, setOnglet] = useState('apercu')
   const [nouvelleCle, setNouvelleCle] = useState(false)
   const [nomCle, setNomCle] = useState('')
   const [quotaCle, setQuotaCle] = useState(5000)
-  const [expediteur, setExpediteur] = useState('facturation@dba.africa')
+  const [expediteurChoisi, setExpediteur] = useState('')
+  const expediteur = expediteurChoisi || `facturation@${domaineRef}`
   const [refuserHorsDomaine, setRefuserHorsDomaine] = useState(true)
   const [purgeErreurs, setPurgeErreurs] = useState(true)
   const [desabonnement, setDesabonnement] = useState(false)
@@ -303,8 +307,14 @@ export default function Smtp() {
       }))
     : SMTP.journal.map((j) => ({ id: j.ts, ...j }))
 
+  // Le backend renvoie `tauxRemise` à 0 tant qu'il ne l'a pas calculé : on le tire
+  // alors du journal chargé, sinon l'écran affiche 0 % à côté de 91 % de messages remis.
+  const tauxJournal =
+    api && journal.length > 0
+      ? (journal.filter((j) => j.statut === 'delivre').length / journal.length) * 100
+      : 0
   const tauxLivraison = api
-    ? (relais?.reputation.tauxRemise ?? 0)
+    ? relais?.reputation.tauxRemise || tauxJournal
     : (SMTP.livraison.find((l) => l.statut === 'delivre')?.pct ?? 0)
   const quotaJour = api ? (relais?.quota.parJour ?? 0) : SMTP.quotas.parJour
   const envoyesJour = api ? (relais?.quota.utiliseJour ?? 0) : SMTP.quotas.envoyesJour
@@ -369,7 +379,7 @@ export default function Smtp() {
       <PageHeader
         fil={[{ label: 'Espace client', href: '/app' }, { label: 'Relais SMTP' }]}
         titre="Relais SMTP"
-        sousTitre="Un relais pour les courriels transactionnels de vos applications : factures, confirmations de commande, réinitialisations de mot de passe. Adresse IP dédiée, SPF, DKIM et DMARC configurés, réputation surveillée."
+        sousTitre="Un relais pour les courriels transactionnels de vos applications : factures, confirmations de commande, réinitialisations de mot de passe. SPF, DKIM et DMARC configurés, réputation surveillée, adresse IP dédiée en option."
         actions={
           <GatedAction autorise={autorise('secrets.update')} message={refus('secrets.update')}>
             <Button iconBefore={<Plus size={14} />} onClick={() => ouvrirCreationCle()}>
@@ -454,7 +464,7 @@ export default function Smtp() {
                         type: 'select_multi_ou_nouveau',
                         options: domainesConnus.map((d) => ({ value: d.nom, label: d.nom })),
                         hint: 'Cliquez vos domaines enregistrés, ou saisissez-en un hors liste.',
-                        placeholder: 'dba.africa, digitalbusinessafrica.ci',
+                        placeholder: `${domaineRef}, autre-domaine.ci`,
                         obligatoire: true,
                       },
                       { id: 'quotaJour', label: 'Quota journalier', type: 'nombre', min: 100, demi: true },
@@ -485,7 +495,14 @@ export default function Smtp() {
           )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card>
-              <CardHeader titre="Quotas" sousTitre="Trois limites, pour trois types d’abus différents." />
+              <CardHeader
+                titre="Quotas"
+                sousTitre={
+                  api
+                    ? 'Un plafond par jour et un par heure, contre les envois en masse.'
+                    : 'Trois limites, pour trois types d’abus différents.'
+                }
+              />
               <div className="space-y-3.5">
                 <QuotaBar
                   libelle="Par jour"
@@ -518,10 +535,10 @@ export default function Smtp() {
                   </>
                 )}
               </div>
-              <Callout ton="info" className="mt-4" titre="La limite par minute">
+              <Callout ton="info" className="mt-4" titre={api ? 'Pourquoi des plafonds' : 'La limite par minute'}>
                 Une boucle de code qui part en vrille peut envoyer dix mille courriels en quelques
-                secondes et brûler la réputation de votre adresse IP pour des semaines. La limite
-                borne les dégâts le temps que vous vous en aperceviez.
+                secondes et brûler la réputation de votre adresse IP pour des semaines. Les plafonds
+                bornent les dégâts le temps que vous vous en aperceviez.
               </Callout>
             </Card>
 
@@ -576,7 +593,7 @@ export default function Smtp() {
               <CardHeader titre="Réputation" sousTitre="Ce que les fournisseurs pensent de votre adresse IP." />
               <div className="flex justify-center py-2">
                 <GaugeCircle
-                  valeur={api ? (relais?.reputation.tauxRemise ?? 0) : SMTP.reputation.score}
+                  valeur={api ? tauxLivraison : SMTP.reputation.score}
                   min={0}
                   max={100}
                   cible={85}
@@ -669,7 +686,7 @@ export default function Smtp() {
                     <Input
                       value={destinataireTest}
                       onChange={(e) => setDestinataireTest(e.target.value)}
-                      placeholder="vous@dba.africa"
+                      placeholder={`vous@${domaineRef}`}
                     />
                   </Field>
                   <GatedAction autorise={autorise('secrets.update')} message={refus('secrets.update')}>
@@ -725,14 +742,14 @@ export default function Smtp() {
 from email.message import EmailMessage
 
 msg = EmailMessage()
-msg["From"] = "facturation@dba.africa"
+msg["From"] = "facturation@${domaineRef}"
 msg["To"] = "client@exemple.ci"
 msg["Subject"] = "Votre facture INV-2091"
 msg.set_content("Bonjour, votre facture est disponible.")
 
-with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
+with smtplib.SMTP("${api ? relais?.hote || 'smtp.synelia.cloud' : 'smtp.synelia.cloud'}", 587) as s:
     s.starttls()
-    s.login("org-dba", os.environ["SYNELIA_SMTP_KEY"])
+    s.login("${api ? relais?.identifiant || 'identifiant-smtp' : 'org-dba'}", os.environ["SYNELIA_SMTP_KEY"])
     s.send_message(msg)`}
                 />
               </div>
@@ -876,7 +893,7 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
                   nom: 'DMARC',
                   etat: api ? relais?.authentification.dmarc || 'absent' : SMTP.authentification.dmarc,
                   quoi: 'Indique au destinataire quoi faire d’un courriel qui échoue SPF et DKIM, et vous envoie des rapports.',
-                  valeur: 'v=DMARC1; p=quarantine; rua=mailto:dmarc@dba.africa',
+                  valeur: `v=DMARC1; p=quarantine; rua=mailto:dmarc@${domaineRef}`,
                 },
               ].map((a) => (
                 <div key={a.nom} className="rounded-[6px] border border-g-300 px-3 py-2.5">
@@ -948,12 +965,14 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
                   </div>
                 ))}
               </div>
-              <Callout ton="err" className="mt-4" titre="24 tentatives d’usurpation détectées">
-                Une adresse au Nigéria a envoyé 24 courriels prétendant venir de{' '}
-                <span className="font-mono text-[12px]">dba.africa</span> sans passer par notre
-                relais. Ils ont tous échoué SPF et DKIM, et ont donc été mis en quarantaine chez les
-                destinataires.
-              </Callout>
+              {!api && (
+                <Callout ton="err" className="mt-4" titre="24 tentatives d’usurpation détectées">
+                  Une adresse au Nigéria a envoyé 24 courriels prétendant venir de{' '}
+                  <span className="font-mono text-[12px]">dba.africa</span> sans passer par notre
+                  relais. Ils ont tous échoué SPF et DKIM, et ont donc été mis en quarantaine chez les
+                  destinataires.
+                </Callout>
+              )}
             </Card>
 
             <Card>
@@ -995,7 +1014,7 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
                     <Input
                       value={domainesRelais}
                       onChange={(e) => setDomainesRelais(e.target.value)}
-                      placeholder="dba.africa, digitalbusinessafrica.ci"
+                      placeholder={`${domaineRef}, autre-domaine.ci`}
                     />
                   </Field>
                   <Field label="Quota journalier" error={erreursRelais.quotaJour}>
@@ -1134,7 +1153,7 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
                   titre="Ajouter un webhook"
                   description="Nous appelons votre application dès qu’un courriel change d’état. Sans webhook, il faut interroger le journal."
                   champs={[
-                    { id: 'url', label: 'URL appelée', placeholder: 'https://api.dba.africa/hooks/smtp', obligatoire: true },
+                    { id: 'url', label: 'URL appelée', placeholder: `https://api.${domaineRef}/hooks/smtp`, obligatoire: true },
                     {
                       id: 'evenements',
                       label: 'Événements',
@@ -1286,7 +1305,7 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
               code={`{
   "evenement": "rejete",
   "horodatage": "2026-08-19T15:16:44Z",
-  "message_id": "<8f2a91c4@dba.africa>",
+  "message_id": "<8f2a91c4@${domaineRef}>",
   "cle": "sk-2",
   "destinataire": "ancienne-adresse@yahoo.fr",
   "sujet": "Newsletter août",
@@ -1377,10 +1396,10 @@ with smtplib.SMTP("smtp.synelia.cloud", 587) as s:
             </Field>
             <Field label="Adresse d’expéditeur autorisée" hint="doit appartenir à un de vos domaines">
               <Select value={expediteur} onChange={(e) => setExpediteur(e.target.value)}>
-                <option value="facturation@dba.africa">facturation@dba.africa</option>
-                <option value="noreply@dba.africa">noreply@dba.africa</option>
-                <option value="contact@dba.africa">contact@dba.africa</option>
-                <option value="*@dba.africa">Toute adresse de dba.africa</option>
+                {['facturation', 'noreply', 'contact'].map((l) => (
+                  <option key={l} value={`${l}@${domaineRef}`}>{`${l}@${domaineRef}`}</option>
+                ))}
+                <option value={`*@${domaineRef}`}>Toute adresse de {domaineRef}</option>
               </Select>
             </Field>
             <Callout ton="warn" titre="La clé n’est affichée qu’une seule fois">

@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { estActif } from '@/lib/api/client'
+import { RubriqueNonPubliee } from '@/components/site/rubrique-non-publiee'
 import { Clock, MapPin, PhoneCall } from 'lucide-react'
 import { ASTREINTE, EQUIPE } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -17,10 +19,13 @@ import {
 export const metadata: Metadata = {
   title: 'L’équipe qui exploite la plateforme',
   description:
-    'Huit personnes à Abidjan et Grand-Bassam : exploitation, architecture, migrations, sécurité, réseau et relation client. Qui décroche à deux heures du matin, et comment l’astreinte fonctionne réellement.',
+    estActif()
+      ? 'Rubrique non publiée.'
+      : 'Huit personnes à Abidjan et Grand-Bassam : exploitation, architecture, migrations, sécurité, réseau et relation client. Qui décroche à deux heures du matin, et comment l’astreinte fonctionne réellement.',
 }
 
 export default function Equipe() {
+  if (estActif()) return <RubriqueNonPubliee surtitre="L’équipe" titre="L’équipe qui exploite la plateforme" />
   const parSite = ['Abidjan', 'Grand-Bassam'] as const
 
   return (

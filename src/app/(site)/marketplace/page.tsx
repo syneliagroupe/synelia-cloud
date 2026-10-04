@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react'
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { CATEGORIE_LABEL, type CategorieService } from '@/lib/types'
+import { CATEGORIE_LABEL, SITES, type CategorieService } from '@/lib/types'
 import { CATALOGUE, CONTRAT_INTEGRATION } from '@/lib/mock'
+import { estActif } from '@/lib/api/client'
 import { usePublic } from '@/lib/api/public'
 import { fusionnerCatalogue, type FicheCataloguePublique } from '@/lib/api/vitrine'
 import { Badge, MicroLabel } from '@/components/ui/badge'
@@ -29,9 +30,12 @@ export default function MarketplacePublic() {
   // remplace la liste locale ; chaque fiche garde l’habillage local de
   // même `slug` (pictogramme, captures) que le backend ne publie pas.
   const distant = usePublic<{ donnees: FicheCataloguePublique[] }>('/public/catalogue/services')
+  // En mode API, jamais la liste de la maquette (ses prix et ses sites ne sont
+  // pas ceux de la plateforme) : on attend le catalogue publié, ou on le dit absent.
+  const api = estActif()
   const catalogue = useMemo(
-    () => fusionnerCatalogue(distant.donnees?.donnees, CATALOGUE) ?? CATALOGUE,
-    [distant.donnees],
+    () => fusionnerCatalogue(distant.donnees?.donnees, api ? [] : CATALOGUE) ?? (api ? [] : CATALOGUE),
+    [distant.donnees, api],
   )
 
   const resultats = useMemo(
@@ -63,11 +67,12 @@ export default function MarketplacePublic() {
         }
         chapeau="Vous pourriez installer chacune de ces solutions vous-même. Ce que nous vendons, c’est l’exploitation : provisioning, dimensionnement à chaud, fédération d’identité, sauvegarde immuable avec restauration testée, supervision avec engagement, montées de version qualifiées, et réversibilité documentée."
         enfants={
+          api && catalogue.length === 0 ? undefined : (
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
             {[
               { v: `${catalogue.length}`, l: 'solutions au catalogue' },
               { v: `${catalogue.filter((c) => c.certifie).length}`, l: 'certifiées Synelia' },
-              { v: '2', l: 'sites en Côte d’Ivoire' },
+              { v: `${SITES.length}`, l: SITES.length > 1 ? 'sites en Côte d’Ivoire' : 'site en Côte d’Ivoire' },
             ].map((x) => (
               <div key={x.l} className="rounded-[14px] border border-encre-2/10 bg-creme px-4 py-3">
                 <p className="tnum text-[22px] font-black leading-none [font-family:var(--font-display)] text-p-600">
@@ -77,6 +82,7 @@ export default function MarketplacePublic() {
               </div>
             ))}
           </div>
+          )
         }
       />
 
@@ -142,9 +148,19 @@ export default function MarketplacePublic() {
           {resultats.length === 0 ? (
             <EmptyState
               className="mt-8"
-              titre="Aucun service ne correspond"
-              phrase="Élargissez les critères, ou dites-nous quelle solution open source vous aimeriez voir opérée par Synelia. Nous instruisons chaque demande, et notre catalogue s’étend à la demande du marché."
-              action={{ libelle: 'Proposer une solution', href: '/entreprises#contact' }}
+              titre={
+                api && catalogue.length === 0
+                  ? distant.termine
+                    ? 'Le catalogue n’est pas disponible pour le moment'
+                    : 'Chargement du catalogue…'
+                  : 'Aucun service ne correspond'
+              }
+              phrase={
+                api && catalogue.length === 0
+                  ? 'Les services et leurs prix sont lus en direct sur la plateforme. Réessayez dans un instant, ou demandez-nous le catalogue.'
+                  : 'Élargissez les critères, ou dites-nous quelle solution open source vous aimeriez voir opérée par Synelia. Nous instruisons chaque demande, et notre catalogue s’étend à la demande du marché.'
+              }
+              action={{ libelle: api && catalogue.length === 0 ? 'Contacter l’équipe' : 'Proposer une solution', href: '/entreprises#contact' }}
             />
           ) : (
             <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

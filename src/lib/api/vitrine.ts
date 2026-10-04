@@ -1,6 +1,7 @@
 import type { CatalogService, Offer } from '@/lib/types'
 import type { FamilleTarif, FicheProduit } from '@/lib/mock/vitrine'
 import type { DATACENTERS } from '@/lib/mock/vitrine'
+import { slaLibelle } from '@/lib/format'
 
 /**
  * Fusion des lectures publiques (`GET /v1/public/…`) avec la maquette.
@@ -23,7 +24,7 @@ const NOM_FAMILLE: Record<string, string> = {
   espace_cloud: 'Espaces Cloud',
   image_vm: 'Machines virtuelles',
   k8s: 'Kubernetes',
-  stack: 'Piles applicatives',
+  stack: 'Bases managées',
   web: 'Web',
   economique: 'Économique',
   generique: 'Usage général',
@@ -36,6 +37,10 @@ function libelleFamille(code: string, nom: string): string {
   return NOM_FAMILLE[code] ?? code.charAt(0).toUpperCase() + code.slice(1)
 }
 
+// Le produit d'entrée d'abord, les familles inconnues à la fin (le tri est stable).
+const ORDRE_FAMILLES = ['espace_cloud', 'image_vm', 'economique', 'generique', 'calcul', 'memoire', 'k8s', 'web', 'stack']
+const rang = (code: string) => (ORDRE_FAMILLES.includes(code) ? ORDRE_FAMILLES.indexOf(code) : ORDRE_FAMILLES.length)
+
 /**
  * `GET /public/tarifs` → familles de la grille. Chaque offre devient une
  * colonne ; les lignes sont la configuration, le SLA, puis chaque
@@ -43,7 +48,8 @@ function libelleFamille(code: string, nom: string): string {
  */
 export function famillesDepuisTarifs(distant: TarifsPublics | undefined): FamilleTarif[] | undefined {
   if (!distant || !Array.isArray(distant.familles) || distant.familles.length === 0) return undefined
-  const familles = distant.familles
+  const familles = [...distant.familles]
+    .sort((a, b) => rang(a.code) - rang(b.code))
     .filter((f) => Array.isArray(f.offres) && f.offres.length > 0)
     .map((f) => {
       const offres = f.offres.filter((o) => o.statut !== 'brouillon')
@@ -74,7 +80,7 @@ export function famillesDepuisTarifs(distant: TarifsPublics | undefined): Famill
             ? [
                 {
                   caracteristique: 'Disponibilité contractuelle',
-                  valeurs: offres.map((o) => (o.sla ? `${o.sla} %` : '—')),
+                  valeurs: offres.map((o) => (o.sla ? slaLibelle(o.sla) : '—')),
                 },
               ]
             : []),
@@ -163,6 +169,75 @@ export interface FicheProduitPublique {
 }
 
 /**
+ * Catégories du back-office (`Offer.categorie`) rattachées à chaque fiche
+ * produit de la vitrine. Une offre du catalogue (`espace-pro`, `web-pro`…)
+ * n’a pas de fiche à elle : elle s’affiche comme palier de la fiche de son
+ * produit, et son adresse `/offres/<code>` y renvoie.
+ */
+export const CATEGORIES_PAR_FICHE: Record<string, string[]> = {
+  'espace-cloud': ['espace_cloud'],
+  'machines-virtuelles': ['image_vm', 'economique', 'generique', 'calcul', 'memoire'],
+  'hebergement-web': ['web'],
+  'bases-managees': ['stack'],
+  kubernetes: ['k8s'],
+}
+
+/** Slug de la fiche produit qui porte les offres d’une catégorie du catalogue. */
+export function ficheDeCategorie(categorie: string): string | undefined {
+  return Object.keys(CATEGORIES_PAR_FICHE).find((f) => CATEGORIES_PAR_FICHE[f].includes(categorie))
+}
+
+/** Paliers de la fiche = offres publiées du catalogue de sa catégorie, du moins cher au plus cher. */
+export function paliersDepuisTarifs(
+  distant: TarifsPublics | undefined,
+  slug: string,
+): FicheProduit['paliers'] | undefined {
+  const cats = CATEGORIES_PAR_FICHE[slug]
+  if (!cats || !distant || !Array.isArray(distant.familles)) return undefined
+  const offres = distant.familles
+    .filter((f) => cats.includes(f.code))
+    .flatMap((f) => f.offres ?? [])
+    .filter((o) => o.statut !== 'brouillon')
+    .sort((a, b) => a.prix - b.prix)
+  if (offres.length === 0) return undefined
+  return offres.map((o) => ({
+    nom: o.nom,
+    specs: o.specs,
+    prix: o.surDevis ? null : o.prix,
+    surDevis: o.surDevis,
+    recommande: o.populaire,
+    unite: o.surDevis ? '' : '/mois',
+  }))
+}
+
+/** Prix d’appel (le plus bas, hors « sur devis ») d’un ensemble de catégories du catalogue. */
+export function prixDAppel(distant: TarifsPublics | undefined, categories: string[]): number | undefined {
+  if (!distant || !Array.isArray(distant.familles)) return undefined
+  const prix = distant.familles
+    .filter((f) => categories.includes(f.code))
+    .flatMap((f) => f.offres ?? [])
+    .filter((o) => o.statut !== 'brouillon' && !o.surDevis && o.prix > 0)
+    .map((o) => o.prix)
+  return prix.length > 0 ? Math.min(...prix) : undefined
+}
+
+/** Prix d'entrée d'un service du marketplace (le même que sa carte et sa fiche) : meilleur prix au siège s'il y en a un, sinon plus petit forfait mensuel. */
+export function prixEntreeCatalogue(
+  distantes: FicheCataloguePublique[] | undefined,
+  slug: string,
+): { prix: number; unite: string } | undefined {
+  const paliers = (distantes?.find((d) => d.slug === slug)?.paliers ?? []) as Array<{
+    prixSiege?: number
+    prixMois?: number
+  }>
+  const sieges = paliers.map((p) => p.prixSiege ?? 0).filter((v) => v > 0)
+  if (sieges.length > 0) return { prix: Math.min(...sieges), unite: '/siège/mois' }
+  const mois = paliers.map((p) => p.prixMois ?? 0).filter((v) => v > 0)
+  if (mois.length > 0) return { prix: Math.min(...mois), unite: '/mois' }
+  return undefined
+}
+
+/**
  * `GET /public/offres/{slug}` fusionné à la fiche locale : nom, accroche,
  * résumé, paliers et FAQ viennent du backend quand il les publie ; le
  * schéma d’architecture, les puces et le SLA détaillé restent locaux (le
@@ -226,10 +301,11 @@ export function fusionnerDatacenters(
   locaux: readonly DatacenterLocal[],
 ): DatacenterLocal[] {
   if (!distants || distants.length === 0) return [...locaux]
-  return locaux.map((l) => {
+  return locaux.flatMap((l) => {
     const d = distants.find((x) => x.site === l.code || x.code === l.code)
-    if (!d) return l
-    return {
+    // Un site que le back-office ne déclare pas n'existe pas : il ne s'affiche pas.
+    if (!d) return []
+    return [{
       ...l,
       nom: d.nom || l.nom,
       ville: d.ville || l.ville,
@@ -238,6 +314,6 @@ export function fusionnerDatacenters(
       alimentation: [d.energie, d.redondance ? `redondance ${d.redondance}` : undefined]
         .filter(Boolean)
         .join(' · ') || l.alimentation,
-    }
+    }]
   })
 }

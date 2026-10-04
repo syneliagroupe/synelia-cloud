@@ -28,7 +28,7 @@ export default function ParametresTousProjets() {
         titre="Paramètres des projets"
         sousTitre="Nom, description, environnements, Espace Cloud de rattachement et suppression. Ces réglages se modifient projet par projet : choisissez-en un dans le panneau de gauche."
         actions={
-          <ButtonLink href="/app/applications/projets/nouveau" variant="secondary">
+          <ButtonLink href="/app/applications/nouveau" variant="secondary">
             Nouveau projet
           </ButtonLink>
         }

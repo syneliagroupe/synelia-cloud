@@ -16,6 +16,7 @@ import { useApp, useEspace } from '@/components/app/contexte'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { useOperation } from '@/components/app/actions'
 import { creerRessource, estActif } from '@/lib/api/client'
+import { prixControlPlane } from '@/lib/tarifs'
 
 const ETAPES = [
   { numero: 1, titre: 'Version et site' },
@@ -147,7 +148,7 @@ export default function NouveauCluster() {
     // Un nœud préemptible est facturé 40 % du prix d'un nœud garanti.
     return a + Math.round(prix * p.nodes * (p.type === 'preemptible' ? 0.4 : 1))
   }, 0)
-  const coutControlPlane = modeCp === 'ha' ? 42000 : 14000
+  const coutControlPlane = prixControlPlane(modeCp === 'ha')
   const coutModules = modules.reduce(
     (a, id) => a + (MODULES.find((m) => m.id === id)?.prix ?? 0),
     0,
@@ -395,7 +396,7 @@ export default function NouveauCluster() {
                   {
                     mode: 'single' as const,
                     titre: 'Mono-master',
-                    prix: 14000,
+                    prix: prixControlPlane(false),
                     sla: 'SLA 99,5 %',
                     pour: 'Développement, recette, charges non critiques',
                     contre:
@@ -404,7 +405,7 @@ export default function NouveauCluster() {
                   {
                     mode: 'ha' as const,
                     titre: 'Haute disponibilité',
-                    prix: 42000,
+                    prix: prixControlPlane(true),
                     sla: 'SLA 99,95 %',
                     pour: 'Production',
                     contre:

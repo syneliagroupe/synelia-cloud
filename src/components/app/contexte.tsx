@@ -189,8 +189,8 @@ export function AppProvider({
 
   const organisations: OrganisationContexte[] = useMemo(
     () =>
-      api && session
-        ? session.organisations.map((o) => ({ id: o.orgId, nom: o.nom, role: o.role }))
+      api
+        ? (session?.organisations ?? []).map((o) => ({ id: o.orgId, nom: o.nom, role: o.role }))
         : MES_ORGANISATIONS.map((m) => ({ id: m.org.id, nom: m.org.nom, role: m.role })),
     [api, session],
   )
@@ -244,8 +244,8 @@ export function AppProvider({
       retirer,
       api,
       utilisateur:
-        api && session
-          ? session.utilisateur
+        api
+          ? (session?.utilisateur ?? { id: '', nom: '', email: '' })
           : { id: UTILISATEUR_COURANT.id, nom: UTILISATEUR_COURANT.nom, email: UTILISATEUR_COURANT.email },
       organisations,
       organisationId,

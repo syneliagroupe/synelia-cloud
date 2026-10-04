@@ -5,12 +5,8 @@ import { useMemo } from 'react'
 import { Globe } from 'lucide-react'
 import { dateCourte } from '@/lib/format'
 import { SITE_LABEL, type Projet, type ServiceProjet } from '@/lib/types'
-import {
-  DOMAINES_APPLICATIFS,
-  ZONE_APPLICATIVE,
-  PROJETS,
-  SERVICES_PROJET,
-} from '@/lib/mock'
+import { DOMAINES_APPLICATIFS, ZONE_APPLICATIVE, PROJETS, SERVICES_PROJET } from '@/lib/mock'
+import type { DomaineApplicatif } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { CopyField } from '@/components/ui/display'
 import { Card, CardHeader, Callout } from '@/components/composition/card'
@@ -30,6 +26,10 @@ const ETAT_CERT = {
 export function VueRoutage({ id }: { id: string }) {
   const lesProjets = useCollection<Projet>('projets', PROJETS)
   const lesServices = useCollection<ServiceProjet>('services-projet', SERVICES_PROJET)
+  const lesDomaines = useCollection<DomaineApplicatif>(
+    'domaines-applicatifs',
+    DOMAINES_APPLICATIFS,
+  )
 
   const projet = lesProjets.items.find((p) => p.id === id)
   // Avec l’API, la liste vient de `GET /projets/{id}/services` (route nichée,
@@ -42,7 +42,7 @@ export function VueRoutage({ id }: { id: string }) {
 
   if (!projet) return <ProjetIntrouvable />
   const ids = new Set(services.map((s) => s.id))
-  const domaines = DOMAINES_APPLICATIFS.filter((d) => ids.has(d.serviceId))
+  const domaines = lesDomaines.items.filter((d) => ids.has(d.serviceId))
 
   const propres = domaines.filter((d) => d.origine !== 'genere')
   const aVerifier = domaines.filter((d) => d.verification && d.verification.etat !== 'ok')

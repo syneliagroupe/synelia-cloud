@@ -6,6 +6,9 @@
 
 export type Site = 'ABJ' | 'GBM'
 
+/** Sites proposés à l'écran : en mode API, seul Abidjan est adossé à de l'infrastructure. */
+export const SITES: Site[] = process.env.NEXT_PUBLIC_API_URL ? ['ABJ'] : ['ABJ', 'GBM']
+
 export const SITE_LABEL: Record<Site, string> = {
   ABJ: 'Abidjan · Synertech Vallon',
   GBM: 'Grand-Bassam · VITIB',
@@ -15,6 +18,19 @@ export const SITE_COURT: Record<Site, string> = {
   ABJ: 'Abidjan',
   GBM: 'Grand-Bassam',
 }
+
+/** « Abidjan » ou « Abidjan et Grand-Bassam », pour les phrases de la plateforme. */
+export const LIEUX_HEBERGEMENT = SITES.map((s) => SITE_COURT[s]).join(' et ')
+
+/** Un seul site réel : pas de « site de repli », pas de copie « hors site » possible. */
+export const UN_SEUL_SITE = SITES.length < 2
+
+/** « Abidjan → Grand-Bassam », ou « Abidjan · reprise sur place » quand source et repli
+ *  se confondent (un seul site : la reprise redémarre sur le même site). */
+export const trajetSites = (source: Site, repli: Site): string =>
+  UN_SEUL_SITE || source === repli
+    ? `${SITE_COURT[source]} · reprise sur place`
+    : `${SITE_COURT[source]} → ${SITE_COURT[repli]}`
 
 // ─── Tenancy & identité ───────────────────────────────────────────────
 
@@ -76,7 +92,7 @@ export type Role =
 
 export const ROLE_LABEL: Record<Role, string> = {
   super_admin: 'Super Admin',
-  platform_operator: 'Platform Operator',
+  platform_operator: 'Opérateur plateforme',
   org_admin: 'Org Admin',
   espace_admin: 'Espace Cloud Admin',
   project_owner: 'Project Owner',
@@ -305,6 +321,7 @@ export interface Volume {
   ephemere: boolean
   iops: number
   montage?: string
+  statut?: 'creation' | 'disponible' | 'erreur'
 }
 
 export interface Bucket {
@@ -819,7 +836,16 @@ export interface WebHosting {
     }
   }
   /** Protocoles de transfert ouverts sur le serveur, activables séparément. */
-  acces: { ftp: boolean; sftp: boolean; ftps: boolean; ssh: boolean; portSsh: number }
+  acces: {
+    ftp: boolean
+    sftp: boolean
+    ftps: boolean
+    ssh: boolean
+    portSsh: number
+    /** Port public edge dev01 → conteneur SFTP */
+    portSftp?: number
+    hoteTransfert?: string
+  }
   espaceUtiliseGo: number
   espaceTotalGo: number
   sauvegarde: {

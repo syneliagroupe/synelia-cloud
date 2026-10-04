@@ -11,7 +11,7 @@ import { Button, IconButton } from '@/components/ui/button'
 import { CopyField, GatedAction, Tabs } from '@/components/ui/display'
 import { Field, Input, Select, Slider, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
-import { DegradedState, EmptyState } from '@/components/composition/states'
+import { DegradedState, EmptyState, SkeletonCards } from '@/components/composition/states'
 import { StatTile } from '@/components/composition/metrics'
 import { GrilleSparkCharts, LogPeek } from '@/components/business/observabilite'
 import { useApp } from '@/components/app/contexte'
@@ -87,6 +87,7 @@ export function VueLb({ id }: { id: string }) {
   const lb = lbs.items.find((l) => l.id === id)
   const espace = lb ? espaces.items.find((e) => e.id === lb.espaceId) : undefined
 
+  if (!lb && lbs.chargement) return <SkeletonCards nombre={2} />
   if (!lb) {
     return (
       <div className="space-y-5">
@@ -156,7 +157,12 @@ export function VueLb({ id }: { id: string }) {
       },
     })
 
-  const onglets = lb.layer === 'l7' ? ONGLETS : ONGLETS.filter((o) => o.id !== 'regles' && o.id !== 'waf')
+  // En mode API : ni WAF (non porté par la plateforme) ni journaux d’accès (aucune source réelle).
+  const onglets = ONGLETS.filter(
+    (o) =>
+      !(lb.layer !== 'l7' && (o.id === 'regles' || o.id === 'waf')) &&
+      !(estActif() && (o.id === 'waf' || o.id === 'journaux')),
+  )
 
   return (
     <div className="space-y-5">
@@ -292,10 +298,10 @@ export function VueLb({ id }: { id: string }) {
               <CardHeader titre="Accès" />
               <div className="space-y-3">
                 <CopyField label="Adresse virtuelle" value={lb.vip} />
-                {lb.layer === 'l7' && lb.listeners[0]?.certId && (
+                {lb.layer === 'l7' && lb.listeners[0]?.certId && lb.reglesL7?.[0]?.hote && (
                   <CopyField
                     label="Point d’entrée public"
-                    value={`https://${lb.reglesL7?.[0]?.hote ?? 'api.dba.africa'}`}
+                    value={`https://${lb.reglesL7[0].hote}`}
                   />
                 )}
               </div>
@@ -692,7 +698,7 @@ export function VueLb({ id }: { id: string }) {
             </div>
           </Card>
 
-          {lb.listeners.some((l) => l.certId) && (
+          {!estActif() && lb.listeners.some((l) => l.certId) && (
             <Card>
               <CardHeader titre="Certificat TLS" />
               <KeyValueList

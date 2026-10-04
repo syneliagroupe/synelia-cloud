@@ -5,6 +5,7 @@ import type { WebHosting } from '@/lib/types'
 import type { Tone } from '@/components/ui/badge'
 import { CadreSection } from '@/components/app/cadre-section'
 import { useCollection } from '@/components/app/atelier'
+import { estActif } from '@/lib/api/client'
 
 /**
  * Panneau de la section — liste les hébergements de l'organisation, depuis
@@ -13,10 +14,12 @@ import { useCollection } from '@/components/app/atelier'
  */
 export function CadreHebergement({ children }: { children: React.ReactNode }) {
   const hebergements = useCollection<WebHosting>('hebergements', HEBERGEMENTS)
+  const perimetre = estActif()
+    ? hebergements.items
+    : hebergements.items.filter((h) => h.orgId === ORG_COURANTE.id)
 
-  const entrees = hebergements.items
-    .filter((h) => h.orgId === ORG_COURANTE.id)
-    .map((h) => ({
+  const entrees = perimetre.map((h) => {
+    return {
       id: h.id,
       nom: nomServi(h),
       sousTitre: `${h.palier} · ${h.serveur.nom}`,
@@ -25,7 +28,8 @@ export function CadreHebergement({ children }: { children: React.ReactNode }) {
       ton: (h.statut === 'en_ligne' ? 'ok' : 'warn') as Tone,
       href: `/app/web/hebergement/${h.id}`,
       motsCles: [h.serveur.nom, h.serveur.ip, `PHP ${h.php.versionDefaut}`],
-    }))
+    }
+  })
 
   return (
     <CadreSection

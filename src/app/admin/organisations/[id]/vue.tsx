@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useLectureDegradable } from '@/lib/api/degradable'
 import Link from 'next/link'
 import { Ban, KeyRound, Pause, Play, ShieldAlert, UserCog } from 'lucide-react'
 import { cn, trendSeries } from '@/lib/utils'
@@ -11,6 +12,7 @@ import {
   MAINTENANT,
   money,
   moneyPerMonth,
+  nomPays,
   num,
   pct,
   relatif,
@@ -33,6 +35,7 @@ import {
   MOYEN_LABEL,
   ROLE_LABEL,
   SITE_COURT,
+  type AuditEvent,
   type EspaceCloud,
   type Invoice,
   type Membership,
@@ -110,10 +113,24 @@ export function VueOrganisation({ id }: { id: string }) {
   const offresSouscriptibles = offres.items.filter((o) => o.statut === 'publiee')
   // `tenantPlan` porte le code d'une offre du catalogue (facturée en ligne de base sur la
   // facture) — sauf les trois libellés hérités (Standard/Avancé/Entreprise), affichés tels quels.
-  const libellePlan = (plan: string) => offres.items.find((o) => o.code === plan)?.nom ?? plan
-  const elevations = useCollection<Elevation>(`elevations-${id}`, ELEVATIONS)
+  // Le backend stocke les libellés hérités en minuscules (« entreprise ») : on les remet en forme.
+  const planCanon = (plan?: string | null) =>
+    plan ? (['Standard', 'Avancé', 'Entreprise'].find((l) => l.toLowerCase() === plan.toLowerCase()) ?? plan) : undefined
+  const libellePlan = (plan: string) => offres.items.find((o) => o.code === plan)?.nom ?? planCanon(plan) ?? plan
+  // Pas de lecture distante : `/admin/equipe/{id}/elevation` est par membre, pas par organisation.
+  // En mode API l'historique vient du journal d'audit (action organisation.emprunt_identite).
+  const elevations = useCollection<Elevation>(`emprunts-${id}`, estActif() ? [] : ELEVATIONS)
+  const { donnees: auditDistant } = useLectureDegradable<{ donnees: AuditEvent[] }>(
+    '/admin/audit',
+    { parPage: '100', orgId: id },
+  )
   const orgs = useCollection<Organisation>('organisations', ORGANISATIONS)
   const impayes = useCollection<Impaye>('impayes', IMPAYES)
+  // `lesFactures` ne lit que celles de l'organisation de l'admin connecté.
+  const { donnees: facturesDistantes } = useLectureDegradable<{ donnees: Invoice[] }>(
+    '/admin/facturation/factures',
+    { parPage: '100', orgId: id },
+  )
   const espacesOrg = useRessourcesOrganisation<EspaceCloud>(id, 'espaces')
   const membresOrg = useRessourcesOrganisation<Membership>(id, 'membres')
   const ticketsOrg = useRessourcesOrganisation<Ticket>(id, 'tickets')
@@ -177,16 +194,36 @@ export function VueOrganisation({ id }: { id: string }) {
   const membres = estActif()
     ? membresOrg.items.map((m) => ({ membership: m, user: m.utilisateur! }))
     : membresDeLOrg(org.id)
-  const factures = lesFactures.items.filter((f) => f.orgId === org.id)
-  const impayees = factures.filter((f) => f.statut === 'impayee')
+  const factures = estActif()
+    ? (facturesDistantes?.donnees ?? [])
+    : lesFactures.items.filter((f) => f.orgId === org.id)
+  // Même règle que le relevé des impayés : une facture émise dont l'échéance est passée est en retard.
+  const enRetard = (f: Invoice) =>
+    f.statut === 'impayee' || (f.statut === 'emise' && !!f.echeance && f.echeance.slice(0, 10) < maintenant.slice(0, 10))
+  const impayees = factures.filter(enRetard)
   const tickets = estActif() ? ticketsOrg.items : TICKETS_PLATEFORME.filter((t) => t.orgId === org.id)
-  const audit = AUDIT.filter((a) => a.orgId === org.id)
+  const audit = estActif() ? (auditDistant?.donnees ?? []) : AUDIT.filter((a) => a.orgId === org.id)
+  // API active : jamais le journal fictif en repli pour une vraie organisation.
+  // API : l'historique des élévations est celui du journal d'audit (motif seul, la durée n'y figure pas).
+  const listeElevations: Elevation[] = estActif()
+    ? audit
+        .filter((a) => a.action === 'organisation.emprunt_identite')
+        .map((a) => ({
+          id: a.id,
+          qui: a.actor.nom,
+          quand: a.ts,
+          duree: '',
+          motif: a.detail ?? a.target,
+          actif: false,
+        }))
+    : elevations.items
+  const lignesAudit = audit.length > 0 ? audit : estActif() ? [] : AUDIT.slice(0, 10)
   const espaces = estActif() ? espacesOrg.items : org.id === 'org-dba' ? ESPACES : []
   // Services managés : catalogue entièrement simulé côté backend (pas d'endpoint réel),
   // reste sur la maquette dans les deux modes — cf. mémoire « services_manages fully simulated ».
   const services = org.id === 'org-dba' ? SERVICES_MANAGES : []
   const souscriptions = SOUSCRIPTIONS.filter((s) => s.orgId === org.id)
-  const impayeReleve = impayes.items.find((i) => i.org === org.nom)
+  const impayeReleve = impayes.items.find((i) => i.org === org.nom || i.org === org.id)
 
   return (
     <div className="space-y-5">
@@ -197,7 +234,7 @@ export function VueOrganisation({ id }: { id: string }) {
           { label: org.nom },
         ]}
         titre={org.nom}
-        sousTitre={`${org.pays}${org.secteur ? ` · ${org.secteur}` : ''} · cliente en direct depuis le ${dateCourte(org.createdAt)}`}
+        sousTitre={`${nomPays(org.pays)}${org.secteur ? ` · ${org.secteur}` : ''} · cliente en direct depuis le ${dateCourte(org.createdAt)}`}
         meta={
           <>
             <Badge
@@ -267,7 +304,12 @@ export function VueOrganisation({ id }: { id: string }) {
         <StatTile
           libelle="vCPU alloué"
           valeur={num(org.consommationVcpu ?? 0)}
-          serie={trendSeries(`org-${org.id}-vcpu`, 30, (org.consommationVcpu ?? 0) * 0.7, org.consommationVcpu ?? 0)}
+          detail={estActif() ? 'Espaces Cloud et Web Cloud' : undefined}
+          serie={
+            estActif()
+              ? undefined
+              : trendSeries(`org-${org.id}-vcpu`, 30, (org.consommationVcpu ?? 0) * 0.7, org.consommationVcpu ?? 0)
+          }
         />
         <StatTile
           libelle="CA mensuel"
@@ -297,14 +339,16 @@ export function VueOrganisation({ id }: { id: string }) {
               items={[
                 { cle: 'Identifiant', valeur: org.id },
                 { cle: 'Raison sociale', valeur: org.nom },
-                { cle: 'Pays', valeur: org.pays },
+                { cle: 'Pays', valeur: nomPays(org.pays) },
                 { cle: 'Secteur', valeur: org.secteur ?? '—' },
                 { cle: 'Numéro de contribuable', valeur: org.tva ?? '—' },
                 { cle: 'Domaine principal', valeur: org.domaine ?? '—' },
-                { cle: 'Plan de service', valeur: libellePlan(org.tenantPlan ?? 'Standard') },
+                { cle: 'Plan de service', valeur: org.tenantPlan ? libellePlan(org.tenantPlan) : estActif() ? 'Aucun abonnement' : 'Standard' },
                 { cle: 'Contrat', valeur: 'Direct, sans intermédiaire' },
                 { cle: 'Créée le', valeur: dateCourte(org.createdAt) },
-                { cle: 'Royaume d’identité', valeur: `identite.synelia.cloud/realms/${org.id}` },
+                ...(estActif()
+                  ? []
+                  : [{ cle: 'Royaume d’identité', valeur: `identite.synelia.cloud/realms/${org.id}` }]),
               ]}
             />
           </Card>
@@ -317,7 +361,9 @@ export function VueOrganisation({ id }: { id: string }) {
               />
               {espaces.length === 0 ? (
                 <p className="rounded-[6px] border border-dashed border-g-300 px-3 py-4 text-center text-[12px] text-g-500">
-                  Le détail des quotas de cette organisation n’est pas chargé dans cette vue.
+                  {estActif()
+                    ? 'Cette organisation n’a aucun Espace Cloud : il n’y a pas encore de quota à comparer.'
+                    : 'Le détail des quotas de cette organisation n’est pas chargé dans cette vue.'}
                 </p>
               ) : (
                 <div className="space-y-3">
@@ -343,6 +389,7 @@ export function VueOrganisation({ id }: { id: string }) {
                     total={espaces.reduce((a, e) => a + e.quota.stockageTo, 0)}
                     unite="To"
                     seuil={85}
+                    formateur={(v) => num(v, 2)}
                   />
                 </div>
               )}
@@ -355,7 +402,9 @@ export function VueOrganisation({ id }: { id: string }) {
               <CardHeader titre="Souscriptions" sousTitre="Engagements en cours." />
               {souscriptions.length === 0 ? (
                 <p className="rounded-[6px] border border-dashed border-g-300 px-3 py-4 text-center text-[12px] text-g-500">
-                  Aucune souscription active.
+                  {estActif() && org.tenantPlan
+                    ? `Abonnement au plan ${libellePlan(org.tenantPlan)}, sans engagement supplémentaire.`
+                    : 'Aucune souscription active.'}
                 </p>
               ) : (
                 <div className="space-y-1.5">
@@ -386,13 +435,15 @@ export function VueOrganisation({ id }: { id: string }) {
             <div className="border-b border-g-100 px-4 py-3.5">
               <CardHeader
                 titre="Espaces Cloud"
-                sousTitre="Nom, quota, usage, site physique et plage réseau. Le contenu des machines n’est pas visible d’ici."
+                sousTitre={`Nom, quota, usage, site physique et plage réseau. Le contenu des machines n’est pas visible d’ici.${estActif() ? ' Les services Web Cloud (hébergements, domaines, messageries) ne sont pas listés dans cette vue.' : ''}`}
                 className="mb-0"
               />
             </div>
             {espaces.length === 0 ? (
               <p className="px-4 py-8 text-center text-[12.5px] text-g-500">
-                Aucun Espace Cloud chargé pour cette organisation dans cette vue de démonstration.
+                {estActif()
+                  ? 'Aucun Espace Cloud pour cette organisation.'
+                  : 'Aucun Espace Cloud chargé pour cette organisation dans cette vue de démonstration.'}
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -424,7 +475,7 @@ export function VueOrganisation({ id }: { id: string }) {
                           {e.usage.ramGo}/{e.quota.ramGo} Go
                         </td>
                         <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">
-                          {e.usage.stockageTo}/{e.quota.stockageTo} To
+                          {num(e.usage.stockageTo, 2)}/{num(e.quota.stockageTo, 2)} To
                         </td>
                         <td className="tnum px-3 py-2.5 text-[11.5px] text-g-700">{e.projets}</td>
                         <td className="px-3 py-2.5">
@@ -531,7 +582,9 @@ export function VueOrganisation({ id }: { id: string }) {
           </div>
           {membres.length === 0 ? (
             <p className="px-4 py-8 text-center text-[12.5px] text-g-500">
-              Aucun membre chargé pour cette organisation dans cette vue de démonstration.
+              {estActif()
+                ? 'Aucun membre pour cette organisation.'
+                : 'Aucun membre chargé pour cette organisation dans cette vue de démonstration.'}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -604,6 +657,7 @@ export function VueOrganisation({ id }: { id: string }) {
               libelle="CA mensuel"
               valeur={org.caMensuel ? money(org.caMensuel) : '—'}
               ton="ok"
+              detail={estActif() ? 'Abonnement et consommation courante, HT' : undefined}
             />
             <StatTile
               libelle="Factures émises"
@@ -619,11 +673,19 @@ export function VueOrganisation({ id }: { id: string }) {
                   : 'Aucun impayé'
               }
             />
-            <StatTile
-              libelle="Souscriptions"
-              valeur={souscriptions.length}
-              detail={`${souscriptions.filter((s) => s.periodicite === 'annuelle').length} annuelles`}
-            />
+            {estActif() ? (
+              <StatTile
+                libelle="Plan de service"
+                valeur={org.tenantPlan ? libellePlan(org.tenantPlan) : '—'}
+                detail={org.tenantPlan ? 'Abonnement mensuel' : 'Aucun abonnement'}
+              />
+            ) : (
+              <StatTile
+                libelle="Souscriptions"
+                valeur={souscriptions.length}
+                detail={`${souscriptions.filter((s) => s.periodicite === 'annuelle').length} annuelles`}
+              />
+            )}
           </div>
 
           <Card padding={false}>
@@ -672,7 +734,7 @@ export function VueOrganisation({ id }: { id: string }) {
                             tone={
                               f.statut === 'payee'
                                 ? 'ok'
-                                : f.statut === 'impayee'
+                                : enRetard(f)
                                   ? 'err'
                                   : f.statut === 'brouillon'
                                     ? 'info'
@@ -681,7 +743,9 @@ export function VueOrganisation({ id }: { id: string }) {
                             dot
                             size="sm"
                           >
-                            {f.statut}
+                            {enRetard(f)
+                              ? 'En retard'
+                              : { brouillon: 'Brouillon', emise: 'Émise', payee: 'Payée', impayee: 'Impayée', annulee: 'Annulée' }[f.statut]}
                           </Badge>
                         </td>
                         <td className="px-3 py-2.5 text-right">
@@ -697,7 +761,7 @@ export function VueOrganisation({ id }: { id: string }) {
                                   'Téléchargement indisponible : le backend ne sert pas encore le PDF de facture.',
                               }}
                             />
-                            {f.statut === 'impayee' && (
+                            {enRetard(f) && (
                               <GatedAction
                                 autorise={autorise('org.manage')}
                                 message={refus('org.manage')}
@@ -730,20 +794,20 @@ export function VueOrganisation({ id }: { id: string }) {
             <Card>
               <CardHeader
                 titre="Recouvrement"
-                sousTitre="La chronologie des relances, et ce qui reste à tenter avant d’envisager une suspension."
+                sousTitre="Le barème de relance, et ce qui reste à tenter avant d’envisager une suspension."
               />
               <Timeline
                 evenements={[
                   {
                     id: '1',
-                    titre: 'Facture émise',
+                    titre: 'Échéance dépassée',
                     detail: `${impayeReleve.facture} · ${money(impayeReleve.montant)}`,
                     horodatage: dateCourte(impayeReleve.echeance),
                     ton: 'neutral',
                   },
                   {
                     id: '2',
-                    titre: 'Première relance automatique',
+                    titre: 'Première relance',
                     detail: 'Courriel au contact de facturation, 3 jours après l’échéance',
                     horodatage: '+3 jours',
                     ton: 'info',
@@ -962,7 +1026,7 @@ export function VueOrganisation({ id }: { id: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(audit.length > 0 ? audit : AUDIT.slice(0, 10)).map((a) => (
+                  {lignesAudit.map((a) => (
                     <tr key={a.id} className="border-b border-g-100 last:border-0">
                       <td className="px-3 py-2 text-[11px] text-g-700">{dateHeure(a.ts)}</td>
                       <td className="px-3 py-2">
@@ -994,6 +1058,13 @@ export function VueOrganisation({ id }: { id: string }) {
                 </tbody>
               </table>
             </div>
+            {lignesAudit.length === 0 && (
+              <p className="px-4 py-6 text-center text-[12.5px] text-g-500">
+                {estActif() && auditDistant === undefined
+                  ? 'Chargement du journal…'
+                  : 'Aucun événement enregistré pour cette organisation.'}
+              </p>
+            )}
           </Card>
         </div>
       )}
@@ -1002,7 +1073,7 @@ export function VueOrganisation({ id }: { id: string }) {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader
-              titre="Plan de service et limites"
+              titre={estActif() ? 'Plan de service' : 'Plan de service et limites'}
               sousTitre="Ce que nous pouvons ajuster côté super admin, sans toucher aux ressources du client."
             />
             <div className="space-y-4">
@@ -1011,7 +1082,7 @@ export function VueOrganisation({ id }: { id: string }) {
                 hint="l'offre du catalogue à laquelle l'organisation est abonnée — sa facture porte cet abonnement en ligne de base, en plus de sa consommation réelle"
               >
                 <Select
-                  value={planService || (org.tenantPlan ?? 'Standard')}
+                  value={planService || planCanon(org.tenantPlan) || 'Standard'}
                   onChange={(e) => setPlanService(e.target.value)}
                 >
                   <option value="Standard">Standard (héritage — aucune offre du catalogue)</option>
@@ -1028,51 +1099,55 @@ export function VueOrganisation({ id }: { id: string }) {
                   )}
                 </Select>
               </Field>
-              <Field
-                label="Plafond de dépense mensuelle"
-                hint="au-delà, la création de nouvelles ressources est bloquée et le client averti"
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  value={plafond || (org.caMensuel ? org.caMensuel * 2 : 500000)}
-                  onChange={(e) => setPlafond(Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Quota maximal d’Espaces Cloud">
-                <Input
-                  type="number"
-                  min={org.espaces ?? 0}
-                  value={quotaEspaces}
-                  onChange={(e) => setQuotaEspaces(Number(e.target.value))}
-                />
-              </Field>
-              <div className="space-y-3">
-                <Switch
-                  checked={libreService}
-                  onChange={setLibreService}
-                  label="Autoriser le libre-service"
-                  description="Le client peut créer et supprimer ses propres ressources sans passer par nous. Désactiver revient à imposer un ticket pour chaque création."
-                />
-                <Switch
-                  checked={marketplaceOuverte}
-                  onChange={setMarketplaceOuverte}
-                  label="Autoriser la marketplace"
-                  description="Souscription en autonomie aux services managés du catalogue."
-                />
-                <Switch
-                  checked={soclesSouverains}
-                  onChange={setSoclesSouverains}
-                  label="Restreindre aux socles souverains"
-                  description="Les ressources de cette organisation ne seront placées que sur des socles libres et localisés en Côte d’Ivoire. À activer pour les organisations soumises à une contrainte réglementaire."
-                />
-              </div>
-              {!libreService && (
-                <Callout ton="warn" titre="Sans libre-service, tout passe par un ticket">
-                  Le client ne pourra plus créer ni supprimer une ressource lui-même : chaque
-                  demande arrivera dans notre file de tickets, avec le délai que cela implique. À
-                  réserver aux organisations qui le demandent explicitement.
-                </Callout>
+              {!estActif() && (
+              <>
+                <Field
+                  label="Plafond de dépense mensuelle"
+                  hint="au-delà, la création de nouvelles ressources est bloquée et le client averti"
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    value={plafond || (org.caMensuel ? org.caMensuel * 2 : 500000)}
+                    onChange={(e) => setPlafond(Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Quota maximal d’Espaces Cloud">
+                  <Input
+                    type="number"
+                    min={org.espaces ?? 0}
+                    value={quotaEspaces}
+                    onChange={(e) => setQuotaEspaces(Number(e.target.value))}
+                  />
+                </Field>
+                <div className="space-y-3">
+                  <Switch
+                    checked={libreService}
+                    onChange={setLibreService}
+                    label="Autoriser le libre-service"
+                    description="Le client peut créer et supprimer ses propres ressources sans passer par nous. Désactiver revient à imposer un ticket pour chaque création."
+                  />
+                  <Switch
+                    checked={marketplaceOuverte}
+                    onChange={setMarketplaceOuverte}
+                    label="Autoriser la marketplace"
+                    description="Souscription en autonomie aux services managés du catalogue."
+                  />
+                  <Switch
+                    checked={soclesSouverains}
+                    onChange={setSoclesSouverains}
+                    label="Restreindre aux socles souverains"
+                    description="Les ressources de cette organisation ne seront placées que sur des socles libres et localisés en Côte d’Ivoire. À activer pour les organisations soumises à une contrainte réglementaire."
+                  />
+                </div>
+                {!libreService && (
+                  <Callout ton="warn" titre="Sans libre-service, tout passe par un ticket">
+                    Le client ne pourra plus créer ni supprimer une ressource lui-même : chaque
+                    demande arrivera dans notre file de tickets, avec le délai que cela implique. À
+                    réserver aux organisations qui le demandent explicitement.
+                  </Callout>
+                )}
+              </>
               )}
             </div>
             <BoutonAction
@@ -1083,8 +1158,10 @@ export function VueOrganisation({ id }: { id: string }) {
               operation={{
                 action: 'org.manage',
                 titre: 'Paramètres enregistrés',
-                detail: `Plan ${planService || (org.tenantPlan ?? 'Standard')}, quota de ${quotaEspaces} espaces, libre-service ${
-                  libreService ? 'autorisé' : 'refusé'
+                detail: `Plan ${planService || (org.tenantPlan ?? 'Standard')}${
+                  estActif()
+                    ? ''
+                    : `, quota de ${quotaEspaces} espaces, libre-service ${libreService ? 'autorisé' : 'refusé'}`
                 }. La modification est journalisée dans l’audit du client, avec votre nom.`,
                 appel: () =>
                   modifierRessource('/organisations', org.id, {
@@ -1106,7 +1183,14 @@ export function VueOrganisation({ id }: { id: string }) {
                 sousTitre="Chaque accès de nos équipes aux ressources de cette organisation."
               />
               <div className="space-y-2">
-                {elevations.items.map((e) => (
+                {estActif() && listeElevations.length === 0 && (
+                  <p className="text-[12px] text-g-500">
+                    {auditDistant === undefined
+                      ? 'Chargement…'
+                      : 'Aucune élévation enregistrée pour cette organisation.'}
+                  </p>
+                )}
+                {listeElevations.map((e) => (
                   <div
                     key={e.id}
                     className={cn(
@@ -1120,14 +1204,15 @@ export function VueOrganisation({ id }: { id: string }) {
                         {e.qui}
                       </span>
                       <Badge tone={e.actif ? 'warn' : 'neutral'} dot={e.actif} size="sm">
-                        {e.actif ? 'Active' : 'Expirée'}
+                        {estActif() ? 'Consignée' : e.actif ? 'Active' : 'Expirée'}
                       </Badge>
                     </div>
                     <p className="mt-0.5 text-[11.5px] text-g-700">{e.motif}</p>
                     <p className="mt-0.5 text-[10.5px] text-g-500">
-                      {dateHeure(e.quand)} · durée {e.duree}
+                      {dateHeure(e.quand)}
+                      {estActif() ? '' : ` · durée ${e.duree}`}
                     </p>
-                    {e.actif && (
+                    {e.actif && !estActif() && (
                       <BoutonAction
                         libelle="Révoquer maintenant"
                         variant="ghost"
@@ -1161,7 +1246,7 @@ export function VueOrganisation({ id }: { id: string }) {
                   </p>
                   <p className="mt-0.5 text-[11.5px] leading-relaxed text-g-700">
                     Les accès sont coupés, les ressources continuent de tourner et de facturer. Une
-                    suspension arrête l’activité d’une entreprise : elle exige un motif écrit et reste
+                    suspension arrête l’activité d’une entreprise : elle est consignée avec votre nom et reste
                     visible dans son journal d’audit.
                   </p>
                   <GatedAction
@@ -1350,7 +1435,7 @@ export function VueOrganisation({ id }: { id: string }) {
             ? [
                 `Les ${org.utilisateurs ?? 0} membres perdent immédiatement l’accès au portail et aux services managés`,
                 'Les ressources continuent de tourner et de facturer — une suspension n’est pas un arrêt',
-                'L’activité de l’entreprise s’arrête : cette décision est consignée avec votre nom et son motif',
+                'L’activité de l’entreprise s’arrête : cette décision est consignée avec votre nom',
               ]
             : [
                 'Les accès de tous les membres sont rétablis immédiatement',
@@ -1369,7 +1454,7 @@ export function VueOrganisation({ id }: { id: string }) {
                 ? requete(`/organisations/${encodeURIComponent(org.id)}/suspension`, {
                     methode: 'POST',
                     corps: {
-                      motif: 'Suspension décidée depuis l’espace fournisseur, après relances.',
+                      motif: 'Suspension décidée depuis l’espace fournisseur.',
                       notifier: true,
                     },
                   })

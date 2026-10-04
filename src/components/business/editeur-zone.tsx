@@ -15,7 +15,8 @@ import {
   Wand2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { dateHeure, duree, num } from '@/lib/format'
+import { dateHeure, duree } from '@/lib/format'
+import { telechargerTexte } from '@/lib/export'
 import { MODELES_DNS, ZONES_DNS } from '@/lib/mock'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button, ButtonLink, IconButton } from '@/components/ui/button'
@@ -25,6 +26,7 @@ import { ConfirmDialog, Drawer, Modal, Tooltip } from '@/components/ui/overlay'
 import { Card, CardHeader, Callout, KeyValueList } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
 import { useApp } from '@/components/app/contexte'
+import { useParametresEntreeWeb } from '@/lib/web/dns-entree'
 import { useCollection } from '@/components/app/atelier'
 import { BoutonAction, BoutonFormulaire, useOperation } from '@/components/app/actions'
 import { creerRessource, estActif, requete } from '@/lib/api/client'
@@ -58,10 +60,7 @@ const versContrat = (r: Enregistrement) => ({
 
 /** Valeurs créées par un modèle rapide, une fois les jokers résolus. */
 const ENREGISTREMENTS_MODELE: Record<string, Enregistrement[]> = {
-  'mod-espace': [
-    { id: '', type: 'A', nom: '@', valeur: '102.176.20.13', ttl: 3600 },
-    { id: '', type: 'A', nom: 'www', valeur: '102.176.20.13', ttl: 3600 },
-  ],
+  'mod-espace': [],
   'mod-mail': [
     { id: '', type: 'MX', nom: '@', valeur: 'mx1.synelia.cloud.', ttl: 3600, priorite: 10 },
     { id: '', type: 'MX', nom: '@', valeur: 'mx2.synelia.cloud.', ttl: 3600, priorite: 20 },
@@ -91,9 +90,28 @@ const EXPLICATIONS: Record<string, string> = {
   NS: 'Délègue un sous-domaine à d’autres serveurs de noms.',
 }
 
+function enregistrementsModEspace(dnsEntree: {
+  dnsEntreeA?: string | null
+  dnsEntreeWildcardCname?: string | null
+}): Enregistrement[] {
+  const ip = dnsEntree.dnsEntreeA ?? '102.176.20.13'
+  const lignes: Enregistrement[] = [{ id: '', type: 'A', nom: '@', valeur: ip, ttl: 3600 }]
+  if (dnsEntree.dnsEntreeWildcardCname) {
+    lignes.push({
+      id: '',
+      type: 'CNAME',
+      nom: '*',
+      valeur: dnsEntree.dnsEntreeWildcardCname,
+      ttl: 3600,
+    })
+  }
+  return lignes
+}
+
 export function EditeurZone({ zoneId }: { zoneId: string }) {
   const { autorise, refus } = useApp()
   const executer = useOperation()
+  const dnsEntree = useParametresEntreeWeb()
   const zones = useCollection<DnsZone>('zones-dns', ZONES_DNS)
   const [onglet, setOnglet] = useState('enregistrements')
   const [filtre, setFiltre] = useState<string>('tous')
@@ -164,7 +182,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
       action: 'network.manage',
       titre: edition ? 'Enregistrement modifié' : 'Enregistrement créé',
       detail:
-        'Publié sur les trois serveurs de noms. Visible partout après expiration du TTL.',
+        'Publié sur les serveurs de noms. Visible partout après expiration du TTL.',
       appel: () =>
         edition
           ? requete(
@@ -225,6 +243,9 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
     ),
   ].join('\n')
 
+  const telecharger = () =>
+    telechargerTexte(`${zone.domaine}.zone`, fichierZone, 'text/plain;charset=utf-8')
+
   return (
     <div className="space-y-5">
 
@@ -236,13 +257,15 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
         />
         <StatTile
           libelle="TTL le plus court"
-          valeur={duree(Math.min(...zone.enregistrements.map((r) => r.ttl)))}
+          valeur={
+            zone.enregistrements.length ? duree(Math.min(...zone.enregistrements.map((r) => r.ttl))) : '—'
+          }
           detail="Délai de propagation d’un changement"
         />
         <StatTile
-          libelle="Requêtes 24 h"
-          valeur={num(184_920)}
-          detail="Sur les trois serveurs de noms"
+          libelle="Serveurs de noms"
+          valeur={zone.ns.length}
+          detail="À déclarer chez le registre"
         />
         <StatTile
           libelle="DNSSEC"
@@ -352,16 +375,18 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                   effet: () => setOnglet('brut'),
                 }}
               />
-              <BoutonAction
-                libelle="Historique"
-                variant="ghost"
-                icone={<History size={12} />}
-                operation={{
-                  ton: 'info',
-                  titre: 'Historique de la zone',
-                  detail: `${zone.enregistrements.length} enregistrements au dernier point de reprise. Les sept derniers jours sont conservés.`,
-                }}
-              />
+              {!estActif() && (
+                <BoutonAction
+                  libelle="Historique"
+                  variant="ghost"
+                  icone={<History size={12} />}
+                  operation={{
+                    ton: 'info',
+                    titre: 'Historique de la zone',
+                    detail: `${zone.enregistrements.length} enregistrements au dernier point de reprise. Les sept derniers jours sont conservés.`,
+                  }}
+                />
+              )}
               <BoutonAction
                 libelle="Exporter"
                 variant="ghost"
@@ -370,6 +395,8 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                   ton: 'info',
                   titre: `Zone ${zone.domaine} exportée`,
                   detail: 'Format BIND, réimportable tel quel chez n’importe quel opérateur.',
+                  effet: telecharger,
+                  appel: async () => telecharger(),
                 }}
               />
               <BoutonFormulaire
@@ -541,7 +568,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
 
           <div className="border-t border-g-100 px-4 py-3">
             <p className="text-[12px] leading-relaxed text-g-500">
-              Un changement est publié sur les trois serveurs de noms en moins de dix secondes. Le
+              Un changement est publié sur les serveurs de noms de la zone. Le
               temps qu’il devienne visible partout dépend du TTL de l’enregistrement modifié — un TTL
               de 3 600 secondes signifie qu’un résolveur peut encore servir l’ancienne valeur pendant
               une heure.
@@ -626,7 +653,15 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
               label="DNSSEC"
               description="Nous gérons les clés, leur rotation et la publication de l’enregistrement DS auprès du registre. Aucune manipulation de clé de votre côté."
             />
-            {zone.dnssec ? (
+            {zone.dnssec && estActif() ? (
+              <Callout ton="ok" className="mt-4" titre="DNSSEC activé">
+                <span className="inline-flex items-center gap-1.5">
+                  <ShieldCheck size={13} />
+                  Les clés sont gérées par Synelia. Le DS à déclarer chez le registre est publié
+                  avec l’activation.
+                </span>
+              </Callout>
+            ) : zone.dnssec ? (
               <>
                 <div className="mt-4 space-y-3 border-t border-g-100 pt-4">
                   <CopyField
@@ -670,12 +705,16 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
             />
             <div className="space-y-2">
               {[
-                { t: 'Cohérence des serveurs de noms', ok: true, d: 'Les trois serveurs servent la même série de zone.' },
+                ...(estActif()
+                  ? []
+                  : [{ t: 'Cohérence des serveurs de noms', ok: true, d: 'Les serveurs servent la même série de zone.' }]),
                 { t: 'Enregistrement SPF unique', ok: zone.enregistrements.filter((r) => r.type === 'TXT' && r.valeur.startsWith('v=spf1')).length <= 1, d: 'Deux SPF sur un même domaine invalident les deux — c’est une cause fréquente de courriels rejetés.' },
                 { t: 'Aucun CNAME sur l’apex', ok: !zone.enregistrements.some((r) => r.type === 'CNAME' && r.nom === '@'), d: 'La norme interdit un CNAME sur @. Certains résolveurs le tolèrent, d’autres refusent toute la zone.' },
                 { t: 'DMARC publié', ok: zone.enregistrements.some((r) => r.nom === '_dmarc'), d: 'Sans DMARC, n’importe qui peut envoyer des courriels en usurpant votre domaine.' },
                 { t: 'CAA présent', ok: zone.enregistrements.some((r) => r.type === 'CAA'), d: 'Limite l’émission de certificats aux autorités que vous désignez.' },
-                { t: 'MX joignables', ok: true, d: 'Les serveurs de courrier déclarés répondent sur le port 25.' },
+                ...(estActif()
+                  ? []
+                  : [{ t: 'MX joignables', ok: true, d: 'Les serveurs de courrier déclarés répondent sur le port 25.' }]),
               ].map((v) => (
                 <div
                   key={v.t}
@@ -714,23 +753,21 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                   <span className="min-w-0">
                     <span className="block font-mono text-[13px] font-semibold text-ink">{n}</span>
                     <span className="block text-[11px] text-g-500">
-                      {i === 0
-                        ? 'Abidjan · ABJ-1 · primaire'
-                        : i === 1
-                          ? 'Grand-Bassam · GBM-1 · secondaire'
-                          : 'Anycast régional · secondaire'}
+                      {i === 0 ? 'Primaire' : 'Secondaire'}
                     </span>
                   </span>
-                  <Badge tone="ok" dot size="sm">
-                    Répond
-                  </Badge>
+                  {!estActif() && (
+                    <Badge tone="ok" dot size="sm">
+                      Répond
+                    </Badge>
+                  )}
                 </div>
               ))}
             </div>
-            <Callout ton="info" className="mt-4" titre="Pourquoi trois serveurs sur deux sites">
+            <Callout ton="info" className="mt-4" titre="Pourquoi plusieurs serveurs de noms">
               Un seul serveur de noms, c’est un point de défaillance unique : s’il tombe, votre
-              domaine devient injoignable même si vos serveurs web fonctionnent. Deux sites physiques
-              distincts protègent d’une panne électrique ou réseau localisée.
+              domaine devient injoignable même si vos serveurs web fonctionnent. Déclarez-les tous
+              chez votre bureau d’enregistrement.
             </Callout>
           </Card>
 
@@ -815,6 +852,8 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
                     ton: 'info',
                     titre: `${zone.domaine}.zone téléchargé`,
                     detail: `${zone.enregistrements.length} enregistrements au format BIND.`,
+                    effet: telecharger,
+                    appel: async () => telecharger(),
                   }}
                 />
               }
@@ -822,28 +861,30 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
             <CodeBlock langue="dns" code={fichierZone} />
           </Card>
 
-          <Card>
-            <CardHeader
-              titre="Import de zone"
-              sousTitre="Collez un fichier de zone BIND. Nous vous montrons les différences avant d’appliquer quoi que ce soit."
-            />
-            <MonoTextarea rows={8} placeholder="@	3600	IN	A	203.0.113.10" />
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <BoutonAction
-                libelle="Analyser les différences"
-                size="md"
-                operation={{
-                  ton: 'info',
-                  titre: 'Comparatif prêt',
-                  detail:
-                    'Aucun enregistrement n’a été modifié : le comparatif liste ce qui serait ajouté, remplacé et laissé en place.',
-                }}
+          {!estActif() && (
+            <Card>
+              <CardHeader
+                titre="Import de zone"
+                sousTitre="Collez un fichier de zone BIND. Nous vous montrons les différences avant d’appliquer quoi que ce soit."
               />
-              <span className="text-[12px] text-g-500">
-                Aucun enregistrement n’est modifié avant votre validation du comparatif.
-              </span>
-            </div>
-          </Card>
+              <MonoTextarea rows={8} placeholder="@	3600	IN	A	203.0.113.10" />
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <BoutonAction
+                  libelle="Analyser les différences"
+                  size="md"
+                  operation={{
+                    ton: 'info',
+                    titre: 'Comparatif prêt',
+                    detail:
+                      'Aucun enregistrement n’a été modifié : le comparatif liste ce qui serait ajouté, remplacé et laissé en place.',
+                  }}
+                />
+                <span className="text-[12px] text-g-500">
+                  Aucun enregistrement n’est modifié avant votre validation du comparatif.
+                </span>
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
@@ -948,7 +989,11 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
             </Button>
             <Button
               onClick={() => {
-                const ajouts = (ENREGISTREMENTS_MODELE[modele ?? ''] ?? []).map((r) => ({
+                const base =
+                  modele === 'mod-espace'
+                    ? enregistrementsModEspace(dnsEntree)
+                    : (ENREGISTREMENTS_MODELE[modele ?? ''] ?? [])
+                const ajouts = base.map((r) => ({
                   ...r,
                   id: zones.identifiant('rr'),
                   valeur: r.valeur.replace('%DOMAINE%', zone.domaine),
@@ -1035,7 +1080,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
               action: 'network.manage',
               ton: 'err',
               titre: 'Enregistrement supprimé',
-              detail: 'Vous pouvez le recréer depuis l’historique de la zone dans les sept jours.',
+              detail: 'La suppression est journalisée dans l’audit.',
               appel: () =>
                 requete(
                   `/web/dns/${encodeURIComponent(zone.id)}/enregistrements/${encodeURIComponent(cible.id)}`,
@@ -1059,6 +1104,7 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
           qu’une heure. Remontez-le ensuite : un TTL court multiplie les requêtes et ralentit
           légèrement la résolution.
         </Callout>
+        {!estActif() ? (
         <Card>
           <CardHeader titre="Historique de la zone" sousTitre="Sept derniers jours." />
           <div className="space-y-1.5">
@@ -1083,6 +1129,14 @@ export function EditeurZone({ zoneId }: { zoneId: string }) {
             Voir le journal d’audit complet
           </ButtonLink>
         </Card>
+        ) : (
+          <Card>
+            <CardHeader titre="Journal d’audit" sousTitre="Les modifications de zone sont journalisées avec leur auteur." />
+            <ButtonLink size="sm" variant="ghost" href="/app/securite">
+              Ouvrir le journal d’audit
+            </ButtonLink>
+          </Card>
+        )}
       </div>
     </div>
   )

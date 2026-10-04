@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { Container, Link2, Plus, Server, Settings2, TrendingUp, Unlink } from 'lucide-react'
 import { cn, seededSeries, trendSeries } from '@/lib/utils'
+import { estActif } from '@/lib/api/client'
 import { dateCourte, dateHeure, goHumain, money, num, pct, toHumain } from '@/lib/format'
 import {
   SITE_LABEL,
@@ -66,7 +67,7 @@ export function VueEspace({ id }: { id: string }) {
   const grappes = useCollection<K8sCluster>('clusters', K8S_CLUSTERS)
   // Le catalogue réel prime sur la graine : un tarif changé côté
   // /admin/catalogue doit se voir ici, pas seulement dans l'admin.
-  const offresReelles = useCollection<Offer>('offres', OFFRES)
+  const offresReelles = useCollection<Offer>('offres-publiques', OFFRES)
   // Même collections que `/app/reseau`, `/app/membres` et `/app/sauvegarde` :
   // avant ce correctif, ces trois onglets lisaient les graines directement
   // (`reseauxDeLEspace`/`ipsDeLEspace`, `MEMBERSHIPS`, `BACKUP_PLANS`,
@@ -226,22 +227,21 @@ export function VueEspace({ id }: { id: string }) {
               libelle="vCPU"
               valeur={`${espace.usage.vcpu}/${espace.quota.vcpu}`}
               detail={pct(Math.round((espace.usage.vcpu / espace.quota.vcpu) * 100))}
-              serie={trendSeries(`${id}-vcpu`, 24, espace.usage.vcpu - 8, espace.usage.vcpu, 2)}
+              serie={estActif() ? undefined : trendSeries(`${id}-vcpu`, 24, espace.usage.vcpu - 8, espace.usage.vcpu, 2)}
             />
             <StatTile
               libelle="Mémoire"
               valeur={`${num(espace.usage.ramGo)}/${num(espace.quota.ramGo)}`}
               unite="Go"
               detail={pct(Math.round((espace.usage.ramGo / espace.quota.ramGo) * 100))}
-              serie={trendSeries(`${id}-ram`, 24, espace.usage.ramGo - 20, espace.usage.ramGo, 6)}
+              serie={estActif() ? undefined : trendSeries(`${id}-ram`, 24, espace.usage.ramGo - 20, espace.usage.ramGo, 6)}
             />
             <StatTile
               libelle="Stockage"
-              valeur={`${espace.usage.stockageTo}/${espace.quota.stockageTo}`}
-              unite="To"
+              valeur={toHumain(espace.usage.stockageTo)}
               ton={espace.usage.stockageTo / espace.quota.stockageTo > 0.85 ? 'warn' : 'violet'}
-              detail={pct(Math.round((espace.usage.stockageTo / espace.quota.stockageTo) * 100))}
-              serie={trendSeries(
+              detail={`sur ${toHumain(espace.quota.stockageTo)} · ${pct(Math.round((espace.usage.stockageTo / espace.quota.stockageTo) * 100))}`}
+              serie={estActif() ? undefined : trendSeries(
                 `${id}-sto`,
                 24,
                 espace.usage.stockageTo * 0.9,
@@ -289,6 +289,7 @@ export function VueEspace({ id }: { id: string }) {
                   formateur={(v) => toHumain(v)}
                 />
               </div>
+{!estActif() && (
               <div className="mt-4 border-t border-g-100 pt-3.5">
                 <MicroLabel className="mb-2">Consommation vCPU sur 30 jours</MicroLabel>
                 <Sparkline
@@ -296,6 +297,7 @@ export function VueEspace({ id }: { id: string }) {
                   hauteur={56}
                 />
               </div>
+              )}
               {espace.usage.stockageTo / espace.quota.stockageTo > 0.85 && (
                 <Callout ton="warn" className="mt-3.5" titre="Extension de stockage recommandée">
                   À ce rythme de croissance, le plafond de {toHumain(espace.quota.stockageTo)} sera

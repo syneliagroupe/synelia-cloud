@@ -16,8 +16,8 @@ export function CadreBackup({ children }: { children: React.ReactNode }) {
       id: s.id,
       nom: s.nomServi,
       sousTitre: `${s.serveur} · ${s.frequence} à ${s.heure}`,
-      etat: dernier?.statut === 'ok' ? 'OK' : dernier?.statut === 'partielle' ? 'Partielle' : 'Échec',
-      ton: (dernier?.statut === 'ok' ? 'ok' : dernier?.statut === 'partielle' ? 'warn' : 'err') as Tone,
+      etat: !dernier ? 'Planifiée' : dernier.statut === 'ok' ? 'OK' : dernier.statut === 'partielle' ? 'Partielle' : 'Échec',
+      ton: (!dernier ? 'neutral' : dernier.statut === 'ok' ? 'ok' : dernier.statut === 'partielle' ? 'warn' : 'err') as Tone,
       href: `/app/web/backup/${s.id}`,
       motsCles: [s.destination, s.serveur],
     }

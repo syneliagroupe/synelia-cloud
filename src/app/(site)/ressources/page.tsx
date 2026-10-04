@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react'
 import { BookOpen, Download, FileText, PlayCircle, Table2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RESSOURCES } from '@/lib/mock'
+import { estActif } from '@/lib/api/client'
+import { RubriqueNonPubliee } from '@/components/site/rubrique-non-publiee'
 import { Badge, MicroLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, Input, SearchInput } from '@/components/ui/field'
@@ -42,6 +44,9 @@ export default function Ressources() {
       }),
     [q, type, theme],
   )
+
+  // En mode API, aucun document n'est publié : on ne propose pas de « télécharger » des livres blancs de démonstration.
+  if (estActif()) return <RubriqueNonPubliee surtitre="Ressources" titre="Livres blancs, guides et webinaires" />
 
   return (
     <>

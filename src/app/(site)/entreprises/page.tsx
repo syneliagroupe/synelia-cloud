@@ -12,6 +12,8 @@ import {
   SectionTitle,
   SiteSection,
 } from '@/components/site/blocs'
+import { estActif } from '@/lib/api/client'
+import { SITES } from '@/lib/types'
 import {
   BANDEAU_CONFIANCE,
   OFFRES_ENTREPRISE,
@@ -30,7 +32,7 @@ const ARGUMENTS = [
   {
     titre: 'Une souveraineté attestée, pas revendiquée',
     texte:
-      'Nous générons sur demande une attestation de résidence des données, ressource par ressource, avec l’identifiant du site. Nous documentons aussi ce qui n’est pas encore atteint : la capacité VMware et Hyper-V héritée de reprises de parcs clients est marquée « en sortie », avec une date cible de migration. Un évaluateur technique préfère une trajectoire honnête à une affirmation invérifiable.',
+      'Nous générons sur demande une attestation de résidence des données, ressource par ressource, avec l’identifiant du site. ' + (estActif() ? 'Ce qui n’est pas atteint, nous le disons.' : 'Nous documentons aussi ce qui n’est pas encore atteint : la capacité VMware et Hyper-V héritée de reprises de parcs clients est marquée « en sortie », avec une date cible de migration. Un évaluateur technique préfère une trajectoire honnête à une affirmation invérifiable.'),
   },
   {
     titre: 'Un PRA exercé, pas seulement contractualisé',
@@ -43,6 +45,14 @@ const ARGUMENTS = [
       'Chaque service publie son format d’export et son délai — cinq jours pour un Drive, sept pour une messagerie, dix pour une GED. Nous vérifions périodiquement que ces exports se réimportent effectivement dans une instance vierge. Partir doit être possible pour que rester soit un choix.',
   },
 ]
+
+/** Sans API : le bandeau de la maquette. Avec API : seulement ce que la plateforme peut affirmer. */
+const bandeau = estActif()
+  ? [
+      { valeur: String(SITES.length), libelle: SITES.length > 1 ? 'sites en Côte d’Ivoire' : 'site en Côte d’Ivoire' },
+      ...BANDEAU_CONFIANCE.slice(2, 3),
+    ]
+  : BANDEAU_CONFIANCE
 
 export default function Entreprises() {
   return (
@@ -136,7 +146,7 @@ export default function Entreprises() {
       <section className="bg-p-700">
         <Container className="py-10">
           <dl className="grid grid-cols-2 gap-8 sm:grid-cols-4">
-            {BANDEAU_CONFIANCE.map((c) => (
+            {bandeau.map((c) => (
               <ChiffreCle key={c.libelle} valeur={c.valeur} libelle={c.libelle} sombre />
             ))}
           </dl>
@@ -269,7 +279,7 @@ export default function Entreprises() {
                     required
                     name="besoin"
                     rows={5}
-                    placeholder="Nous sortons d’un contrat de licences propriétaires arrivant à échéance en mars, pour un parc de 40 machines virtuelles et 240 boîtes de messagerie. Nous cherchons à établir un PRA inter-site avec un RTO inférieur à quatre heures."
+                    placeholder="Exemple : un parc de machines virtuelles à migrer avant l’échéance de notre contrat actuel, avec un plan de reprise dont le RTO reste à définir."
                   />
                 </Field>
                 <Checkbox
@@ -286,7 +296,11 @@ export default function Entreprises() {
 
       <AppelFinal
         titre="Ou commencez par explorer le portail"
-        chapeau="Créez un compte : l’espace client est peuplé de données de démonstration réalistes — Espaces Cloud, machines, applications, services managés, sauvegardes, PRA, facturation."
+        chapeau={
+          estActif()
+            ? 'Créez un compte pour ouvrir l’espace client : Espaces Cloud, machines, applications, services managés, sauvegardes, facturation.'
+            : 'Créez un compte : l’espace client est peuplé de données de démonstration réalistes — Espaces Cloud, machines, applications, services managés, sauvegardes, PRA, facturation.'
+        }
         primaire={{ libelle: 'Créer un compte', href: '/signup' }}
         secondaire={{ libelle: 'Voir les datacenters', href: '/datacenters' }}
       />

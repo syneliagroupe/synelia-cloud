@@ -279,6 +279,7 @@ export function VueAgent({ agentId }: { agentId: string }) {
               ni sur une dépense de clé — seule une trace d’audit est écrite, comme pour tout appel.
             </p>
             <MonoTextarea
+              aria-label="Message de test"
               value={messageTest}
               placeholder="Bonjour, peux-tu te présenter ?"
               onChange={(e) => setMessageTest(e.target.value)}

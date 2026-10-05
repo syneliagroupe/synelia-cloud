@@ -80,7 +80,7 @@ export function SectionTitle({
   return (
     <div className={cn(centre && 'mx-auto max-w-2xl text-center', className)}>
       {surtitre && (
-        <MicroLabel className={sombre ? 'text-p-300' : 'text-m-600'}>{surtitre}</MicroLabel>
+        <MicroLabel className={sombre ? 'text-p-300' : 'text-m-700'}>{surtitre}</MicroLabel>
       )}
       <h2
         className={cn(
@@ -181,7 +181,7 @@ export function HeroCourt({
   return (
     <section className="border-b border-encre-2/10 bg-creme-2">
       <Container className="py-14 sm:py-16">
-        {surtitre && <MicroLabel className="text-m-600">{surtitre}</MicroLabel>}
+        {surtitre && <MicroLabel className="text-m-700">{surtitre}</MicroLabel>}
         <h1 className="mt-2 max-w-3xl text-[32px] font-black leading-[1.06] tracking-[-0.02em] [font-family:var(--font-display)] text-encre-2 sm:text-[46px]">
           {titre}
         </h1>

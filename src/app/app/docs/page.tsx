@@ -128,7 +128,7 @@ export default function Docs() {
             placeholder="Rechercher dans la documentation…"
             className="min-w-[240px] flex-1"
           />
-          <Select value={theme} onChange={(e) => setTheme(e.target.value)} className="w-auto">
+          <Select aria-label="Thème" value={theme} onChange={(e) => setTheme(e.target.value)} className="w-auto">
             {themes.map((t) => (
               <option key={t} value={t}>
                 {t === 'tous' ? 'Tous les thèmes' : t}

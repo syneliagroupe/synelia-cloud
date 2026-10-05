@@ -53,7 +53,7 @@ function DatacentersReels({ sites, capacite }: { sites: DatacenterPublic[]; capa
             <Container>
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
-                  <MicroLabel className="text-m-600">Site {d.site}</MicroLabel>
+                  <MicroLabel className="text-m-700">Site {d.site}</MicroLabel>
                   <h2 className="mt-2 text-[26px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[32px]">
                     {d.nom}
                   </h2>
@@ -330,7 +330,7 @@ export default async function Datacenters() {
             <Container>
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
-                  <MicroLabel className="text-m-600">Site {d.code}</MicroLabel>
+                  <MicroLabel className="text-m-700">Site {d.code}</MicroLabel>
                   <h2 className="mt-2 text-[26px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[32px]">
                     {d.nom}
                   </h2>

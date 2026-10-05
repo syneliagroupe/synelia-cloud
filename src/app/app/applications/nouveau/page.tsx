@@ -665,6 +665,7 @@ function ChampEtiquettes({
         </span>
       ))}
       <input
+        aria-label="Ajouter une étiquette"
         value={saisie}
         onChange={(e) => setSaisie(e.target.value)}
         onKeyDown={(e) => {

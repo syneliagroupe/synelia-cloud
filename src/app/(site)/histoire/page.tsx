@@ -46,7 +46,7 @@ export default function Histoire() {
       {/* ─── Le déclencheur ───────────────────────────────────────────── */}
       <SiteSection>
         <Container taille="md">
-          <MicroLabel className="text-m-600">Le déclencheur · 2017</MicroLabel>
+          <MicroLabel className="text-m-700">Le déclencheur · 2017</MicroLabel>
           <p className="mt-4 text-[19px] font-medium leading-relaxed [font-family:var(--font-display)] text-ink sm:text-[22px]">
             Un client perd l’accès à son ERP un mardi matin. La cause est dans un datacenter à
             5 000 km. Le support répond en anglais, sur un autre fuseau, à des heures où notre
@@ -78,7 +78,7 @@ export default function Histoire() {
                   className="absolute -left-[31px] top-1.5 h-3 w-3 rounded-full border-2 border-p-050 bg-p-700 sm:-left-[39px]"
                   aria-hidden
                 />
-                <p className="tnum type-micro text-m-600">{h.annee}</p>
+                <p className="tnum type-micro text-m-700">{h.annee}</p>
                 <h3 className="mt-1.5 text-[17px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[19px]">
                   {h.titre}
                 </h3>

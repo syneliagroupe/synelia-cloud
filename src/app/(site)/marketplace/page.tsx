@@ -199,7 +199,7 @@ export default function MarketplacePublic() {
         <Container>
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
             <div>
-              <MicroLabel className="text-m-600">Notre ligne de conduite</MicroLabel>
+              <MicroLabel className="text-m-700">Notre ligne de conduite</MicroLabel>
               <h2 className="mt-3 text-[24px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[30px]">
                 Nous ne réimplémentons pas ces produits.
               </h2>
@@ -211,7 +211,7 @@ export default function MarketplacePublic() {
               </p>
               <p className="mt-3 text-[14px] leading-relaxed text-g-700">
                 Concrètement, un bouton{' '}
-                <span className="font-semibold text-m-600">Ouvrir</span> vous redirige en SSO vers
+                <span className="font-semibold text-m-700">Ouvrir</span> vous redirige en SSO vers
                 l’interface d’origine de la solution. Vous bénéficiez de son écosystème complet, de
                 ses applications mobiles, de ses extensions et de sa documentation. Le portail garde
                 ce qu’il fait mieux : le provisioning, les quotas, les sièges, la sauvegarde, la

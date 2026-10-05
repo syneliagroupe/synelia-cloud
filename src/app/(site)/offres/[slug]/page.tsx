@@ -154,7 +154,7 @@ export default async function FicheProduit({
                 className="h-16 w-16 shrink-0 rounded-[12px]"
               />
             )}
-            <MicroLabel className="text-m-600">{f.surtitre}</MicroLabel>
+            <MicroLabel className="text-m-700">{f.surtitre}</MicroLabel>
           </div>
           <h1 className="mt-3 text-[34px] font-black leading-[1.06] tracking-[-0.02em] [font-family:var(--font-display)] text-encre-2 sm:text-[46px]">
             {f.nom}

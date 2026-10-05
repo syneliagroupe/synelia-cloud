@@ -87,13 +87,13 @@ export default async function FicheServicePublique({
               <div className="flex items-center gap-3">
                 <SolutionLogo initiales={s.logoInitiales} teinte={s.logoTeinte} icone={s.icone} size="lg" />
                 <div>
-                  <MicroLabel className="text-m-600">{CATEGORIE_LABEL[s.categorie]}</MicroLabel>
+                  <MicroLabel className="text-m-700">{CATEGORIE_LABEL[s.categorie]}</MicroLabel>
                   <h1 className="mt-1 text-[32px] font-black leading-none [font-family:var(--font-display)] text-encre-2 sm:text-[40px]">
                     {s.nom}
                   </h1>
                 </div>
               </div>
-              <p className="mt-4 text-[15px] font-bold text-m-600">{s.pitch}</p>
+              <p className="mt-4 text-[15px] font-bold text-m-700">{s.pitch}</p>
               <p className="mt-2.5 text-[14px] leading-relaxed text-encre-2/70">{s.description}</p>
               <div className="mt-5 flex flex-wrap items-center gap-2">
                 <Badge tone={s.certifie ? 'ok' : 'neutral'}>
@@ -110,7 +110,7 @@ export default async function FicheServicePublique({
             </div>
 
             <div className="w-full max-w-xs rounded-[20px] border border-encre-2/10 bg-creme p-5">
-              <MicroLabel className="text-m-600">Prix d’entrée</MicroLabel>
+              <MicroLabel className="text-m-700">Prix d’entrée</MicroLabel>
               <p className="tnum mt-2 text-[28px] font-black leading-none [font-family:var(--font-display)] text-p-600">
                 {prixEntree ? money(prixEntree.valeur) : 'Sur devis'}
                 {prixEntree && (
@@ -199,7 +199,7 @@ export default async function FicheServicePublique({
         <Container>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="max-w-2xl">
-              <MicroLabel className="text-m-600">Le cœur de l’offre</MicroLabel>
+              <MicroLabel className="text-m-700">Le cœur de l’offre</MicroLabel>
               <h2 className="mt-2 text-[26px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[32px]">
                 Ce que Synelia opère pour vous
               </h2>

@@ -219,6 +219,7 @@ export function WizardShell({
   courante,
   onChange,
   titre,
+  niveau: Titre = 'h1',
   children,
   panneau,
   actions,
@@ -228,6 +229,8 @@ export function WizardShell({
   courante: number
   onChange?: (n: number) => void
   titre: string
+  /** `h2` quand la page porte déjà son `PageHeader`. */
+  niveau?: 'h1' | 'h2'
   children: ReactNode
   panneau?: ReactNode
   actions?: ReactNode
@@ -240,12 +243,12 @@ export function WizardShell({
       </div>
       <div className={cn('grid gap-5', panneau ? 'lg:grid-cols-[1fr_340px]' : '')}>
         <div className="min-w-0 space-y-4">
-          <h1 className="type-h2">
+          <Titre className="type-h2">
             <span className="tnum mr-2 text-g-500">
               {courante}/{etapes.length}
             </span>
             {titre}
-          </h1>
+          </Titre>
           {children}
           {actions && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-g-100 pt-4">

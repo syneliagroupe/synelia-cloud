@@ -173,6 +173,7 @@ export function TagsInput({
         </span>
       ))}
       <input
+        aria-label="Ajouter une étiquette"
         value={brouillon}
         onChange={(e) => setBrouillon(e.target.value)}
         onKeyDown={(e) => {

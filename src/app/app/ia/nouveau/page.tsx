@@ -233,6 +233,7 @@ export default function NouvelAgent() {
         courante={etape}
         onChange={setEtape}
         titre={ETAPES[etape - 1].titre}
+        niveau="h2"
         panneau={panneau}
         actions={
           <>

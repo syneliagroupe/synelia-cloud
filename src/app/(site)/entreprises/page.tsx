@@ -158,7 +158,7 @@ export default function Entreprises() {
         <Container>
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_1.15fr]">
             <div>
-              <MicroLabel className="text-m-600">Mise en relation</MicroLabel>
+              <MicroLabel className="text-m-700">Mise en relation</MicroLabel>
               <h2 className="mt-3 text-[26px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[32px]">
                 Parlez à un architecte qui connaît votre marché
               </h2>

@@ -186,7 +186,7 @@ export default function Equipe() {
       <SiteSection>
         <Container taille="md">
           <div className="rounded-[14px] border border-g-300 bg-white p-6 sm:p-8">
-            <MicroLabel className="text-m-600">Nous recrutons</MicroLabel>
+            <MicroLabel className="text-m-700">Nous recrutons</MicroLabel>
             <h2 className="mt-3 text-[22px] font-bold leading-tight [font-family:var(--font-display)] text-ink sm:text-[26px]">
               Quatre des huit personnes de cette page sont arrivées en alternance
             </h2>

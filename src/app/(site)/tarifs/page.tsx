@@ -137,6 +137,10 @@ export default function Tarifs() {
             </p>
           </div>
 
+          {!distant.termine ? (
+            <div aria-busy className="mt-6 h-[420px] animate-pulse rounded-[10px] bg-g-100" />
+          ) : (
+          <>
           <Tabs
             className="mt-6"
             tabs={familles.map((f) => ({ id: f.id, label: f.nom }))}
@@ -250,13 +254,15 @@ export default function Tarifs() {
             <div>
               <MicroLabel>À retenir</MicroLabel>
               <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-g-700">
-                Les colonnes « Sur devis » correspondent aux configurations dimensionnées sur mesure,
-                avec hôtes dédiés possibles et SLA renforcé. Le devis est établi après un atelier de
-                cadrage d’une demi-journée, sans frais.
+                {active.colonnes.some((c) => c.surDevis)
+                  ? 'Les colonnes « Sur devis » correspondent aux configurations dimensionnées sur mesure, avec hôtes dédiés possibles et SLA renforcé. Le devis est établi après un atelier de cadrage d’une demi-journée, sans frais.'
+                  : 'Pour une configuration dimensionnée sur mesure, avec hôtes dédiés ou SLA renforcé, demandez un devis : il est établi après un atelier de cadrage d’une demi-journée, sans frais.'}
               </p>
             </div>
             <LienFleche href="/simulateur">Ouvrir le simulateur</LienFleche>
           </div>
+          </>
+          )}
         </Container>
       </SiteSection>
 

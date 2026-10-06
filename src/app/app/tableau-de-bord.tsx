@@ -272,12 +272,12 @@ export default function TableauDeBord() {  const maintenant = useMaintenant()
           <Link href="/app/espaces" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Espaces</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{espacesN}</div>
-            <div className="mt-1 text-[11px] text-g-500">{sitesN} site(s) · {offresN} offre(s)</div>
+            <div className="mt-1 text-[11px] text-g-500">{sitesN} site{sitesN > 1 ? 's' : ''} · {offresN} offre{offresN > 1 ? 's' : ''}</div>
           </Link>
           <Link href="/app/vms" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">VMs</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Machines</div>
             <div className="mt-1 text-[22px] font-bold leading-none text-ink">{vmsN}</div>
-            <div className="mt-1 text-[11px] text-g-500">{clustersN} cluster(s) K8s</div>
+            <div className="mt-1 text-[11px] text-g-500">{clustersN} cluster{clustersN > 1 ? 's' : ''} K8s</div>
           </Link>
           <Link href="/app/web/sites" className="rounded-[8px] border border-g-200 p-3 hover:border-p-300 hover:bg-p-050">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-g-500">Domaines</div>

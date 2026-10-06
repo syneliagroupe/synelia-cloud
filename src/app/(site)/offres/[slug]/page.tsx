@@ -159,7 +159,7 @@ export default async function FicheProduit({
           <h1 className="mt-3 text-[34px] font-black leading-[1.06] tracking-[-0.02em] [font-family:var(--font-display)] text-encre-2 sm:text-[46px]">
             {f.nom}
           </h1>
-          <p className="mt-3 max-w-2xl text-[18px] font-bold leading-snug text-m-600 sm:text-[22px]">
+          <p className="mt-3 max-w-2xl text-[18px] font-bold leading-snug text-m-700 sm:text-[22px]">
             {f.accroche}
           </p>
           <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-encre-2/70">{f.resume}</p>

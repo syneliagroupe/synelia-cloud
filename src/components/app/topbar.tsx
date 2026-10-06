@@ -190,7 +190,7 @@ function BarreUnivers({
 
       <CentreDeTaches superAdmin={superAdmin} />
 
-      <NotificationsPopover />
+      <Notifications superAdmin={superAdmin} />
 
       <MenuCompte superAdmin={superAdmin} />
     </header>
@@ -518,8 +518,25 @@ function CentreDeTachesCorps({ jobs, superAdmin }: { jobs: ProvisioningJob[]; su
   )
 }
 
-function NotificationsPopover() {
+function Notifications({ superAdmin }: { superAdmin: boolean }) {
+  return superAdmin ? <NotificationsAdmin /> : <NotificationsClient />
+}
+
+function NotificationsClient() {
+  const client = useCollection<ProvisioningJob>('jobs', JOBS)
+  return <NotificationsCorps jobs={client.items} />
+}
+
+function NotificationsAdmin() {
+  const plateforme = useCollection<ProvisioningJob>('jobs-plateforme', JOBS_PLATEFORME)
+  return <NotificationsCorps jobs={plateforme.items} />
+}
+
+/** La cloche s'allume et pulse tant qu'une tâche tourne ; la liste montre les tâches en cours puis les plus récentes. */
+function NotificationsCorps({ jobs }: { jobs: ProvisioningJob[] }) {
   const maintenant = useMaintenant()
+  const enCours = jobs.filter((j) => j.statut === 'running' || j.statut === 'queued')
+  const recents = [...enCours, ...jobs.filter((j) => !enCours.includes(j))].slice(0, 6)
   // Pas de flux de notifications côté backend : la liste de démonstration ne
   // doit pas se faire passer pour l'état réel de la plateforme.
   const liste = estActif() ? [] : NOTIFICATIONS
@@ -532,9 +549,13 @@ function NotificationsPopover() {
           className="relative flex h-8 w-8 items-center justify-center rounded-[6px] text-p-300 transition-colors hover:bg-white/10"
           title="Notifications"
         >
-          <Bell size={16} />
-          {liste.length > 0 && (
-            <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-m-600" />
+          <Bell size={16} className={cn(enCours.length > 0 && 'text-white')} />
+          {enCours.length > 0 ? (
+            <span className="tnum animate-pulse-dot absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-m-600 px-1 text-[9.5px] font-bold text-white">
+              {enCours.length}
+            </span>
+          ) : (
+            liste.length > 0 && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-m-600" />
           )}
         </span>
       )}
@@ -544,11 +565,33 @@ function NotificationsPopover() {
           <p className="text-[13px] font-bold text-ink">Notifications</p>
         </div>
         <div className="max-h-80 divide-y divide-g-100 overflow-y-auto">
-          {liste.length === 0 && (
+          {liste.length === 0 && recents.length === 0 && (
             <p className="px-3 py-6 text-center text-[12.5px] text-g-500">
               Aucune notification. Les opérations en cours et leurs échecs sont dans le centre de tâches.
             </p>
           )}
+          {recents.map((j) => (
+            <div key={j.id} className="px-3 py-2.5">
+              <div className="flex items-start gap-2">
+                <span
+                  className={cn(
+                    'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+                    j.statut === 'done' ? 'bg-ok' : j.statut === 'failed' || j.statut === 'rolled_back' ? 'bg-err' : 'animate-pulse-dot bg-m-600',
+                  )}
+                />
+                <div className="min-w-0">
+                  <p className="text-[12.5px] font-medium leading-snug text-ink">{j.label}</p>
+                  <p className="mt-0.5 text-[11.5px] text-g-500">
+                    {j.statut === 'done'
+                      ? 'Terminée'
+                      : j.statut === 'failed' || j.statut === 'rolled_back'
+                        ? 'Échec — diagnostic dans le centre de tâches'
+                        : `En cours · ${j.taches.filter((t) => t.statut === 'ok').length}/${j.taches.length} étapes`}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
           {liste.map((n) => (
             <div key={n.id} className="px-3 py-2.5">
               <div className="flex items-start gap-2">

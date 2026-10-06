@@ -172,28 +172,6 @@ interface LigneDifferenciee {
   image: string;
 }
 
-const CLOUD_INIT_DEFAUT = `#cloud-config
-package_update: true
-packages:
-  - fail2ban
-  - unattended-upgrades
-
-users:
-  - name: ops
-    groups: [sudo]
-    shell: /bin/bash
-    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
-
-write_files:
-  - path: /etc/ssh/sshd_config.d/99-synelia.conf
-    content: |
-      PasswordAuthentication no
-      PermitRootLogin no
-
-runcmd:
-  - systemctl enable --now fail2ban
-`;
-
 export default function NouvellesVms() {
   const router = useRouter();
   const { pousser } = useApp();
@@ -306,7 +284,8 @@ export default function NouvellesVms() {
   const [sg, setSg] = useState("");
   const [lb, setLb] = useState("");
 
-  const [cloudInit, setCloudInit] = useState(CLOUD_INIT_DEFAUT);
+  const [cloudInit, setCloudInit] = useState("");
+  const [injecterCles, setInjecterCles] = useState(true);
   const [planSauvegarde, setPlanSauvegarde] = useState("bp-prod-quotidien");
   const [antiAffinite, setAntiAffinite] = useState(true);
   const [planification, setPlanification] = useState(false);
@@ -1199,17 +1178,23 @@ export default function NouvellesVms() {
               titre="Initialisation (cloud-init / user-data)"
               sousTitre="Exécuté au premier démarrage. La syntaxe est validée avant création."
             />
+            <Checkbox
+              checked={injecterCles}
+              onChange={(e) => setInjecterCles(e.target.checked)}
+              label="Injecter les clés SSH de mon compte"
+              description="La plateforme ajoute vos clés publiques à l’utilisateur par défaut de l’image, avant votre propre script. Gérez-les dans Sécurité & audit › Clés SSH."
+              className="mb-3"
+            />
             <MonoTextarea
               value={cloudInit}
               onChange={(e) => setCloudInit(e.target.value)}
-              rows={14}
+              rows={10}
+              placeholder="Vide par défaut. Collez ici votre #cloud-config ou un script shell : il est fusionné après celui de la plateforme."
               aria-label="cloud-init"
             />
             <p className="mt-2 text-[12px] text-g-500">
-              Les clés SSH du trousseau de l’organisation sont injectées
-              automatiquement en plus de celles déclarées ici. Ne placez jamais
-              de secret en clair dans ce champ : utilisez le coffre de secrets
-              et référencez-le.
+              Ne placez jamais de secret en clair dans ce champ : utilisez le
+              coffre de secrets et référencez-le.
             </p>
           </Card>
 
@@ -1371,7 +1356,7 @@ export default function NouvellesVms() {
                 },
                 {
                   cle: "cloud-init",
-                  valeur: `${cloudInit.split("\n").length} lignes`,
+                  valeur: `${injecterCles ? "Clés du compte" : "Sans clés du compte"}${cloudInit.trim() ? ` + ${cloudInit.trim().split("\n").length} lignes` : ""}`,
                 },
               ]}
             />

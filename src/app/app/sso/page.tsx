@@ -655,7 +655,7 @@ export default function Sso() {
                   <div className="space-y-4">
                     <Callout ton="warn" titre="LDAP exige une connectivité réseau vers votre annuaire">
                       Nous ne joignons pas votre contrôleur de domaine depuis Internet. Il faut un
-                      tunnel IPsec ou une interconnexion depuis un de vos Espaces Cloud. Comptez une
+                      accès OpenVPN ou une interconnexion depuis un de vos Espaces Cloud (le tunnel IPsec arrive bientôt). Comptez une
                       demi-journée de mise en place avec nos équipes.
                     </Callout>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

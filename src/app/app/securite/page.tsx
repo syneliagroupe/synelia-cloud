@@ -21,6 +21,7 @@ import { useLectureDegradable } from '@/lib/api/degradable'
 import { useAtelier, useCollection } from '@/components/app/atelier'
 import { BoutonAction, useOperation } from '@/components/app/actions'
 import type { AuditEvent } from '@/lib/types'
+import { ClesSshCompte } from './cles-ssh'
 
 interface SessionActive {
   id: string
@@ -125,6 +126,7 @@ const ONGLETS = [
   { id: 'audit', label: 'Journal d’audit' },
   { id: 'posture', label: 'Posture de sécurité' },
   { id: 'sessions', label: 'Sessions actives' },
+  { id: 'cles-ssh', label: 'Clés SSH' },
   { id: 'conformite', label: 'Conformité des sauvegardes' },
   { id: 'export', label: 'Export & rétention' },
 ]
@@ -652,6 +654,8 @@ export default function Securite() {
           </div>
         </div>
       )}
+
+      {onglet === 'cles-ssh' && <ClesSshCompte />}
 
       {onglet === 'sessions' && (
         <div className="space-y-4">

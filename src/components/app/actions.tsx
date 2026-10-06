@@ -712,27 +712,26 @@ export function BoutonFormulaire({
   const bloqueApi = estActif() && !!sansApi
 
   /**
-   * En mode API avec `appel`, la modale reste ouverte jusqu’au succès : un
-   * `422` y affiche ses erreurs de champs au lieu de se perdre dans un toast
-   * sur un écran déjà refermé. En maquette elle se referme aussitôt, comme avant.
+   * La modale se ferme dès la validation : un travail long (création de VM) ne doit pas
+   * la garder ouverte jusqu'à son terme. Seul un `422` avec erreurs de champs la rouvre,
+   * valeurs conservées, pour corriger sur place.
    */
   const valider = (valeurs: ValeursFormulaire) => {
     const spec = operation(valeurs)
+    setOuvert(false)
     if (estActif() && spec.appel) {
       setErreurs({})
       executer({
         action,
         ...spec,
-        onErreur: (e) => setErreurs(e.champs ?? {}),
-        effetFinal: () => {
-          spec.effetFinal?.()
-          setOuvert(false)
+        onErreur: (e) => {
+          setErreurs(e.champs ?? {})
+          if (e.champs && Object.keys(e.champs).length > 0) setOuvert(true)
         },
       })
       return
     }
     executer({ action, sansApi: spec.sansApi ?? sansApi, ...spec })
-    setOuvert(false)
   }
 
   return (

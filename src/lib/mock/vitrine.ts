@@ -107,10 +107,10 @@ export const MEGAMENU: Array<{ colonne: string; entrees: EntreeMegamenu[] }> = [
     colonne: 'Calcul & réseau',
     entrees: [
       { nom: 'Espace Cloud (VDC)', slug: 'espace-cloud', resume: 'Une enveloppe de capacité, vos ressources dedans.' },
-      { nom: 'Machines virtuelles', slug: 'machines-virtuelles', resume: 'Linux et Windows, du gabarit standard au sur-mesure.' },
+      { nom: 'Machines virtuelles', slug: 'machines-virtuelles', resume: 'Linux, du gabarit standard au sur-mesure ; Windows Server sur demande.' },
       { nom: 'Kubernetes managé', slug: 'kubernetes', resume: 'Control plane opéré, pools autoscalés.' },
       { nom: 'Load balancer', slug: 'load-balancer', resume: 'L4 et L7, WAF OWASP, health checks.' },
-      { nom: 'Réseau privé & VPN', slug: 'reseau-vpn', resume: 'Segmentation, IPsec site-à-site, accès SSL.' },
+      { nom: 'Réseau privé & VPN', slug: 'reseau-vpn', resume: 'Segmentation, accès OpenVPN nominatif ; IPsec site-à-site bientôt.' },
       { nom: 'IP & anti-DDoS', slug: 'ip-antiddos', resume: 'Adresses publiques, PTR, filtrage volumétrique.' },
     ],
   },
@@ -203,7 +203,7 @@ export const PORTES_ENTREE = [
  */
 export const CARTES_PRODUIT = unSite([
   { nom: 'Espace Cloud', slug: 'espace-cloud', icone: 'nuage', phrase: 'Votre enveloppe de capacité, isolée et dimensionnable.', prix: 25000, unite: '/mois', famille: 'Calcul' },
-  { nom: 'Machines virtuelles', slug: 'machines-virtuelles', icone: 'serveurs', phrase: 'Linux ou Windows, du 2 vCPU au 64 vCPU.', prix: 4200, unite: '/mois', famille: 'Calcul' },
+  { nom: 'Machines virtuelles', slug: 'machines-virtuelles', icone: 'serveurs', phrase: 'Linux (Windows Server sur demande), du 2 vCPU au 64 vCPU.', prix: 4200, unite: '/mois', famille: 'Calcul' },
   { nom: 'Kubernetes managé', slug: 'kubernetes', icone: 'kubernetes', phrase: 'Control plane opéré, pools autoscalés, modules prêts.', prix: 45000, unite: '/mois', famille: 'Calcul' },
   { nom: 'Stockage objet S3', slug: 'stockage-objet', icone: 'stockage-objet', phrase: 'Compatible S3, versioning, verrouillage WORM.', prix: 1500, unite: '/To/mois', famille: 'Stockage' },
   { nom: 'Cloud Backup', slug: 'cloud-backup', icone: 'sauvegarde', phrase: 'Sauvegarde immuable, restauration au fichier près.', prix: 2800, unite: '/To/mois', famille: 'Protection' },
@@ -630,7 +630,7 @@ export const FICHES_PRODUIT: FicheProduit[] = unSite([
     icone: 'serveurs',
     nom: 'Machines virtuelles',
     surtitre: 'Calcul & réseau',
-    accroche: 'Linux et Windows, du gabarit standard au sur-mesure.',
+    accroche: 'Linux, du gabarit standard au sur-mesure.',
     resume:
       'Des machines virtuelles créées en quelques minutes depuis notre bibliothèque d’images ou depuis vos propres images, avec accès console, snapshots, redimensionnement et plan de sauvegarde applicable en un clic.',
     puces: [
@@ -649,7 +649,7 @@ export const FICHES_PRODUIT: FicheProduit[] = unSite([
       {
         theme: 'Images',
         items: [
-          { libelle: 'Bibliothèque Synelia', valeur: 'Ubuntu 24.04, Debian 12, Rocky 9, Windows Server 2022' },
+          { libelle: 'Bibliothèque Synelia', valeur: 'Ubuntu 24.04, Debian 12, Rocky 9 ; Windows Server 2022 sur demande' },
           { libelle: 'Images privées', valeur: 'Import qcow2, vmdk, vhdx' },
           { libelle: 'Images capturées', valeur: 'Depuis n’importe quelle machine existante' },
           { libelle: 'Durcissement', valeur: 'CIS niveau 1 appliqué sur les images Linux' },
@@ -692,7 +692,7 @@ export const FICHES_PRODUIT: FicheProduit[] = unSite([
     faq: [
       { question: 'La console nécessite-t-elle un logiciel ?', reponse: 'Non. La console KVM s’ouvre dans un panneau du portail. Nous encapsulons le protocole, nous ne le réimplémentons pas.' },
       { question: 'Puis-je créer vingt machines d’un coup ?', reponse: 'Oui. L’assistant propose deux modes : un gabarit identique appliqué à N machines, ou un tableau où chaque ligne a ses propres caractéristiques.' },
-      { question: 'Les licences Windows sont-elles incluses ?', reponse: 'Elles sont refacturées au vCPU, ligne distincte sur la facture. Le montant apparaît dans l’aperçu de coût avant validation.' },
+      { question: 'Les licences Windows sont-elles incluses ?', reponse: 'Windows Server est proposé sur demande, pas encore en libre-service. Les licences sont refacturées au vCPU, ligne distincte sur la facture. Le montant apparaît dans l’aperçu de coût avant validation.' },
     ],
   },
   {
@@ -1133,16 +1133,16 @@ export const FICHES_PRODUIT: FicheProduit[] = unSite([
     surtitre: 'Calcul & réseau',
     accroche: 'Vos machines se parlent entre elles, pas au reste du monde.',
     resume:
-      'Chaque Espace Cloud reçoit une plage privée qui n’appartient qu’à vous. Vous y découpez autant de réseaux que votre architecture en demande, puis vous les reliez à vos sites et à vos équipes — tunnel IPsec pour un bureau, accès SSL nominatif pour une personne.',
+      'Chaque Espace Cloud reçoit une plage privée qui n’appartient qu’à vous. Vous y découpez autant de réseaux que votre architecture en demande, puis vous les reliez à vos équipes — accès OpenVPN nominatif pour une personne. Le tunnel IPsec site-à-site pour un bureau arrive bientôt.',
     puces: [
       'Segmentation par VLAN dédiés, sans voisinage avec d’autres clients',
-      'Tunnel IPsec site-à-site vers vos bureaux, en redondance active/passive',
-      'Accès VPN SSL nominatif, révocable en une action, journalisé',
+      'Tunnel IPsec site-à-site vers vos bureaux (bientôt disponible)',
+      'Accès OpenVPN nominatif, révocable en une action, journalisé',
     ],
     paliers: [
       { nom: 'Inclus', specs: 'Réseaux privés, VLAN, DNS interne, groupes de sécurité', prix: 0, unite: 'inclus dans l’Espace Cloud' },
-      { nom: 'IPsec site-à-site', specs: 'Par tunnel · redondance incluse · 500 Mbit/s', prix: 18000, unite: '/mois' },
-      { nom: 'VPN SSL nominatif', specs: 'Par accès · MFA obligatoire · révocation immédiate', prix: 2500, unite: '/accès/mois', recommande: true },
+      { nom: 'IPsec site-à-site (bientôt)', specs: 'Par tunnel · redondance incluse · 500 Mbit/s', prix: 18000, unite: '/mois' },
+      { nom: 'OpenVPN nominatif', specs: 'Par accès · MFA obligatoire · révocation immédiate', prix: 2500, unite: '/accès/mois', recommande: true },
       { nom: 'Interconnexion opérateur', specs: 'Lien dédié vers votre MPLS ou votre datacenter', prix: null, surDevis: true, unite: '' },
     ],
     caracteristiques: [
@@ -1158,8 +1158,8 @@ export const FICHES_PRODUIT: FicheProduit[] = unSite([
       {
         theme: 'Accès distant',
         items: [
-          { libelle: 'IPsec', valeur: 'IKEv2, AES-256-GCM, PFS, redémarrage automatique du tunnel' },
-          { libelle: 'VPN SSL', valeur: 'WireGuard, un profil par personne, MFA via Keycloak' },
+          { libelle: 'IPsec (bientôt)', valeur: 'IKEv2, AES-256-GCM, PFS, redémarrage automatique du tunnel' },
+          { libelle: 'OpenVPN', valeur: 'Un profil .ovpn par personne, révocable ; WireGuard prévu' },
           { libelle: 'Révocation', valeur: 'Immédiate, sans redémarrer le service ni couper les autres accès' },
           { libelle: 'Journal', valeur: 'Connexions, déconnexions et refus, conservés 12 mois' },
         ],
@@ -1182,15 +1182,15 @@ export const FICHES_PRODUIT: FicheProduit[] = unSite([
     architecture: {
       titre: 'Raccordement d’un siège et de collaborateurs nomades',
       couches: [
-        { nom: 'Siège', elements: ['Tunnel IPsec redondant vers Abidjan', 'Routage des deux plages, sans NAT'] },
-        { nom: 'Nomades', elements: ['Profils WireGuard nominatifs', 'MFA Keycloak à chaque session'] },
+        { nom: 'Siège', elements: ['Tunnel IPsec redondant vers Abidjan (bientôt)', 'Routage des deux plages, sans NAT'] },
+        { nom: 'Nomades', elements: ['Profils OpenVPN nominatifs', 'Révocation immédiate du profil'] },
         { nom: 'Espace Cloud', elements: ['Réseau d’administration séparé du réseau applicatif', 'Groupes de sécurité par rôle de machine'] },
         { nom: 'Contrôle', elements: ['Journal des accès distants', 'Alerte sur tunnel interrompu'] },
       ],
     },
     faq: [
       { question: 'Puis-je choisir mes plages d’adresses ?', reponse: 'Oui. Une plage vous est proposée à la création pour éviter les collisions avec vos réseaux existants, et vous pouvez la remplacer par celle de votre plan d’adressage.' },
-      { question: 'Le VPN SSL passe-t-il par une console à nous ?', reponse: 'Non. Vous téléchargez un profil de configuration depuis le portail et l’ouvrez dans le client WireGuard officiel. Nous ne reconstruisons pas de client VPN.' },
+      { question: 'Le VPN SSL passe-t-il par une console à nous ?', reponse: 'Non. Vous téléchargez un profil de configuration depuis le portail et l’ouvrez dans le client OpenVPN officiel. Nous ne reconstruisons pas de client VPN.' },
       { question: 'Que se passe-t-il si mon tunnel tombe la nuit ?', reponse: 'La sonde déclenche une alerte selon la règle d’escalade que vous avez définie. Le tunnel tente de se rétablir seul, et l’incident reste visible dans l’historique même après rétablissement.' },
     ],
   },

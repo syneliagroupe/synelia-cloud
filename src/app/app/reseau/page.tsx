@@ -792,13 +792,14 @@ export default function Reseau() {
           <Card>
             <CardHeader
               titre="Tunnels site-à-site IPsec"
-              sousTitre="Interconnexion entre vos sites physiques et votre Espace Cloud."
+              sousTitre={estActif() ? "Bientôt disponible : le service IPsec d’OpenStack n’est pas encore activé sur cette plateforme. En attendant, utilisez l’accès OpenVPN ci-dessous." : "Interconnexion entre vos sites physiques et votre Espace Cloud."}
               actions={
                 <BoutonFormulaire
                   libelle="Nouveau tunnel"
                   variant="primary"
                   icone={<Plus size={13} />}
                   action="network.manage"
+                  sansApi="Bientôt disponible : le service IPsec n’est pas encore activé. Utilisez l’accès OpenVPN."
                   titre="Nouveau tunnel IPsec"
                   description="Le tunnel relie votre site à la plage de l’espace. Les paramètres de chiffrement sont imposés : IKEv2, AES-256-GCM, PFS."
                   champs={[

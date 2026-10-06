@@ -477,6 +477,19 @@ const identite = {
     ['id', 'userId', 'ip', 'debut', 'derniereActivite'],
   ),
 
+  CleSshCompte: objet(
+    {
+      id: chaine(),
+      nom: chaine(),
+      publique: chaine('Clé publique OpenSSH, une ligne.'),
+      empreinte: chaine('Empreinte SHA256, comme l’affiche `ssh-keygen -lf`.'),
+      type: chaine(),
+      ajouteeLe: horodatage(),
+    },
+    ['id', 'nom', 'publique', 'empreinte'],
+    'Clé SSH publique du compte, injectée dans le cloud-init des nouvelles machines.',
+  ),
+
   CleApi: objet(
     {
       id: chaine(),
@@ -696,7 +709,8 @@ const iaas = {
       ipPubliqueDemandee: booleen(),
       groupesSecurite: tableau(chaine()),
       cleSsh: chaine(),
-      cloudInit: chaine('Script d’amorçage, encodé en clair.'),
+      cloudInit: chaine('Script d’amorçage de l’utilisateur, encodé en clair, vide par défaut. Fusionné après celui de la plateforme.'),
+      injecterClesCompte: booleen('Injecte les clés SSH du compte dans le cloud-init de la plateforme. Vrai par défaut.'),
       hardware: ref('MateielVirtuel'),
       backupPlanId: chaine(),
       tags: tableau(chaine()),
@@ -748,7 +762,8 @@ const iaas = {
         'Plan de déploiement composé dans l’écran de composition.',
       ),
       cleSsh: chaine(),
-      cloudInit: chaine('Script d’amorçage, encodé en clair, commun au lot.'),
+      cloudInit: chaine('Script d’amorçage de l’utilisateur, encodé en clair, commun au lot, vide par défaut.'),
+      injecterClesCompte: booleen('Injecte les clés SSH du compte dans le cloud-init de la plateforme. Vrai par défaut.'),
       antiAffinite: booleen('Répartit les machines du lot sur des hôtes distincts.'),
     },
     ['espaceId', 'machines'],

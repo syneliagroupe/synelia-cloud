@@ -301,6 +301,35 @@ const moi = {
       ),
     }),
   },
+  '/moi/cles-ssh': {
+    get: op({
+      tag: T_MOI,
+      id: 'listerMesClesSsh',
+      resume: 'Lister ses clés SSH',
+      ok: tableau(ref('CleSshCompte')),
+    }),
+    post: op({
+      tag: T_MOI,
+      id: 'ajouterUneCleSsh',
+      resume: 'Ajouter une clé SSH publique au compte',
+      detail: 'Refusé (422) si la ligne n’est pas une clé publique OpenSSH, ou (409) si elle est déjà enregistrée.',
+      corps: objet({ nom: chaine(), publique: chaine() }, ['nom', 'publique']),
+      ok: ref('CleSshCompte'),
+      code: 201,
+      erreurs: [409],
+    }),
+  },
+  '/moi/cles-ssh/{cleId}': {
+    delete: op({
+      tag: T_MOI,
+      id: 'retirerUneCleSsh',
+      resume: 'Retirer une clé SSH du compte',
+      detail: 'Les machines déjà créées gardent la clé : elle est dans leur cloud-init, pas dans le compte.',
+      params: [chemin('cleId', 'Identifiant de la clé SSH.')],
+      code: 204,
+      erreurs: [404],
+    }),
+  },
   '/moi/sessions': {
     get: op({
       tag: T_MOI,

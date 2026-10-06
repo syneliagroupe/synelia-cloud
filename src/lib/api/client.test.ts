@@ -201,6 +201,45 @@ describe('requete', () => {
     expect(lireSession()?.accessToken).toBe('neuf')
   })
 
+  test('dix 401 simultanés : un seul rafraîchissement (le jeton tourne, le rejouer révoque la famille)', async () => {
+    ecrireSession({
+      accessToken: 'expire',
+      refreshToken: 'ref-1',
+      expiresIn: 3600,
+      utilisateur: { id: 'u1', nom: 'Test', email: 't@x.ci' },
+      organisations: [],
+      organisationActive: 'org-1',
+      roleActif: 'org_admin',
+    })
+    let appelsRafraichir = 0
+    globalThis.fetch = mock(async (url: unknown, options: RequestInit) => {
+      const chemin = String(url)
+      if (chemin === '/auth/rafraichir') {
+        appelsRafraichir += 1
+        await new Promise((r) => setTimeout(r, 10))
+        return new Response(
+          JSON.stringify({
+            accessToken: 'neuf',
+            refreshToken: 'ref-2',
+            expiresIn: 3600,
+            utilisateur: { id: 'u1', nom: 'Test', email: 't@x.ci' },
+            organisations: [],
+            organisationActive: 'org-1',
+            roleActif: 'org_admin',
+          }),
+          { status: 200 },
+        )
+      }
+      const jeton = (options?.headers as Record<string, string> | undefined)?.Authorization
+      if (!jeton || jeton.includes('expire')) return new Response('{"erreur":{"code":"expire"}}', { status: 401 })
+      return new Response('{"donnees":[]}', { status: 200 })
+    }) as unknown as typeof fetch
+
+    const rs = await Promise.all(Array.from({ length: 10 }, (_, i) => requete(`/c${i}`)))
+    expect(rs).toHaveLength(10)
+    expect(appelsRafraichir).toBe(1)
+  })
+
   test('401 sur le rafraîchissement lui-même : session effacée, redirection, pas de boucle', async () => {
     ecrireSession({
       accessToken: 'expire',

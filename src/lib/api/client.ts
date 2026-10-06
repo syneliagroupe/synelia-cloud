@@ -165,18 +165,8 @@ export async function requete<T>(chemin: string, options: OptionsRequete = {}): 
     return await requeteBrute<T>(chemin, options)
   } catch (e) {
     if (!(e instanceof ApiError) || e.statut !== 401 || chemin === '/auth/rafraichir') throw e
-    const session = lireSession()
-    if (!session?.refreshToken) {
-      effacerSession()
-      redirigerConnexion()
-      throw e
-    }
     try {
-      const neuve = await requeteBrute<SessionApi>('/auth/rafraichir', {
-        methode: 'POST',
-        corps: { refreshToken: session.refreshToken },
-      })
-      ecrireSession({ ...neuve, refreshToken: neuve.refreshToken ?? session.refreshToken })
+      await rafraichirUneFois()
     } catch {
       effacerSession()
       redirigerConnexion()
@@ -184,6 +174,27 @@ export async function requete<T>(chemin: string, options: OptionsRequete = {}): 
     }
     return requeteBrute<T>(chemin, options)
   }
+}
+
+/**
+ * Le jeton de rafraîchissement tourne : le rejouer révoque toute la famille. Une page qui
+ * charge dix collections à jeton expiré lance donc dix 401 simultanés — un seul
+ * `POST /auth/rafraichir` doit partir, les autres attendent son résultat.
+ */
+let rafraichissement: Promise<void> | null = null
+function rafraichirUneFois(): Promise<void> {
+  rafraichissement ??= (async () => {
+    const session = lireSession()
+    if (!session?.refreshToken) throw new Error('session absente')
+    const neuve = await requeteBrute<SessionApi>('/auth/rafraichir', {
+      methode: 'POST',
+      corps: { refreshToken: session.refreshToken },
+    })
+    ecrireSession({ ...neuve, refreshToken: neuve.refreshToken ?? session.refreshToken })
+  })().finally(() => {
+    rafraichissement = null
+  })
+  return rafraichissement
 }
 
 /** Renvoie vers `/login` quand la session est morte — jamais depuis `/login`. */

@@ -213,7 +213,7 @@ export default function VuePlateforme() {
               </ButtonLink>
             }
           />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className={`grid grid-cols-1 gap-3 ${backends.items.length > 1 ? 'sm:grid-cols-2' : ''}`}>
             {backends.items.map((b) => (
               <BackendGauge key={b.id} backend={b} />
             ))}

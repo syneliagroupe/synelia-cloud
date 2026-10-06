@@ -719,8 +719,16 @@ dernier relevé (2026-09-05), à confirmer (`bunx vercel@latest env ls --token
 date ; `$VERCEL_TOKEN` n'était pas dans l'environnement au moment d'écrire
 cette phrase, la commande n'a pas pu être rejouée).
 
-**Bac à sable dev01** — `https://app.synelia.dev01.ovh.smile.ci`, construit
-**avec** `NEXT_PUBLIC_API_URL` par
-`/var/lib/synelia-cloud/deploy-dev01/redeploy-front.sh [ref]` (défaut
-`branchement-api` — la branche de travail actuelle est `dev01-real-infra`,
-passez-la explicitement : `redeploy-front.sh dev01-real-infra`).
+**Démonstration locale sur dev01** — front `https://app.cloud.dev01.ovh.smile.ci`,
+API `https://api.cloud.dev01.ovh.smile.ci/v1`. La démo ne tourne pas sur Vercel :
+le front est construit **avec** `NEXT_PUBLIC_API_URL` (dans `.env.local`) et
+relancé par Docker, depuis ce dépôt :
+
+```
+set -a && . ./.env.local && set +a
+FRONT_PORT=3000 FRONT_BIND=0.0.0.0 docker compose --profile prod up -d --build front-prod
+```
+
+Le backend (source montée en volume) se relance avec
+`docker compose restart api worker`. L'ancien hôte `app.synelia.dev01.ovh.smile.ci`
+et `redeploy-front.sh` ne servent plus.

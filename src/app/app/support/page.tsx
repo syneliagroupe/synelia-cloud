@@ -156,8 +156,8 @@ export default function Support() {
             <Badge tone="neutral" size="sm">
               {nomOrg}
             </Badge>
-            <Badge tone="ok" dot size="sm">
-              Support ouvert · 8 h – 19 h GMT
+            <Badge tone="neutral" size="sm">
+              Support 8 h – 19 h GMT
             </Badge>
             <Badge tone="neutral" size="sm">
               Astreinte 24/7 sur incident critique
@@ -198,7 +198,7 @@ export default function Support() {
           detail="Engagement : 30 min sur critique"
         />
         <StatTile
-          libelle="Disponibilité constatée 30 j"
+          libelle={estActif() ? 'Opérations réussies 30 j' : 'Disponibilité constatée 30 j'}
           valeur={disponibiliteConstatee !== undefined ? pct(disponibiliteConstatee, 2) : '—'}
           ton="ok"
           detail="Engagement contractuel 99,9 %"

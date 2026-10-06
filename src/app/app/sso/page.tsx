@@ -13,6 +13,7 @@ import { CodeBlock, CopyField, GatedAction, Tabs } from '@/components/ui/display
 import { Field, Input, MonoTextarea, Select, Switch } from '@/components/ui/field'
 import { Card, CardHeader, Callout, KeyValueList, PageHeader } from '@/components/composition/card'
 import { StatTile } from '@/components/composition/metrics'
+import { EmptyState } from '@/components/composition/states'
 import { Stepper, Timeline } from '@/components/composition/flow'
 import { useApp } from '@/components/app/contexte'
 import { useCollection } from '@/components/app/atelier'
@@ -88,8 +89,8 @@ export default function Sso() {
   const correspondances = useCollection<Correspondance>('correspondances-sso', CORRESPONDANCES)
   const adhesions = useCollection<Membership>('memberships', MEMBERSHIPS)
   const [onglet, setOnglet] = useState('etat')
-  const [emailSimule, setEmailSimule] = useState('k.toure@dba.africa')
-  const [groupesSimules, setGroupesSimules] = useState('SYN-CLOUD-DEV-PROD\nTout le personnel')
+  const [emailSimule, setEmailSimule] = useState(estActif() ? '' : 'k.toure@dba.africa')
+  const [groupesSimules, setGroupesSimules] = useState(estActif() ? '' : 'SYN-CLOUD-DEV-PROD\nTout le personnel')
   const [resultatSimulation, setResultatSimulation] = useState<Correspondance | null>(null)
   const [creationAuto, setCreationAuto] = useState(true)
   const [desactivationAuto, setDesactivationAuto] = useState(true)
@@ -100,11 +101,13 @@ export default function Sso() {
   const api = estActif()
   /** Paramètres publiés dans `PUT /securite/sso` — préremplis depuis `GET`. */
   const [emetteur, setEmetteur] = useState(
-    'https://login.microsoftonline.com/8f2a91c4-d7b0-e544-3a17-c96e2f0d8b41/v2.0/.well-known/openid-configuration',
+    api
+      ? ''
+      : 'https://login.microsoftonline.com/8f2a91c4-d7b0-e544-3a17-c96e2f0d8b41/v2.0/.well-known/openid-configuration',
   )
-  const [clientId, setClientId] = useState('4d91a7c2-8b0e-4413-9c6e-2f0d8b41a17c')
+  const [clientId, setClientId] = useState(api ? '' : '4d91a7c2-8b0e-4413-9c6e-2f0d8b41a17c')
   const [urlMetadonnees, setUrlMetadonnees] = useState('')
-  const [domainesVerifies, setDomainesVerifies] = useState('dba.africa, digitalbusinessafrica.ci')
+  const [domainesVerifies, setDomainesVerifies] = useState(api ? '' : 'dba.africa, digitalbusinessafrica.ci')
   /** Erreurs de champs renvoyées par le backend (`422`), affichées sous les champs de l’étape 2. */
   const [erreursSso, setErreursSso] = useState<Record<string, string>>({})
   /** Correspondances telles que le backend les connaît (mode API) ; la graine locale sinon. */
@@ -257,9 +260,11 @@ export default function Sso() {
             <Badge tone={api ? (ssoActif ? 'ok' : 'neutral') : 'ok'} dot={!api || ssoActif} size="sm">
               {api ? (configSso ? (ssoActif ? 'Fédération active' : 'Fédération inactive') : 'Fédération…') : 'Fédération active'}
             </Badge>
-            <Badge tone="accent" size="sm">
-              {servicesSso} services raccordés
-            </Badge>
+            {!api && (
+              <Badge tone="accent" size="sm">
+                {servicesSso} services raccordés
+              </Badge>
+            )}
             <Badge tone="neutral" size="sm">
               {nomOrg}
             </Badge>
@@ -278,25 +283,40 @@ export default function Sso() {
         <StatTile
           libelle="Comptes fédérés"
           valeur={federes}
-          detail={`sur ${membresConnus.length} membres`}
+          detail={`sur ${membresConnus.length} membre${membresConnus.length > 1 ? 's' : ''}`}
           ton="ok"
         />
-        <StatTile
-          libelle="Services raccordés"
-          valeur={servicesSso}
-          detail={`sur ${SERVICES_MANAGES.length} services managés`}
-          ton="accent"
-        />
-        <StatTile
-          libelle="Connexions 24 h"
-          valeur={184}
-          detail="Dont 12 refusées"
-        />
+        {api ? (
+          <>
+            <StatTile
+              libelle="Fédération"
+              valeur={configSso ? (ssoActif ? 'Active' : 'Inactive') : '…'}
+              detail={ssoActif ? 'Les connexions passent par votre annuaire' : 'Connexion locale uniquement'}
+              ton={ssoActif ? 'ok' : 'neutral'}
+            />
+            <StatTile
+              libelle="Dernier test"
+              valeur={configSso?.dernierTest ? (configSso.dernierTest.succes ? 'Réussi' : 'En échec') : 'Jamais'}
+              detail={configSso?.dernierTest ? relatif(configSso.dernierTest.date) : 'Lancez « Tester la connexion »'}
+              ton={configSso?.dernierTest ? (configSso.dernierTest.succes ? 'ok' : 'err') : 'neutral'}
+            />
+          </>
+        ) : (
+          <>
+            <StatTile
+              libelle="Services raccordés"
+              valeur={servicesSso}
+              detail={`sur ${SERVICES_MANAGES.length} services managés`}
+              ton="accent"
+            />
+            <StatTile libelle="Connexions 24 h" valeur={184} detail="Dont 12 refusées" />
+          </>
+        )}
         <StatTile
           libelle="Deuxième facteur"
-          valeur="Délégué"
-          detail="Appliqué par votre annuaire"
-          ton="ok"
+          valeur={api && !ssoActif ? 'Local' : 'Délégué'}
+          detail={api && !ssoActif ? 'Géré par Synelia, sans fédération' : 'Appliqué par votre annuaire'}
+          ton={api && !ssoActif ? 'neutral' : 'ok'}
         />
       </div>
 
@@ -314,7 +334,7 @@ export default function Sso() {
                 {
                   n: 1,
                   t: 'Votre annuaire',
-                  d: 'Microsoft Entra ID. C’est là que réside l’identité de vos collaborateurs, et nulle part ailleurs.',
+                  d: 'Entra ID, Google Workspace, Okta… C’est là que réside l’identité de vos collaborateurs, et nulle part ailleurs.',
                   accent: false,
                 },
                 {
@@ -332,7 +352,7 @@ export default function Sso() {
                 {
                   n: 4,
                   t: 'Les services managés',
-                  d: 'Nextcloud, Grommunio, Odoo. Ils acceptent le même jeton. Un clic sur « Ouvrir » et la session est déjà ouverte.',
+                  d: 'Messagerie, Drive et autres services raccordés. Ils acceptent le même jeton : un clic sur « Ouvrir » et la session est déjà ouverte.',
                   accent: true,
                 },
               ].map((e, i, arr) => (
@@ -388,7 +408,14 @@ export default function Sso() {
               />
               <KeyValueList
                 colonnes={1}
-                items={[
+                items={api ? [
+                  { cle: 'Protocole', valeur: PROTOCOLES.find((p) => p.id === protocole)?.nom ?? protocole },
+                  { cle: 'Émetteur', valeur: configSso?.emetteur || configSso?.urlMetadonnees || 'Non renseigné' },
+                  { cle: 'Domaines vérifiés', valeur: configSso?.domainesVerifies?.join(', ') || 'Aucun' },
+                  { cle: 'Provisionnement', valeur: configSso?.provisioningJustInTime ? 'À la première connexion, sur correspondance de groupe' : 'Comptes créés à la main' },
+                  { cle: 'Secret client', valeur: configSso?.secretDefini ? 'Défini' : 'Non défini' },
+                  { cle: 'Dernier test', valeur: configSso?.dernierTest ? `${configSso.dernierTest.succes ? 'Réussi' : 'En échec'} · ${relatif(configSso.dernierTest.date)}` : 'Jamais testé' },
+                ] : [
                   { cle: 'Protocole', valeur: 'OpenID Connect (autorisation par code, avec PKCE)' },
                   { cle: 'Fournisseur', valeur: 'Microsoft Entra ID' },
                   {
@@ -436,17 +463,24 @@ export default function Sso() {
             <Card>
               <CardHeader
                 titre="Vérifications automatiques"
-                sousTitre="Contrôlées toutes les cinq minutes."
+                sousTitre={api ? 'Résultat du dernier test lancé depuis cet écran.' : 'Contrôlées toutes les cinq minutes.'}
               />
+              {api && !resultatTest && (
+                <p className="py-6 text-center text-[13px] text-g-500">
+                  Aucun test lancé. « Tester la connexion » vérifie le point de découverte, le certificat et les revendications.
+                </p>
+              )}
               <div className="space-y-2">
-                {[
+                {(api
+                  ? (resultatTest?.etapes ?? []).map((e) => ({ t: e.nom, ok: e.ok, d: e.detail ?? (e.ok ? 'Conforme.' : 'Échec.') }))
+                  : [
                   { t: 'Point de découverte joignable', ok: true, d: 'La configuration OpenID de votre annuaire répond en 84 ms.' },
                   { t: 'Certificat de signature valide', ok: true, d: 'Expire dans 179 jours. Nous vous préviendrons 30 jours avant.' },
                   { t: 'Correspondance des groupes', ok: true, d: 'Les cinq groupes déclarés existent dans votre annuaire.' },
                   { t: 'Horloges synchronisées', ok: true, d: 'Un décalage supérieur à cinq minutes invaliderait les jetons.' },
                   { t: 'Réclamation de courriel présente', ok: true, d: 'Indispensable : c’est l’identifiant de rattachement.' },
                   { t: 'Déconnexion propagée', ok: false, d: 'La déconnexion depuis un service ne ferme pas la session dans votre annuaire. À activer côté Entra ID.' },
-                ].map((v) => (
+                ]).map((v) => (
                   <div
                     key={v.t}
                     className={cn(
@@ -871,9 +905,11 @@ export default function Sso() {
                     <span className="block font-mono text-[12px] font-semibold text-ink">
                       {c.groupe}
                     </span>
-                    <span className="block text-[11px] text-g-500">
-                      {c.membres} membres dans votre annuaire
-                    </span>
+                    {!api && (
+                      <span className="block text-[11px] text-g-500">
+                        {c.membres} membres dans votre annuaire
+                      </span>
+                    )}
                   </span>
                   <ArrowRight size={13} className="shrink-0 text-g-300" />
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -1107,7 +1143,15 @@ export default function Sso() {
         </div>
       )}
 
-      {onglet === 'services' && (
+      {onglet === 'services' && api && (
+        <EmptyState
+          titre="Aucun service raccordé à suivre ici"
+          phrase="Le raccordement d’un service managé (messagerie, Drive) se fait depuis son administration, dans Web Cloud."
+          action={{ libelle: 'Ouvrir les emails', href: '/app/web/emails' }}
+        />
+      )}
+
+      {onglet === 'services' && !api && (
         <div className="space-y-4">
           <Card>
             <CardHeader
@@ -1191,7 +1235,15 @@ export default function Sso() {
         </div>
       )}
 
-      {onglet === 'journal' && (
+      {onglet === 'journal' && api && (
+        <EmptyState
+          titre="Journal des connexions non branché"
+          phrase="Les connexions fédérées ne sont pas encore remontées dans cet écran. Les changements de configuration d’authentification unique figurent dans le journal d’audit."
+          action={{ libelle: 'Ouvrir le journal d’audit', href: '/app/securite' }}
+        />
+      )}
+
+      {onglet === 'journal' && !api && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader

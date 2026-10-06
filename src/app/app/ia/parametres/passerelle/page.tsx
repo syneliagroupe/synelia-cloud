@@ -410,7 +410,7 @@ export default function Passerelle() {
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <StatTile libelle="Clés actives" valeur={actives.length} detail={`sur ${cles.length} créées`} />
+            <StatTile libelle="Clés actives" valeur={actives.length} detail={`sur ${cles.length} créée${cles.length > 1 ? 's' : ''}`} />
             <StatTile libelle="Jetons consommés" valeur={jetons(jetonsConsommes)} detail="Mois en cours" />
             <StatTile
               libelle="Dépense du mois"

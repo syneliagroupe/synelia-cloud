@@ -31,7 +31,7 @@ export function BackendGauge({
           <div className="min-w-0">
             <h3 className="type-h3 font-mono">{backend.code}</h3>
             <p className="mt-0.5 text-[12px] text-g-500">
-              {BACKEND_LABEL[backend.type]} · {SITE_COURT[backend.site]} · {backend.hosts} hôtes
+              {BACKEND_LABEL[backend.type]} · {SITE_COURT[backend.site]} · {backend.hosts} hôte{backend.hosts > 1 ? 's' : ''}
             </p>
           </div>
         </div>

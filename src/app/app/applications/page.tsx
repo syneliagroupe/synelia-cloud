@@ -25,6 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { ButtonLink } from '@/components/ui/button'
 import { PageHeader, Card, CardHeader, Callout } from '@/components/composition/card'
+import { EmptyState } from '@/components/composition/states'
 import { StatTile, QuotaBar } from '@/components/composition/metrics'
 import { useCollection } from '@/components/app/atelier'
 import { estActif } from '@/lib/api/client'
@@ -195,6 +196,14 @@ export default function AccueilApplications() {
             sousTitre="Un projet regroupe ce qui casse ensemble. Ouvrez-en un pour retrouver le même choix dans toutes les sections."
           />
           <div className="space-y-3">
+            {lesProjets.items.length === 0 && (
+              <EmptyState
+                className="py-8"
+                titre="Aucun projet pour l’instant"
+                phrase="Un projet regroupe vos services, leurs environnements, domaines et variables. Créez-en un depuis un dépôt Git, une image Docker ou un modèle."
+                action={{ libelle: 'Nouveau projet', href: '/app/applications/nouveau' }}
+              />
+            )}
             {lesProjets.items.map((p) => {
               const s = syntheseDeServices(lesServices.items.filter((x) => x.projetId === p.id))
               const services = lesServices.items.filter((x) => x.projetId === p.id)

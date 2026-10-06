@@ -272,7 +272,7 @@ export default function Securite() {
               : '—'
           }
           ton={USERS_ORG.every((u) => u.mfaEnabled) ? 'ok' : 'warn'}
-          detail={`${USERS_ORG.filter((u) => !u.mfaEnabled).length > 1 ? 'membres sans' : 'membre sans'} deuxième facteur`}
+          detail={`${USERS_ORG.filter((u) => !u.mfaEnabled).length} sur ${USERS_ORG.length} sans deuxième facteur`}
         />
         <StatTile
           libelle="Règle 3-2-1 respectée"

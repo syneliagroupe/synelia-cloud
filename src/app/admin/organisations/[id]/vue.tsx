@@ -300,7 +300,7 @@ export function VueOrganisation({ id }: { id: string }) {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <StatTile libelle="Espaces Cloud" valeur={org.espaces ?? 0} />
-        <StatTile libelle="Utilisateurs" valeur={org.utilisateurs ?? 0} detail={`${membres.length} membres connus`} />
+        <StatTile libelle="Utilisateurs" valeur={org.utilisateurs ?? 0} detail={`${membres.length} membre${membres.length > 1 ? 's' : ''} connu${membres.length > 1 ? 's' : ''}`} />
         <StatTile
           libelle="vCPU alloué"
           valeur={num(org.consommationVcpu ?? 0)}

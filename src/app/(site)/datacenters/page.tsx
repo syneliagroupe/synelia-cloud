@@ -406,7 +406,7 @@ export default async function Datacenters() {
                         },
                         {
                           cle: 'Hôtes physiques',
-                          valeur: `${backendsSite.reduce((a, b) => a + b.hosts, 0)} hôtes répartis sur ${backendsSite.length} backends`,
+                          valeur: `${backendsSite.reduce((a, b) => a + b.hosts, 0)}, sur ${backendsSite.length} socle${backendsSite.length > 1 ? 's' : ''} technique${backendsSite.length > 1 ? 's' : ''}`,
                         },
                         {
                           cle: 'Espaces Cloud hébergés',

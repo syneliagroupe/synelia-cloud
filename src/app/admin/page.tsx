@@ -111,7 +111,7 @@ export default function VuePlateforme() {
               {synthese.tenantsActifs} organisations actives
             </Badge>
             <Badge tone="neutral" size="sm">
-              {synthese.backendsEnLigne}/{synthese.backendsTotal} socles en ligne
+              {synthese.backendsEnLigne}/{synthese.backendsTotal} socle{synthese.backendsTotal > 1 ? 's' : ''} en ligne
             </Badge>
             {!api && (
               <Badge tone="neutral" size="sm">
@@ -220,7 +220,7 @@ export default function VuePlateforme() {
           </div>
           {enSortie.length > 0 && (
             <Callout ton="violet" className="mt-4" titre="Trajectoire de sortie assumée">
-              {enSortie.length} socles propriétaires sont en sortie planifiée :{' '}
+              {enSortie.length} socle{enSortie.length > 1 ? 's propriétaires sont' : ' propriétaire est'} en sortie planifiée :{' '}
               {enSortie
                 .map(
                   (b) =>

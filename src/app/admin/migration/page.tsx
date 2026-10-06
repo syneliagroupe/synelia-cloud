@@ -430,7 +430,7 @@ export default function Migration() {
                       </span>
                     </span>
                   }
-                  sousTitre={`${SITE_COURT[b.site]} · ${b.hosts} hôtes · ${num(b.capacite.vcpu)} vCPU installés`}
+                  sousTitre={`${SITE_COURT[b.site]} · ${b.hosts} hôte${b.hosts > 1 ? 's' : ''} · ${num(b.capacite.vcpu)} vCPU installés`}
                   actions={
                     <Badge tone="warn" dot size="sm">
                       En sortie

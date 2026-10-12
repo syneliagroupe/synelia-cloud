@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Calculator, Info, Save, Scale, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { money, num, pct, TVA_PCT, ventilationTva } from '@/lib/format'
@@ -114,7 +114,10 @@ function Configurateur() {
     () => (api ? (grille?.familles ?? []).flatMap((f) => f.offres) : OFFRES),
     [api, grille],
   )
-  const fiche = (slug: string) => catalogue?.find((f) => f.slug === slug)
+  const fiche = useCallback(
+    (slug: string) => catalogue?.find((f) => f.slug === slug),
+    [catalogue],
+  )
   const [volet, setVolet] = useState<'espace' | 'marketplace' | 'web'>('espace')
   const [annuel, setAnnuel] = useState(false)
 
@@ -220,7 +223,7 @@ function Configurateur() {
         detail: `${n} sièges × ${money(prix)}${dedie ? ' + 20 %' : ''}`,
         montant: Math.round(n * prix * maj),
       }))
-  }, [api, catalogue, dedie, drive, mail, visio, coffre, erp])
+  }, [api, fiche, dedie, drive, mail, visio, coffre, erp])
 
   const lignesWeb = useMemo<Ligne[]>(() => {
     const l: Ligne[] = []
@@ -257,7 +260,7 @@ function Configurateur() {
         montant: webPresta * T.webPrestashop,
       })
     return l
-  }, [api, catalogue, grille, webMut, webWp, webPresta])
+  }, [api, fiche, grille, webMut, webWp, webPresta])
 
   const forfait = forfaitCouvrant(offresPubliees, vcpu, ram, stockage)
   const coutEspace = lignesEspace.reduce((a, l) => a + l.montant, 0)

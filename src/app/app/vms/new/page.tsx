@@ -305,16 +305,20 @@ export default function NouvellesVms() {
     (i) => i.id === image,
   );
   const FLAVORS_AFFICHES = FLAVORS;
-  const flavorChoisi = FLAVORS_AFFICHES.find((f) => f.id === flavor) ??
-    FLAVORS_AFFICHES[0] ?? {
-      id: "",
-      nom: "—",
-      vcpu: 0,
-      ram: 0,
-      disk: 0,
-      prix: 0,
-      famille: "",
-    };
+  const flavorChoisi = useMemo(
+    () =>
+      FLAVORS_AFFICHES.find((f) => f.id === flavor) ??
+      FLAVORS_AFFICHES[0] ?? {
+        id: "",
+        nom: "—",
+        vcpu: 0,
+        ram: 0,
+        disk: 0,
+        prix: 0,
+        famille: "",
+      },
+    [FLAVORS_AFFICHES, flavor],
+  );
   // L’espace choisi peut ne plus figurer dans la liste (supprimé pendant la
   // session, autre organisation) : on retombe sur le premier au lieu de
   // planter sur `espace.usage`.
@@ -523,8 +527,17 @@ export default function NouvellesVms() {
                   images.find((i) =>
                     i.nom.toLowerCase().replace(/[.\-]/g, "").includes(motCle),
                   ) ??
-                  images.find((i) => i.famille === famille) ??
-                  images[0];
+                  images.find((i) => i.famille === famille);
+                // Pas de repli sur `images[0]` ici : sans ça un choix "Windows" sans
+                // image Windows au catalogue créait silencieusement une machine Linux
+                // (trouvé en auditant le catalogue : une seule image réelle, ubuntu).
+                if (!image) {
+                  throw new Error(
+                    famille === "windows"
+                      ? "Aucune image Windows au catalogue."
+                      : "Aucune image système correspondante au catalogue.",
+                  );
+                }
                 // Le gabarit réel le plus proche du choix visuel (vCPU
                 // d'abord, puis RAM, puis disque) — plus le plus petit du
                 // catalogue quel que soit ce choix. Contournement posé quand

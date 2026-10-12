@@ -19,6 +19,8 @@ export function useLectureDegradable<T>(chemin: string, query?: Record<string, s
   const [donnees, setDonnees] = useState<T | undefined>(undefined)
   const [degrade, setDegrade] = useState<Degradation | null>(null)
 
+  const cleQuery = JSON.stringify(query ?? {})
+
   useEffect(() => {
     if (!estActif()) return
     let annule = false
@@ -38,7 +40,10 @@ export function useLectureDegradable<T>(chemin: string, query?: Record<string, s
     return () => {
       annule = true
     }
-  }, [chemin, JSON.stringify(query ?? {})])
+    // `cleQuery` (sérialisé) remplace `query` à dessein : une dépendance sur
+    // l'objet lui-même reboucle à l'infini dès qu'un appelant passe un littéral inline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chemin, cleQuery])
 
   return { donnees, degrade }
 }

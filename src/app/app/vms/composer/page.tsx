@@ -245,8 +245,16 @@ export default function ComposerServeurs() {
                               const motCle = image === 'windows' ? 'windows' : image
                               const imageReelle =
                                 images.find((i) => i.nom.toLowerCase().includes(motCle)) ??
-                                images.find((i) => i.famille === (image === 'windows' ? 'windows' : 'linux')) ??
-                                images[0]
+                                images.find((i) => i.famille === (image === 'windows' ? 'windows' : 'linux'))
+                              // Pas de repli sur `images[0]` : sans ça un choix "Windows" sans
+                              // image Windows au catalogue créait silencieusement une machine Linux.
+                              if (!imageReelle) {
+                                throw new Error(
+                                  image === 'windows'
+                                    ? 'Aucune image Windows au catalogue.'
+                                    : 'Aucune image système correspondante au catalogue.',
+                                )
+                              }
                               const machinesReelles = lots.map((lot) => {
                                 const gabarit = [...gabarits].reduce((meilleur, candidat) => {
                                   const ecart = (g: typeof candidat) =>

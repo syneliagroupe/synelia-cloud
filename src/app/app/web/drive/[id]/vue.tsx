@@ -67,7 +67,7 @@ export function VueDrive({ id }: { id: string }) {
     return () => {
       annule = true
     }
-  }, [d?.id, d?.actif])
+  }, [d?.id, d?.actif, autorise])
 
   if (!d) return null
 

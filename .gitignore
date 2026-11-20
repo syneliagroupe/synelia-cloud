@@ -33,3 +33,7 @@ AGENTS.md
 # Medias locaux (captures/videos de recette)
 public/videos/
 coverage/
+
+# scratch screenshots (non suivis)
+w*.png
+.cursor/

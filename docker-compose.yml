@@ -1,0 +1,60 @@
+# Frontend Synelia Cloud (lab dev01)
+#
+# Public : https://app.cloud.dev01.ovh.smile.ci  →  ce conteneur sur :3000 (vm-admin 192.168.121.138)
+# API      : https://api.cloud.dev01.ovh.smile.ci/v1  (NEXT_PUBLIC_API_URL dans .env.local)
+#
+# Dev avec rechargement (recommandé — pas de rebuild à chaque edit) :
+#   docker compose watch
+#   docker compose up          # équivalent sans sync fichier par fichier
+#
+# Production (image standalone, rebuild complet) :
+#   docker compose --profile prod up --build -d
+name: synelia-cloud-front
+
+services:
+  front:
+    image: oven/bun:1.4
+    working_dir: /app
+    command: >
+      sh -c "if [ ! -d node_modules/next ]; then bun install --frozen-lockfile; fi &&
+             exec bun ./node_modules/next/dist/bin/next dev --turbopack --hostname 0.0.0.0 --port 3000"
+    restart: unless-stopped
+    env_file: .env.local
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "${WATCHPACK_POLLING:-true}"
+    ports:
+      - "${FRONT_BIND:-0.0.0.0}:${FRONT_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - front_next_cache:/app/.next
+    develop:
+      watch:
+        - path: ./src
+          action: sync
+          target: /app/src
+        - path: ./public
+          action: sync
+          target: /app/public
+        - path: ./package.json
+          action: sync+restart
+          target: /app/package.json
+        - path: ./bun.lock
+          action: sync+restart
+          target: /app/bun.lock
+
+  front-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?}
+        NEXT_PUBLIC_WEB_DNS_ENTREE_A: ${NEXT_PUBLIC_WEB_DNS_ENTREE_A:-}
+        NEXT_PUBLIC_WEB_DNS_ENTREE_WILDCARD_CNAME: ${NEXT_PUBLIC_WEB_DNS_ENTREE_WILDCARD_CNAME:-}
+    ports:
+      - "${FRONT_BIND:-127.0.0.1}:${FRONT_PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  front_next_cache:
